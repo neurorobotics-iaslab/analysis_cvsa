@@ -1,5 +1,5 @@
 function [trialStart, trialStop, fixStart, fixStop, ck, tk] = extract_trial_infoo(signal, fixPOS, fixDUR, cfPOS, cfDUR, cueTYP, n_trial)
-disp('[INFO] extracting trials and fixation')
+disp('   [INFO] extracting trials')
 ck = zeros(size(signal,1), 1);
 tk = zeros(size(signal,1), 1);
 trialStart = nan(n_trial, 1);

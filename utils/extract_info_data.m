@@ -1,5 +1,5 @@
 function [fixPOS, fixDUR, cuePOS, cueDUR, cueTYP, cfPOS, cfDUR, n_trial] = extract_info_data(header, fix_event, cue_events, cf_event)
-disp('[INFO] extracting data infoo');
+disp('   [INFO] extracting data infoo');
 fixPOS = header.EVENT.POS(header.EVENT.TYP == fix_event);
 fixDUR = header.EVENT.DUR(header.EVENT.TYP == fix_event);
 

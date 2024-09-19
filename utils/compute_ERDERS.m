@@ -1,5 +1,5 @@
 function [ERD, minDur, minDurFix] = compute_ERDERS(signal, trialStart, trialStop, fixStart, fixStop, nchannels, n_trial, ck, normalization)
-disp('[INFO] computing ERD/ERS')
+disp('      [INFO] computing ERD/ERS')
 % extract useful data
 minDur = min(trialStop-trialStart);
 trial_data = nan(minDur, nchannels, n_trial);
@@ -23,7 +23,7 @@ end
 
 %% ERD/ERS
 if normalization
-    disp('   [proc] normalize it with the baseline (fixation)')
+    disp('         [proc] normalize it with the baseline (fixation)')
     baseline = repmat(mean(fix_data), [size(trial_data, 1) 1 1]);
     ERD = log(trial_data ./ baseline);
 else

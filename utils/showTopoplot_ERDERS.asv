@@ -1,5 +1,5 @@
 function showTopoplot_ERDERS(chanlog_path, ERD, sampleRate, divisionSampleRate, channels_label_selected, band, minDurTrial, cueTYP, classes, nchannels, all_title)
-disp('   [INFO] plotting')
+disp('[INFO] plotting')
 %% Visualization ERD
 load(chanlog_path);
 chanlocs_label = {chanlocs.labels};
@@ -32,9 +32,9 @@ for idx_period=1:size(period, 2)
     topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
     axis image;
     colorbar;
-    if period(2, idx_period) - 1 <= sampleRate*2
+    if period(2, idx_period) < sampleRate*2
         title(['fixation: ' num2str(period(1, idx_period)/sampleRate) '-' num2str(period(2, idx_period)/sampleRate) 's']);
-    elseif period(2, idx_period) - 1 <= sampleRate*3
+    elseif period(2, idx_period) < sampleRate*3
         title(['cue: ' num2str(period(1, idx_period)/sampleRate) '-' num2str(period(2, idx_period)/sampleRate) 's']);
     else
         title(['cf: ' num2str(period(1, idx_period)/sampleRate) '-' num2str(period(2, idx_period)/sampleRate) 's']);
@@ -65,7 +65,7 @@ axis image;
 title(['all the cf: ' num2str(c_cfPeriod(1)/sampleRate) '-' num2str(c_cfPeriod(2)/sampleRate) 's']);
 colorbar;
 
-all_title = [all_title '| br-bl | band: [' num2str(band(1)) ',' num2str(band(2)) ']'];
+all_title = [all_title '| br-bl |']
 
 sgtitle(all_title)
 end
