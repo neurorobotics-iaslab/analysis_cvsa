@@ -33,11 +33,11 @@ for idx_period=1:size(period, 2)
     axis image;
     colorbar;
     if period(2, idx_period) - 1 <= sampleRate*2
-        title(['fixation: ' num2str(period(1, idx_period)/sampleRate) '-' num2str(period(2, idx_period)/sampleRate) 's']);
+        title(['fixation: ' num2str(period(1, idx_period)/sampleRate - 1/sampleRate) '-' num2str(period(2, idx_period)/sampleRate - 1/sampleRate) 's']);
     elseif period(2, idx_period) - 1 <= sampleRate*3
-        title(['cue: ' num2str(period(1, idx_period)/sampleRate) '-' num2str(period(2, idx_period)/sampleRate) 's']);
+        title(['cue: ' num2str(period(1, idx_period)/sampleRate - 1/sampleRate) '-' num2str(period(2, idx_period)/sampleRate - 1/sampleRate) 's']);
     else
-        title(['cf: ' num2str(period(1, idx_period)/sampleRate) '-' num2str(period(2, idx_period)/sampleRate) 's']);
+        title(['cf: ' num2str(period(1, idx_period)/sampleRate - 1/sampleRate) '-' num2str(period(2, idx_period)/sampleRate - 1/sampleRate) 's']);
     end
 end
 
@@ -62,7 +62,7 @@ end
 subplot(2, ceil((size(period, 2) + 1)/2), idx_period + 1);
 topoplot(squeeze(c_cf), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(c_cf)) max(abs(c_cf))], 'electrodes', 'labelpoint');
 axis image;
-title(['all the cf: ' num2str(c_cfPeriod(1)/sampleRate) '-' num2str(c_cfPeriod(2)/sampleRate) 's']);
+title(['all the cf: ' num2str(c_cfPeriod(1)/sampleRate - 1/sampleRate) '-' num2str(c_cfPeriod(2)/sampleRate - 1/sampleRate) 's']);
 colorbar;
 
 all_title = [all_title '| br-bl | band: [' num2str(band(1)) ',' num2str(band(2)) ']'];

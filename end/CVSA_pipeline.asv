@@ -3,7 +3,7 @@
 clc; clear all; close all;
 
 % loading data, gdf and classifier
-subject = 'test1';
+subject = 'test';
 day = ''; % place / before the data
 path_gdf = ['/home/paolo/cvsa_ws/record/' subject day '/gdf/evaluation'];
 gdf_files = dir(fullfile(path_gdf, '*.gdf'));
@@ -152,10 +152,8 @@ for idx_file=1:length(gdf_files)
             % update the integrator buffer
             if prob(1) >= prob(2)
                 integrator_buffer(idx_integrator) = qda.classes(1);
-            elseif prob(2) > prob(1)
-                integrator_buffer(idx_integrator) = qda.classes(2);
             else
-                disp('Found a nan value')
+                integrator_buffer(idx_integrator) = qda.classes(2);
             end
 
             % update the index of the integrator
@@ -210,9 +208,9 @@ for idx_file=1:length(gdf_files)
             text(matlab_new_pointer_startProbsCF(i), 0.05, text_plot)
         end
     end
-%     For the time in the plot
-%     dt = (matlab_new_pointer_endProbsCF - matlab_new_pointer_startProbsCF + 1);
-%     time_trials = dt ./ sampleRate_ros;
+    dt = (matlab_new_pointer_endProbsCF - matlab_new_pointer_startProbsCF + 1);
+    time_trials = dt ./ sampleRate_ros;
+    
     title('Integrated probs for each trial')
 
 end

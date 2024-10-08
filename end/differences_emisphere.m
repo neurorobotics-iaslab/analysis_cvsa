@@ -6,7 +6,7 @@ clc; clearvars; close all;
 
 %% General infromation
 subject = 'c7';
-path = ['/home/paolo/cvsa_ws/recordings/' subject '/gdf/calibration'];
+path = ['/home/paolo/cvsa_ws/record/' subject '/gdf/calibration'];
 % path = ['/home/paolo/cvsa_ws/record/' subject '/gdf'];
 files = dir(fullfile(path, '*.gdf'));
 

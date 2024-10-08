@@ -22,13 +22,6 @@ function prob = apply_qda(qda, data_in)
     probClass1 = unnormalizedProbClass1 / totalProb;
     probClass2 = unnormalizedProbClass2 / totalProb;
 
-    if isnan(probClass1) && isnan(probClass2)
-        prob = [1, 0];
-    elseif isnan(probClass1)
-        prob = [1.0 - probClass2, probClass2];
-    elseif isnan(probClass2)
-        prob = [probClass1, 1.0 - probClass1];
-    else
-        prob = [probClass1, probClass2];
-    end
+    if probClass1
+    prob = [probClass1, probClass2];
 end
