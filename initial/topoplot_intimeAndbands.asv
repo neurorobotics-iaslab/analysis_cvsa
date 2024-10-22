@@ -1,5 +1,5 @@
-% clc; clear all; close all;
-%% compute and show the log band of the file for 8-14 band in a topoplot
+clc; clear all; close all;
+% % compute and show the log band of the file for 8-14 band in a topoplot
 % works with the gdf
 
 subject = 'h8';
@@ -31,7 +31,7 @@ classes = [730 731];
 sampleRate = 512;
 normalization = false; % if false compute the log power, if true the ERD/ERS
 % bands = [[6 8]; [8 10]; [10 12]; [12 14]; [14 16]; [8 14]];
-bands = [[10 12]; [8 14]; [16 18]];
+bands = [8 14];
 avg = 1;
 filtOrder = 4;
 th_eog = 3.0e4; %2.5e4;
@@ -116,7 +116,7 @@ for idx_f = 1:length(files)
         if ~isempty(chanlog_path)
 %             divisionSampleRate = 2;
             divisionSampleRate = 3;
-            showTopoplot_ERDERS(chanlog_path, ERD, sampleRate, divisionSampleRate, channels_label, band, minDurTrial, cueTYP, classes, nchannels, ['matlab' files(idx_f).name])
+%             showTopoplot_ERDERS(chanlog_path, ERD, sampleRate, divisionSampleRate, channels_label, band, minDurTrial, cueTYP, classes, nchannels, ['matlab' files(idx_f).name])
         end
     end
 end

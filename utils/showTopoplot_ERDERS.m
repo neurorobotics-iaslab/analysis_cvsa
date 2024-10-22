@@ -4,8 +4,8 @@ disp('   [INFO] plotting')
 load(chanlog_path);
 chanlocs_label = {chanlocs.labels};
 
-period1 = 1:sampleRate/divisionSampleRate:minDurTrial;
-period2 = period1(2):sampleRate/divisionSampleRate:minDurTrial;
+period1 = 1:ceil(sampleRate/divisionSampleRate):minDurTrial;
+period2 = period1(2):ceil(sampleRate/divisionSampleRate):minDurTrial;
 period2 = cat(2, period2, minDurTrial);
 period = cat(1, period1, period2);
 
@@ -41,7 +41,7 @@ for idx_period=1:size(period, 2)
     end
 end
 
-% show the topoplot for all the cf
+% show the topoplot for all the cf (class 2 - class 1)
 c_cfPeriod = [3*sampleRate minDurTrial];
 dataCf_1 = mean(mean(ERD(c_cfPeriod(1):c_cfPeriod(2), :, cueTYP == classes(1)), 3), 1);
 dataCf_2 = mean(mean(ERD(c_cfPeriod(1):c_cfPeriod(2), :, cueTYP == classes(2)), 3), 1);

@@ -1,10 +1,10 @@
 %% Test the features extracted, the qda probs and the integrated probs only during CF
 % works with only ne file
-clc; clear all; close all;
+% clc; clear all; close all;
 
 % loading data, gdf and classifier
-subject = 'test1';
-day = ''; % place / before the data
+subject = 'h8';
+day = '/20240926'; % place / before the data
 path_gdf = ['/home/paolo/cvsa_ws/record/' subject day '/gdf/evaluation'];
 gdf_files = dir(fullfile(path_gdf, '*.gdf'));
 

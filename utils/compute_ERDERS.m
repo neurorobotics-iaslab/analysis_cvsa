@@ -1,8 +1,8 @@
-function [ERD, minDur, minDurFix] = compute_ERDERS(signal, trialStart, trialStop, fixStart, fixStop, nchannels, n_trial, ck, normalization)
+function [ERD, minDur, minDurFix, fix_data] = compute_ERDERS(signal, trialStart, trialStop, fixStart, fixStop, nchannels, n_trial, ck, normalization)
 disp('      [INFO] computing ERD/ERS')
 % extract useful data
 minDur = min(trialStop-trialStart);
-trial_data = nan(minDur, nchannels, n_trial);
+trial_data = nan(minDur, nchannels, n_trial); % samples x channels x trials
 tCk = zeros(n_trial, 1);
 for idx_tr = 1:n_trial
     cstart = trialStart(idx_tr);
