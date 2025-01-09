@@ -3,9 +3,10 @@ clc; clear all; close all force;
 % sample computed on log band signals. In addition compute the PSD for all channels
 
 %% files
-subject = 'd6';
-path = ['/home/paolo/cvsa_ws/record/old/' subject '/mat_selectedTrials'];
-files = dir(fullfile(path, '*.mat'));
+subject = 'h8';
+day = '/20241015';
+path = ['/home/paolo/cvsa_ws/record/' subject day '/gdf/calibration'];
+files = dir(fullfile(path, '*.gdf'));
 
 channels_label = {'', '', '', '', '', '', '', '', '', '', '', '', 'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', '', ...
         '', '', '', '', '', '', '', '', '', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
@@ -27,7 +28,7 @@ for idx_f = 1:length(files)
     disp(['[STARTING] file: ' files(idx_f).name])
     file = fullfile(path, files(idx_f).name);
 
-    load(file);
+    [signal, header] = sload(file);
 
     %% Extract infoo data
     nchannels = length(channels_label);
@@ -42,7 +43,7 @@ for idx_f = 1:length(files)
     band = [8 14];
     avg = 1;
     filtOrder = 4;
-    signal_processed = processing_offline(signal, lap_path, nchannels, sampleRate, band, filtOrder, avg);
+    signal_processed = processing_offline(signal, nchannels, sampleRate, band, filtOrder, avg);
 
     %% log band
     [ERD, minDur, minDurFix] = compute_ERDERS(signal_processed, trialStart, trialStop, fixStart, fixStop, nchannels, n_trial, ck, normalization);

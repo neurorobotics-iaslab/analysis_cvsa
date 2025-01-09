@@ -3,12 +3,12 @@
 % clc; clear all; close all;
 
 % loading data, gdf and classifier
-subject = 'h8';
-day = '/20240926'; % place / before the data
+subject = 'test';
+day = '/20250108'; % place / before the data
 path_gdf = ['/home/paolo/cvsa_ws/record/' subject day '/gdf/evaluation'];
 gdf_files = dir(fullfile(path_gdf, '*.gdf'));
 
-yaml_QDA_path = ['/home/paolo/cvsa_ws/record/' subject day '/qda_' subject '.yaml'];
+yaml_QDA_path = ['/home/paolo/cvsa_ws/record/' subject day '/qda_' subject '_lbp_' day(2:end) '.yaml'];
 qda = loadQDA(yaml_QDA_path);
 
 yaml_parameters_path = ['/home/paolo/cvsa_ws/record/' subject day '/bag'];
@@ -40,7 +40,7 @@ for idx_file=1:length(gdf_files)
 
     % load the parameters in the yaml file
     yaml_parameters_file = [yaml_parameters_path '/' gdf_files(idx_file).name(1:end-4) '.yaml'];
-    yaml_parameters_file = yaml.ReadYaml(yaml_parameters_file);
+    yaml_parameters_file = ReadYaml(yaml_parameters_file);
     threshold = yaml_parameters_file.trainingCVSA_node.thresholds;
     threshold = [threshold{1}, threshold{2}];
     bufferSize_feedback = yaml_parameters_file.integrator.buffer_size;

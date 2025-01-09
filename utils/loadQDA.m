@@ -1,5 +1,5 @@
 function qda = loadQDA(path_file)
-    c_qda = yaml.ReadYaml(path_file);
+    c_qda = ReadYaml(path_file);
 
     % Accessing the parameters
     qda.nclasses    = c_qda.QdaCfg.params.nclasses;

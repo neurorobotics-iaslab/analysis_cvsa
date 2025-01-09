@@ -2,9 +2,10 @@
 % show fisher and cva of the PSD signal of the channels selected
 
 %% initial informations
-subject = 'c7';
+subject = 'h8';
+day = '/20241015';
 % path = ['/home/paolo/cvsa_ws/record/' subject '/mat_selectedTrials'];
-path = ['/home/paolo/cvsa_ws/recordings/' subject '/gdf/evaluation'];
+path = ['/home/paolo/cvsa_ws/recordings/' subject day '/gdf/calibration'];
 files = dir(fullfile(path, '*.gdf'));
 
 lap_path39 = '/home/paolo/laplacians/lap_39ch_CVSA.mat';

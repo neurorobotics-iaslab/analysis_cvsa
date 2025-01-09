@@ -8,7 +8,7 @@ day = '/20240926';
 cal_eval = input('calibration (1) or evaluation (2): ');
 if cal_eval == 1
     a = 'calibration';
-    using_data_seelcted = input('all (1) or data selected for the evaluation (2): ');
+    using_data_seelcted = input('all (1) or channels selected for the evaluation (2): ');
     if using_data_seelcted == 1
         channelSelected = [13 14 15 16 17 18 29 30 31 32 33 34 35 36 37 38 39];
         bands = [[6 8]; [8 10]; [10 12]; [12 14]; [14 16]; [16 18]; [6 9]; [9 12]; [12 15]; [15 18]; [8 14]];

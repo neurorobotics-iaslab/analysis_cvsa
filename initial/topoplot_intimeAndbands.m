@@ -12,7 +12,7 @@ else
     disp('Error on the input, only 1 or 2 are allowd');
     return;
 end
-day = '/20240926';
+day = '/20241015';
 path = ['/home/paolo/cvsa_ws/record/' subject day '/gdf/' a];
 files = dir(fullfile(path, '*.gdf'));
 
@@ -114,8 +114,8 @@ for idx_f = 1:length(files)
 
         % Visualization
         if ~isempty(chanlog_path)
-%             divisionSampleRate = 2;
-            divisionSampleRate = 3;
+            divisionSampleRate = 2;
+%             divisionSampleRate = 3;
             showTopoplot_ERDERS(chanlog_path, ERD, sampleRate, divisionSampleRate, channels_label, band, minDurTrial, cueTYP, classes, nchannels, ['matlab' files(idx_f).name])
         end
     end
@@ -133,7 +133,7 @@ for idx_band=1:size(bands,1)
 
     % Visualization
     if ~isempty(chanlog_path)
-        divisionSampleRate = 3;
+        divisionSampleRate = 2;
         showTopoplot_ERDERS(chanlog_path, total.ERD{idx_band}, sampleRate, divisionSampleRate, channels_label, band, total.minDurTrial(idx_band), total.cueTYP, classes, nchannels, 'all files concatenated')
     end
 end
