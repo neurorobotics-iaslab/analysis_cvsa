@@ -1,0 +1,132 @@
+%% Anomaly detection with one class SVM
+% close all; clear all; clc;
+
+%% Define variables
+% file info
+c_subject = 'h8'; % input
+prompt = 'Enter "calibration" or "evaluation": ';
+test_typ = input(prompt, 's');
+day = '/20241015'; % input
+
+path = ['/home/paolo/cvsa_ws/record/' c_subject day];
+path_gdf = [path '/gdf/' test_typ];
+files = dir(fullfile(path_gdf, '*.gdf'));  
+
+band = {[8 14]};
+nbands = length(band);
+
+s=[]; events = struct('TYP',[],'POS',[],'SampleRate',512,'DUR',[]); Rk=[];
+
+channels_label = {'', '', '', '', '', '', '', '', '', '', '', '', 'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', '', ...
+       '', '', '', '', '', '', '', '', '', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
+ 
+% channels_label = {'FP1', 'FP2', 'F3', 'FZ', 'F4', 'FC1', 'FC2', 'C3', 'CZ', 'C4', 'CP1', 'CP2', 'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'EOG', ...
+%         'F1', 'F2', 'FC3', 'FCZ', 'FC4', 'C1', 'C2', 'CP3', 'CP4', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
+
+start_file = [0];
+
+%% Concatenate files
+for i=1:length(files)
+    file = fullfile(path_gdf, files(i).name);
+
+    %load(file);
+    [signal,header] = sload(file);
+    
+    curr_s = signal(:,1:39);
+    curr_h = header.EVENT;
+    
+    if strcmp(test_typ, "calibration") || (strcmp(test_typ, "evaluation"))
+        start = find(curr_h.TYP == 1,1,'first');
+        curr_h.TYP = curr_h.TYP(start:end);
+        curr_h.POS = curr_h.POS(start:end);
+        curr_h.DUR = curr_h.DUR(start:end);
+    end
+    % Create Rk vector (run)
+    cRk = i*ones(size(curr_s,1),1);
+    Rk = cat(1,Rk,cRk);
+    % Concatenate events
+    events.TYP = cat(1, events.TYP, curr_h.TYP);
+    events.DUR = cat(1, events.DUR, curr_h.DUR);
+    events.POS = cat(1, events.POS, curr_h.POS + size(s, 1));
+    s = cat(1, s, curr_s);
+    start_file = cat(1, start_file, size(s, 1));
+end
+start_file = start_file(1:end-1);
+
+%% Processing
+% Create Vector labels
+[nsamples,nchannels] = size(s);
+[feedb_pos, feedb_dur, fix_dur, fix_pos, cue_dur, cue_pos, ntrials] = extract_info_label(events, 781, 786, [730 731]);
+
+% Extract trial data
+[TrialStart, TrialStop, FixStart, FixStop, Ck, Tk] = extract_trial_info(s, events, fix_pos, fix_dur, feedb_pos, feedb_dur, cue_pos, ntrials);
+
+% Applay the filtering
+s_processed = NaN(nsamples,nchannels,nbands);
+for f_idx=1:nbands
+    sel_band = band{f_idx}; %Hz
+    t_window = 1; %[s]
+    windowSize = events.SampleRate*t_window;
+    filtOrder = 4;
+    s_movavg = data_processing(s, nchannels, events.SampleRate, sel_band, filtOrder, t_window);
+    s_processed(:,:,f_idx) = s_movavg;
+end
+
+% Trial extraction
+trial_dur = min(TrialStop-TrialStart);
+trialData =  []; new_Rk = []; new_Ck = [];
+dataforTrial = NaN(trial_dur,nchannels,nbands,ntrials);
+tCk = zeros(ntrials,1);
+for trId=1:ntrials
+    cstart = TrialStart(trId);
+    cstop = cstart + trial_dur - 1;
+
+    dataforTrial(:,:,:,trId) = s_processed(cstart:cstop,:,:);
+    tCk(trId) = unique(nonzeros(Ck(cstart:cstop)));
+end
+
+% compute the log
+ERD = log(dataforTrial);  % samples, channels, bands, trials (only the signal of the trials)
+
+%% Extract only the base line signal (the one in the fixation)
+min_fix_dur = min(fix_dur);
+min_cue_dur = min(cue_dur);
+min_cf_dur = min(feedb_dur);
+length_trial = min_fix_dur + min_cue_dur + min_cf_dur;
+ntrials = size(dataforTrial, 4);
+cue_typ = events.TYP(events.TYP == 730 | events.TYP == 731);
+data = nan(min_fix_dur*ntrials + min_cf_dur*ntrials, nchannels, nbands);
+pos = []; dur = []; typ = [];
+
+for i = 1:ntrials
+
+    % FIXATION
+    cstart_fix = 1 + (i-1)*length_trial; 
+    cend_fix = cstart_fix + min_fix_dur - 1;
+    data(cstart_fix:cend_fix,:,:) = dataforTrial(1:min_fix_dur,:,:,i);
+    pos = cat(1, pos, cstart_fix);
+    dur = cat(1, dur, min_fix_dur);
+    typ = cat(1, typ, 786);
+
+    % CUE
+    cstart_cue = cend_fix + (i-1)*length_trial + 1;
+    cend_cue   = cstart_cue + min_cue_dur - 1;
+    data(cstart_cue:cend_cue,:,:) = dataforTrial(min_fix_dur:min_fix_dur + min_cue_dur-1,:,:,i);
+    pos = cat(1, pos, cstart_cue);
+    dur = cat(1, dur, cend_cue);
+    typ = cat(1, typ, cue_typ(i));
+
+    % CF
+    cstart_cf = cend_cue + (i-1)*length_trial;
+    cend_cf   = cstart_cf + min_cf_dur - 1;
+    data(cstart_cf:cend_cf,:,:) = dataforTrial(min_fix_dur + min_cue_dur:min_fix_dur + min_cue_dur + min_cf_dur-1,:,:,i);
+    pos = cat(1, pos, cstart_cf);
+    dur = cat(1, dur, cend_cf);
+    typ = cat(1, typ, 781);
+    
+    disp(['fix: ' num2str(cstart_fix) '-' num2str(cend_fix)]);
+    disp(['cue: ' num2str(cstart_cue) '-' num2str(cend_cue)]);
+    disp(['cf: ' num2str(cstart_cf) '-' num2str(cend_cf)]);
+end
+% save the baseline data
+save("cvsa_ws/src/analysis_cvsa/detectShift/dataset_SVMoneclass.mat", "data", "pos", "typ", "dur", "start_file");

@@ -1,4 +1,4 @@
-function s_moveavg = processing_offline(signal, nchannels, sampleRate, band, filtOrder, avg)
+function signal = processing_offline(signal, nchannels, sampleRate, band, filtOrder, avg)
 disp('      [INFO] start processing');
 
 % filter alpha band
@@ -18,5 +18,9 @@ s_moveavg = zeros(size(signal));
 for idx_ch=1:nchannels
     s_moveavg(:, idx_ch) = (filter(ones(1,avg*sampleRate)/avg/sampleRate, 1, s_rect(:, idx_ch)));
 end
+
+% log
+disp('         [proc] applying log')
+signal = log(s_moveavg);
 
 end
