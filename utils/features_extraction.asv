@@ -1,0 +1,37 @@
+%% this function extract the features giving the signal and the features selected
+%   INPUT:
+%       - signal: it is a struct of nband element
+%           signal{band}.cf: contains only cf values (samples x channels x trial)
+%           signal{band}.cue: contains only cue values (samples x channels x trial)
+%           signal{band}.fix: contains only fix values (samples x channels x trial)
+%       - bands: vector of bands (1 x nbands)
+%       - bands_features: bands asked for the features (nfeatures x 2)
+%       - idxchans_features: channels for the featus (1 x nfeature)
+%   OUTPUT:
+%       - features: matrix with all the features (samples*trial x nfeatures)
+function [features, startTrial] = features_extraction(signal, bands, bands_features, idxchans_features)
+    nfeatures = length(idxchans_features);
+    nbands = size(bands, 2);
+
+    % reshape the data
+    ntrial = size(signal{1}.typ, 1);
+    data = cell(1, nbands);
+    startTrial = nan(1, ntrial);
+    for idx_band=1:nbands
+        for idx_trial=1:ntrial
+            startTrial(idx_trial) = size(data{idx_band}, 1) + 1;
+            data{idx_band} = cat(1, data{idx_band}, signal{idx_band}.cf(:,:,idx_trial));
+        end
+    end
+
+    % extract only the interested features
+    features = nan(size(data{1}, 1), nfeatures);
+    for idx_feature=1:nfeatures
+        for idx_band=1:nbands
+            band = bands{idx_band};
+            if isequal(band, bands_features(idx_feature,:))
+                features(:,idx_feature) = data{idx_band}(:,idxchans_features(idx_feature));
+            end
+        end
+    end
+end

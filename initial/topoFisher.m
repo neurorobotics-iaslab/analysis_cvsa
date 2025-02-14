@@ -1,5 +1,5 @@
 %% for each file compute the fisher for a band and the topoplot
-clc; clear all; close all;
+clc; clear all; %close all;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils');
 
 %% files variables
@@ -52,13 +52,13 @@ for idx_file= 1: length(files)
 
     for idx_band = 1:nbands
         band = bands{idx_band};
-        signal_processed = processing_offline(signal, nchannels, header.SampleRate, band, filterOrder, avg);
+        [signal_processed, header_ros] = processing_offline(signal, header, nchannels, header.SampleRate,filterOrder, band, 32);
         c_header = headers{idx_band};
-        c_header.sampleRate = header.SampleRate;
-        c_header.channels_labels = header.Label(idx_channels_select);
-        c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
-        c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
-        c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        c_header.sampleRate = header_ros.SampleRate;
+        c_header.channels_labels = header_ros.Label(idx_channels_select);
+        c_header.TYP = cat(1, c_header.TYP, header_ros.EVENT.TYP);
+        c_header.DUR = cat(1, c_header.DUR, header_ros.EVENT.DUR);
+        c_header.POS = cat(1, c_header.POS, header_ros.EVENT.POS + size(signals{idx_band}, 1));
 
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,idx_channels_select));
         headers{idx_band} = c_header;
@@ -152,7 +152,7 @@ all_title = 'br-bl | only cf | all files concatenated';
 sgtitle(all_title)
 
 %% show topoplot in time
-step_time_toplot = 0.25; %sec
+step_time_toplot = 0.5; %sec
 rows_plot = 3;
 handles = [];
 cl = -inf;

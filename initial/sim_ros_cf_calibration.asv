@@ -1,0 +1,207 @@
+%% in this file we use the calibration file to check if the cf will hit or miss. We use the same processing used in ros
+clc; clearvars; %close all;
+addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
+
+%% variables
+bands = {[8 10], [10 12], [12 14], [14 16], [8 14]};
+avg = 1;
+chunkSize = 32;
+nchannels = 39;
+bufferSize_processing = 512;
+filterOrder = 4;
+classes = [730 731];
+fix_event = 786;
+cf_event = 781;
+startTrial_event = 786; %% we use only data inside fix to boom
+nclasses = length(classes);
+channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
+bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
+nbands = length(bands);
+signals = cell(1, nbands);
+headers = cell(1, nbands);
+for idx_band = 1:nbands
+    headers{idx_band}.TYP = [];
+    headers{idx_band}.DUR = [];
+    headers{idx_band}.POS = [];
+    headers{idx_band}.startNewFile = [];
+    headers{idx_band}.ths_rejection = [];
+    headers{idx_band}.ths = [];
+    headers{idx_band}.bufferSize_integrator = [];
+    signals{idx_band} = [];
+end
+ths_rejection = [0.5 0.5];
+bufferSize_integrator = 64;
+
+%% load the gdfs
+[filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
+
+% Concatenate all + processing + extract selected channels
+nFiles = length(filenames);
+for idx_file= 1: nFiles
+    fullpath_file = fullfile(pathname, filenames{idx_file});
+    disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', filenames{idx_file}]);
+    [signal,header] = sload(fullpath_file);
+    signal = signal(:,1:nchannels);
+    channels_label = header.Label;
+    [~, idx_channels_select] = ismember(channels_select, channels_label);
+
+    for idx_band = 1:nbands
+        band = bands{idx_band};
+        [signal_processed, header_processed] = processing_offline(signal, header, nchannels, bufferSize_processing, filterOrder, band, chunkSize);
+        c_header = headers{idx_band};
+        c_header.sampleRate = header.SampleRate;
+        c_header.channels_labels = header.Label;
+        c_header.TYP = cat(1, c_header.TYP, header_processed.EVENT.TYP);
+        c_header.DUR = cat(1, c_header.DUR, header_processed.EVENT.DUR);
+        c_header.POS = cat(1, c_header.POS, header_processed.EVENT.POS + size(signals{idx_band}, 1));
+        c_header.startNewFile = cat(1, c_header.startNewFile, size(signals{idx_band}, 1) + 1);
+
+        signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
+        c_header.ths = cat(1, c_header.ths, repmat({[1.0 1.0]},size(signal_processed, 1), 1));
+        c_header.ths_rejection = cat(1, c_header.ths_rejection, repmat({ths_rejection}, size(signal_processed, 1), 1));
+        c_header.bufferSize_integrator = cat(1, c_header.bufferSize_integrator, repmat(bufferSize_integrator, size(signal_processed, 1), 1));
+        headers{idx_band} = c_header;
+    end
+end
+
+%% extract all data
+% for each band the signal are: samples x channels x trial
+%   in data the signal keep this division for data.trial, data.cue data.cf data.fix
+data = cell(1, nbands); 
+for idx_band = 1:nbands
+    [data{idx_band}, info] = extract_cf(signals{idx_band}, headers{idx_band}, classes, cf_event);
+end
+
+%% config the integrator
+[filename_qda, path_qda] = uigetfile('*.yaml;*.yml', 'Select a YAML File of the QDA');
+path_qda = fullfile(path_qda, filename_qda);
+% path_qda = '/home/paolo/cvsa_ws/src/qda_cvsa/cfg/qda_c7_lbp_20250131.yaml';
+qda = loadQDA(path_qda);
+
+%% da rimuovere test per avere le features della calibration con ros
+y = [];
+ntrials = size(info.startCf, 1);
+for idx_trial=1:ntrials
+    cfDUR = info.endCf(idx_trial) - info.startCf(idx_trial) + 1;
+    y = cat(1, y, repmat(data{1}.typ(idx_trial), cfDUR, 1));
+end
+features = features_extraction(data, bands, qda.bands, qda.idchans);
+X = features;
+save('features.mat', 'X', 'y')
+
+
+%% compute the classification and the integrator buffer
+features = features_extraction(data, bands, qda.bands, qda.idchans);
+nfeature = size(features, 1);
+idx_trial = 1;
+idx_integrator = 1;
+integrator_buffer = [];
+ntrial = size(info.startCf, 1);
+prob_integrated_B = inf(nfeature, nclasses);
+probs = inf(nfeature, nclasses);
+for idx_feature=1:nfeature
+    % reset
+    if idx_feature == info.startCf(idx_trial)
+        if idx_trial == ntrial
+            idx_trial = ntrial;
+        else
+            idx_trial = idx_trial + 1;
+        end
+        bufferSize_integrator = info.bufferSize_integrator(idx_trial);
+        idx_integrator = 1;
+        integrator_buffer = repmat(classes, 1, bufferSize_integrator/nclasses);
+        ths_rejection = info.ths_rejection(idx_trial,:);
+    end
+    if idx_integrator > bufferSize_integrator
+        idx_integrator = 1;
+    end
+
+    % classify
+    feature = features(idx_feature,:);
+    prob = apply_qda(qda, feature);
+    [~, idxMax] = max(prob);
+    if prob(idxMax) > ths_rejection(idxMax)
+        integrator_buffer(idx_integrator) = classes(idxMax);
+        idx_integrator = idx_integrator + 1;
+    end
+    prob_integ = nan(1, nclasses);
+    for idx_class=1:nclasses
+        count = sum(integrator_buffer == classes(idx_class));
+        prob_integ(idx_class) = count/bufferSize_integrator;
+    end
+    probs(idx_feature,:) = prob;
+    prob_integrated_B(idx_feature,:) = prob_integ;
+end
+
+%% Compute the integrator exponential
+prob_integrated_E = inf(nfeature, nclasses);
+alpha = 0.97;
+for idx_feature=1:nfeature
+    % reset
+    if idx_feature == info.startCf(idx_trial)
+        if idx_trial == ntrial
+            idx_trial = ntrial;
+        else
+            idx_trial = idx_trial + 1;
+        end
+        c_prob_integ = [0.5 0.5];
+        ths_rejection = info.ths_rejection(idx_trial,:);
+    end
+    if idx_integrator > bufferSize_integrator
+        idx_integrator = 1;
+    end
+
+    % classify
+    feature = features(idx_feature,:);
+    prob = apply_qda(qda, feature);
+    [~, idxMax] = max(prob);
+
+    if prob(idxMax) > ths_rejection(idxMax)
+        c_prob_integ = alpha*prob + (1-alpha)*c_prob_integ;
+        
+    end
+
+
+
+    if prob(idxMax) > ths_rejection(idxMax)
+        c_prob_integ = aplha*prob + (1-alpha)*c_prob_integ;​
+        integrator_buffer(idx_integrator) = classes(idxMax);
+        idx_integrator = idx_integrator + 1;
+    end
+    prob_integrated_E = cat(1, prob_integrated_E, c_prob_integ);
+end
+
+%% plot the trials
+last_trials = 20;
+hit = 0; miss = 0; timeout = 0;
+for idx_trial=ntrial-last_trials+1:ntrial
+    ths = info.ths(idx_trial,:);
+    start_trial = info.startCf(idx_trial);
+    end_trial = info.endCf(idx_trial);
+    
+    c_prob = probs(start_trial:end_trial - 1, :);
+    c_prob = cat(1, nan(1, nclasses), c_prob);
+
+    c_prob_integrated_B = prob_integrated_B(start_trial:end_trial - 1,:);
+    c_prob_integrated_B = cat(1, repmat(1/nclasses, 1, nclasses), c_prob_integrated_B);
+
+    c_prob_integrated_E = prob_integrated_E(start_trial:end_trial - 1,:);
+    c_prob_integrated_E = cat(1, repmat(1/nclasses, 1, nclasses), c_prob_integrated_E);
+
+    figure();
+    hold on;
+    x = 1:end_trial-start_trial + 1;
+    plot(c_prob_integrated_B(:,1));
+    plot(c_prob_integrated_E(:,1));
+    yline(ths_rejection(1), '--r')
+    yline(1.0 - ths_rejection(2), '--r')
+    yline(ths(1), '-g');
+    yline(1.0 - ths(2), '-g');
+    legend({'integrated prob of 730 with buffer', 'integrated prof of 730 with exponential', ...
+        'rejection 730', 'rejection 731', 'threhsold 730', 'threhsold 731', 'qda prob'}, 'Location', 'best');
+    scatter(x, c_prob(:,1), 5, 'k', 'filled');
+    title(['class asked: ' num2str(data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)]);
+    ylim([0,1])
+    hold off;
+end
+

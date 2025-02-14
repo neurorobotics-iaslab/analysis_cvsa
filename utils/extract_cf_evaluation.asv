@@ -1,0 +1,47 @@
+%% extract cf, fix, cue and all the trial
+% OUTPUT: 
+%        - signal struct contains all the data in samples x channels x trial:
+%               signal: signal of each trial
+%        - typ is a vector 1 x trial contain the value of the cue
+function [signal, info] = extract_cf_evaluation(s, header, classes, cf_event)
+nclasses = size(classes, 2);
+
+cueTYP = header.TYP(ismember(header.TYP, classes));
+
+cfPOS = header.POS(header.TYP == cf_event);
+cfDUR = header.DUR(header.TYP == cf_event);
+
+ntrial = length(cfPOS);
+nchannels = size(s, 2);
+
+signal = [];
+signal.typ = cueTYP;
+
+signal.info.ths = nan(ntrial, nclasses);
+signal.info.ths_rejection = nan(ntrial, nclasses);
+signal.info.bufferSize_integrator = nan(ntrial, 1);
+
+for idx_trial = 1:ntrial
+    fixStart = fixPOS(idx_trial);
+    fixEnd = fixStart + minDURfix - 1;
+    signal.fix(:,:,idx_trial) = s(fixStart:fixEnd,:);
+
+    cueStart = cuePOS(idx_trial);
+    cueEnd = cueStart + minDURcue - 1;
+    signal.cue(:,:,idx_trial) = s(cueStart:cueEnd,:);
+
+    cfStart = cfPOS(idx_trial);
+    cfEnd = cfStart + minDURcf - 1;
+    signal.cf(:,:,idx_trial) = s(cfStart:cfEnd,:);
+
+    trialStart = trialPOS(idx_trial);
+    trialEnd = trialStart + minDURtrial - 1;
+    signal.trial(:,:,idx_trial) = s(trialStart:trialEnd,:);
+    
+    signal.info.ths(idx_trial,:) = cell2mat(header.ths(trialStart,:));
+    signal.info.ths_rejection(idx_trial,:) = cell2mat(header.ths_rejection(trialStart,:));
+    signal.info.bufferSize_integrator(idx_trial) = header.bufferSize_integrator(trialStart);
+end
+
+
+end

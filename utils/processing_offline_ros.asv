@@ -3,25 +3,23 @@
 %       - signal: matrix of signals (samples x channels)
 %       - header: header of the gdf
 %       - nchannels: numer of channels
-%       - bufferSize: size of the buffer (rosneuro uses 512)
+%       - bufferSize: 
+%       - sampleRate: sample rate of the data
 %       - band: band to perform low and high filter
 %       - filterOrder: int with th efilter order
-%       - chunkSize: size of chunk (rosneuro uses 32)
-%   OUTPUT:
-%       - signal_processed: signal processed
-%       - header: modification in the POS and DUR of the gdf header
-function [signal_processed, header] = processing_offline(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize)
+%       - avg: avg for the sliding window
+function [signal_processed, header] = processing_offline_ros(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize)
 disp(['      [INFO] start processing like ros for band ' num2str(band(1)) '-' num2str(band(2))]);
 
-nchunks = floor(size(signal, 1)/chunkSize);
+nchunks = floor(signal/chunkSize);
 buffer = nan(bufferSize, nchannels);
 
-[b_low, a_low] = butter(filterOrder, band(2)*(2/header.SampleRate),'low');
-[b_high, a_high] = butter(filterOrder, band(1)*(2/header.SampleRate),'high');
+[b_low, a_low] = butter(filterOrder, band(2)*(2/sampleRate),'low');
+[b_high, a_high] = butter(filterOrder, band(1)*(2/sampleRate),'high');
 zi_low = [];
 zi_high = [];
 
-signal_processed = nan(nchunks, nchannels);
+signal_processed = [];
 
 for i=1:nchunks
     % add
@@ -47,9 +45,9 @@ for i=1:nchunks
     % apply log
     tmp_data = log(tmp_data);
 
-    signal_processed(i,:) = tmp_data;
+    signal_processed = cat(1, signal_processed, tmp_data);
 end
 
-header.EVENT.DUR = round(header.EVENT.DUR/chunkSize) ;
-header.EVENT.POS = round(header.EVENT.POS/chunkSize) - (bufferSize/chunkSize) + 1;  
-header.SampleRate = header.SampleRate/chunkSize;
+header.EVENT.DUR = floor(header.EVENT.DUR/chunkSize) ;
+header.EVENT.POS = ceil(header.EVENT.POS/chunkSize) - (bufferSize/chunkSize) + 1;  
+
