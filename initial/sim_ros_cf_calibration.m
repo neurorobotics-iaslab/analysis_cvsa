@@ -135,7 +135,7 @@ end
 
 %% Compute the integrator exponential
 prob_integrated_E = inf(nfeature, nclasses);
-alpha = 0.03;
+alpha = 0.97;
 idx_trial = 1;
 for idx_feature=1:nfeature
     % reset
@@ -160,7 +160,7 @@ for idx_feature=1:nfeature
     if prob(idxMax) > ths_rejection(idxMax)
         prob = zeros(1, nclasses);
         prob(idxMax) = 1.0;
-        c_prob_integ = alpha*prob + (1-alpha)*c_prob_integ;
+        c_prob_integ = (1.0 - alpha)*prob + alpha*c_prob_integ;
     end
     prob_integrated_E(idx_feature,:) = c_prob_integ;
 end

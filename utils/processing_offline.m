@@ -50,6 +50,6 @@ for i=1:nchunks
     signal_processed(i,:) = tmp_data;
 end
 
-header.EVENT.DUR = round(header.EVENT.DUR/chunkSize) ;
-header.EVENT.POS = round(header.EVENT.POS/chunkSize) - (bufferSize/chunkSize) + 1;  
+header.EVENT.DUR = round(header.EVENT.DUR/chunkSize);
+header.EVENT.POS = round(header.EVENT.POS/chunkSize); % - (bufferSize/chunkSize) + 1;  
 header.SampleRate = header.SampleRate/chunkSize;

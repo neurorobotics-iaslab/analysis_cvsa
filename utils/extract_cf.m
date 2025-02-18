@@ -5,9 +5,9 @@
 %       - classes: classes values to extract
 %       - cf_event: event of the CF
 % OUTPUT: 
-%        - signal struct contains all the data in samples x channels x trial:
-%               signal: signal of each trial
-%        - typ is a vector 1 x trial contain the value of the cue
+%        - signal struct contains all the data in:
+%               data: signal of each trial (samples x channels) x trial
+%               typ: is a vector 1 x trial contain the value of the cue
 function [signal, info] = extract_cf(s, header, classes, cf_event)
 hitMissTimeout = [897, 898, 899];
 nclasses = size(classes, 2);
@@ -26,6 +26,7 @@ signal.typ = cueTYP;
 info.ths = nan(ntrial, nclasses);
 info.ths_rejection = nan(ntrial, nclasses);
 info.bufferSize_integrator = nan(ntrial, 1);
+info.alpha = nan(ntrial, 1);
 info.startCf = [];
 info.endCf = [];
 info.startNewFile =  [];
@@ -50,7 +51,12 @@ for idx_trial = 1:ntrial
     
     info.ths(idx_trial,:) = cell2mat(header.ths(cfStart,:));
     info.ths_rejection(idx_trial,:) = cell2mat(header.ths_rejection(cfStart,:));
-    info.bufferSize_integrator(idx_trial) = header.bufferSize_integrator(cfStart);
+    if size(header.bufferSize_integrator, 1) == 0
+        info.alpha(idx_trial) = header.alpha(cfStart);
+    else
+        info.bufferSize_integrator(idx_trial) = header.bufferSize_integrator(cfStart);
+    end
+    
     info.endCf = cat(1, info.endCf, size(signal.data, 1));
 end
 

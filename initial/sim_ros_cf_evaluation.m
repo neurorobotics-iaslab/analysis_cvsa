@@ -1,5 +1,6 @@
 %% in this file we use the evaluation file to check if the cf will hit or miss. We use the same processing used in ros
 clc; clearvars; close all;
+addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils');
 
 %% variables
 bands = {[8 10], [10 12], [12 14], [14 16], [8 14]};
@@ -30,11 +31,15 @@ for idx_band = 1:nbands
     headers{idx_band}.ths_rejection = [];
     headers{idx_band}.ths = [];
     headers{idx_band}.bufferSize_integrator = [];
+    headers{idx_band}.alpha = [];
     signals{idx_band} = [];
 end
 
 %% load the gdfs
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF evaluation Files', 'MultiSelect', 'on');
+if ischar(filenames)
+    filenames = {filenames};
+end
 
 % Concatenate all + processing + extract selected channels
 nFiles = length(filenames);
@@ -51,7 +56,11 @@ for idx_file= 1: nFiles
     a = ReadYaml(parameters_file);
     ths_rejection = a.integrator.thresholds_rejection;
     ths = a.trainingCVSA_node.thresholds;
-    bufferSize = a.integrator.buffer_size;
+    if contains(filenames{idx_file}, 'expo')
+        alpha = a.integrator.alpha;
+    else
+        bufferSize = a.integrator.buffer_size;
+    end
 
     for idx_band = 1:nbands
         band = bands{idx_band};
@@ -67,7 +76,11 @@ for idx_file= 1: nFiles
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
         c_header.ths = cat(1, c_header.ths, repmat(ths,size(signal_processed, 1), 1));
         c_header.ths_rejection = cat(1, c_header.ths_rejection, repmat(ths_rejection, size(signal_processed, 1), 1));
-        c_header.bufferSize_integrator = cat(1, c_header.bufferSize_integrator, repmat(bufferSize, size(signal_processed, 1), 1));
+        if contains(filenames{idx_file}, 'expo')
+            c_header.alpha = cat(1, c_header.alpha, repmat(alpha, size(signal_processed, 1), 1));
+        else
+            c_header.bufferSize_integrator = cat(1, c_header.bufferSize_integrator, repmat(bufferSize, size(signal_processed, 1), 1));
+        end
         headers{idx_band} = c_header;
     end
 
@@ -78,8 +91,8 @@ for idx_file= 1: nFiles
 end
 
 %% extract all data
-% for each band the signal are: samples x channels x trial
-%   in data the signal keep this division for data.trial, data.cue data.cf data.fix
+% now data contains all the cf data and the info give the positions and
+% durations
 data = cell(1, nbands); 
 for idx_band = 1:nbands
     [data{idx_band}, info] = extract_cf(signals{idx_band}, headers{idx_band}, classes, cf_event);
@@ -90,10 +103,10 @@ end
 path_qda = fullfile(path_qda, filename_qda);
 % path_qda = '/home/paolo/cvsa_ws/src/qda_cvsa/cfg/qda_c7_lbp_20250131.yaml';
 qda = loadQDA(path_qda);
-
-%% compute the classification and the integrator
 features = features_extraction(data, bands, qda.bands, qda.idchans);
 nfeature = size(features, 1);
+
+%% compute the classification and the integrator
 idx_trial = 1;
 idx_integrator = 1;
 sintegrator_buffer = [];
@@ -108,7 +121,11 @@ for idx_feature=1:nfeature
         else
             idx_trial = idx_trial + 1;
         end
-        bufferSize_integrator = info.bufferSize_integrator(idx_trial);
+        if ~isnan(info.bufferSize_integrator)
+            bufferSize_integrator = info.bufferSize_integrator(idx_trial);
+        else
+            bufferSize_integrator = 48;
+        end
         idx_integrator = 1;
         integrator_buffer = repmat(classes, 1, bufferSize_integrator/nclasses);
         ths_rejection = info.ths_rejection(idx_trial,:);
@@ -136,7 +153,11 @@ end
 
 %% Compute the integrator exponential
 prob_integrated_E = inf(nfeature, nclasses);
-alpha = 0.97;
+if isnan(info.alpha)
+    alpha = 0.97;
+else
+    alpha = info.alpha(1);
+end
 idx_trial = 1;
 for idx_feature=1:nfeature
     % reset

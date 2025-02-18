@@ -1,10 +1,10 @@
-%% for each file compute the fisher for a band and the topoplot
+%% for each file compute the fisher for a band and the topoplot. Obv we use the min dur of the cf/cue/fix
 clc; clear all; %close all;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils');
 
 %% files variables
 subject  = 'c7';
-day      = '20250131';
+day      = '20250217';
 path_gdf = ['/home/paolo/cvsa_ws/record/' subject '/' day '/calibration/gdf'];
 files = dir(fullfile(path_gdf, '*.gdf')); 
 
@@ -152,7 +152,7 @@ all_title = 'br-bl | only cf | all files concatenated';
 sgtitle(all_title)
 
 %% show topoplot in time
-step_time_toplot = 0.5; %sec
+step_time_toplot = 0.25; %sec
 rows_plot = 3;
 handles = [];
 cl = -inf;
