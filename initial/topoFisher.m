@@ -224,3 +224,31 @@ for idx_band=1:nbands
     sgtitle(all_title)
 end
 
+%% show the difference as an image
+for idx_band=1:nbands
+    data_1 = mean(data{idx_band}.fix(:,:, data{idx_band}.typ == classes(1)), 3);
+    data_2 = mean(data{idx_band}.fix(:,:, data{idx_band}.typ == classes(2)), 3);
+    data_fix = data_2-data_1;
+    data_1 = mean(data{idx_band}.cue(:,:,data{idx_band}.typ == classes(1)), 3);
+    data_2 = mean(data{idx_band}.cue(:,:,data{idx_band}.typ == classes(2)), 3);
+    data_cue = data_2 - data_1;
+    data_1 = mean(data{idx_band}.cf(:,:,data{idx_band}.typ == classes(1)), 3);
+    data_2 = mean(data{idx_band}.cf(:,:,data{idx_band}.typ == classes(2)), 3);
+    data_cf = data_2 - data_1;
+
+    data_trials = [data_fix; data_cue; data_cf];
+
+    figure();
+    hold on;
+    imagesc(data_trials')
+    xline(size(data_fix, 1), '--k');
+    xline(size(data_cue, 1) + size(data_fix, 1), '--k');
+    xticks_ = (1:sampleRate:size(data_cue, 1) + size(data_fix, 1) + size(data_cf, 1))-1;
+    xticks(xticks_)
+    xticklabels(string((xticks_)/sampleRate))
+    yticks(1:39);
+    yticklabels(headers{1}.channels_labels);
+    title(['Difference between classes in mean | band: ' bands_str{idx_band}]);
+    hold off;
+end
+

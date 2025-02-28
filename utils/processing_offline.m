@@ -51,5 +51,5 @@ for i=1:nchunks
 end
 
 header.EVENT.DUR = round(header.EVENT.DUR/chunkSize);
-header.EVENT.POS = round(header.EVENT.POS/chunkSize); % - (bufferSize/chunkSize) + 1;  
+header.EVENT.POS = round(header.EVENT.POS/chunkSize); % not this part since signal_processed has nan: - (bufferSize/chunkSize) + 1;  
 header.SampleRate = header.SampleRate/chunkSize;

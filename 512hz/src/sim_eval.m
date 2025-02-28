@@ -59,18 +59,20 @@ for idx_file= 1: nFiles
     if contains(filenames{idx_file}, 'expo')
         alpha = a.integrator.alpha;
     else
-        bufferSize = a.integrator.buffer_size;
+        bufferSize = a.integrator.buffer_size*512/16;
     end
 
     for idx_band = 1:nbands
         band = bands{idx_band};
-        [signal_processed, header_processed] = processing_offline(signal, header, nchannels, bufferSize_processing, filterOrder, band, chunkSize);
+
+        signal_processed = proc_512hz(signal, header.SampleRate, band, filterOrder, avg);
+        
         c_header = headers{idx_band};
-        c_header.sampleRate = header_processed.SampleRate;
+        c_header.sampleRate = header.SampleRate;
         c_header.channels_labels = header.Label;
-        c_header.TYP = cat(1, c_header.TYP, header_processed.EVENT.TYP);
-        c_header.DUR = cat(1, c_header.DUR, header_processed.EVENT.DUR);
-        c_header.POS = cat(1, c_header.POS, header_processed.EVENT.POS + size(signals{idx_band}, 1));
+        c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
+        c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
+        c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
         c_header.startNewFile = cat(1, c_header.startNewFile, size(signals{idx_band}, 1) + 1);
 
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
@@ -83,6 +85,7 @@ for idx_file= 1: nFiles
             c_header.bufferSize_integrator = cat(1, c_header.bufferSize_integrator, repmat(bufferSize, size(signal_processed, 1), 1));
             c_header.alpha = cat(1, c_header.alpha, nan(size(signal_processed, 1), 1));
         end
+        headers{idx_band} = c_header;
         headers{idx_band} = c_header;
     end
 
@@ -97,7 +100,7 @@ end
 % durations
 cf_data = cell(1, nbands); 
 for idx_band = 1:nbands
-    [cf_data{idx_band}, cf_info] = extract_event(signals{idx_band}, headers{idx_band}, classes, cf_event);
+    [cf_data{idx_band}, cf_info] = extract_event(signals{idx_band}, headers{idx_band}, classes, [cf_event]);
 end
 
 %% load QDA and extract features
@@ -115,7 +118,7 @@ nsamples = size(features, 1);
 %% compute the classification and the integrator
 idx_trial = 1;
 idx_integrator = 1;
-sintegrator_buffer = [];
+integrator_buffer = [];
 ntrial = size(cf_info.startEvent, 1);
 prob_integrated_B = inf(nsamples, nclasses);
 probs = inf(nsamples, nclasses);
@@ -406,5 +409,3 @@ xlabel('Recall');
 ylabel('Precision');
 title(['Precision-Recall Curve (AUC = ' num2str(auc_pr) ')']);
 grid on;
-
-

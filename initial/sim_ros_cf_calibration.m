@@ -27,10 +27,13 @@ for idx_band = 1:nbands
     headers{idx_band}.ths_rejection = [];
     headers{idx_band}.ths = [];
     headers{idx_band}.bufferSize_integrator = [];
+    headers{idx_band}.alpha = [];
     signals{idx_band} = [];
 end
 ths_rejection = [0.5 0.5];
+ths = [1.0 1.0];
 bufferSize_integrator = 64;
+alpha = 0.97;
 
 %% load the gdfs
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF calibration Files', 'MultiSelect', 'on');
@@ -57,9 +60,10 @@ for idx_file= 1: nFiles
         c_header.startNewFile = cat(1, c_header.startNewFile, size(signals{idx_band}, 1) + 1);
 
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
-        c_header.ths = cat(1, c_header.ths, repmat({[1.0 1.0]},size(signal_processed, 1), 1));
+        c_header.ths = cat(1, c_header.ths, repmat({ths},size(signal_processed, 1), 1));
         c_header.ths_rejection = cat(1, c_header.ths_rejection, repmat({ths_rejection}, size(signal_processed, 1), 1));
         c_header.bufferSize_integrator = cat(1, c_header.bufferSize_integrator, repmat(bufferSize_integrator, size(signal_processed, 1), 1));
+        c_header.alpha = cat(1, c_header.alpha, repmat(alpha, size(signal_processed, 1), 1));
         headers{idx_band} = c_header;
     end
 end
@@ -67,9 +71,9 @@ end
 %% extract all data
 % for each band the signal are: samples x channels x trial
 %   in data the signal keep this division for data.trial, data.cue data.cf data.fix
-data = cell(1, nbands); 
+cf_data = cell(1, nbands); 
 for idx_band = 1:nbands
-    [data{idx_band}, info] = extract_cf(signals{idx_band}, headers{idx_band}, classes, cf_event);
+    [cf_data{idx_band}, cf_info] = extract_event(signals{idx_band}, headers{idx_band}, classes, cf_event);
 end
 
 %% config the integrator
@@ -80,37 +84,37 @@ qda = loadQDA(path_qda);
 
 %% da rimuovere test per avere le features della calibration con ros
 y = [];
-ntrials = size(info.startCf, 1);
+ntrials = size(cf_info.startEvent, 1);
 for idx_trial=1:ntrials
-    cfDUR = info.endCf(idx_trial) - info.startCf(idx_trial) + 1;
-    y = cat(1, y, repmat(data{1}.typ(idx_trial), cfDUR, 1));
+    cfDUR = cf_info.endEvent(idx_trial) - cf_info.startEvent(idx_trial) + 1;
+    y = cat(1, y, repmat(cf_data{1}.typ(idx_trial), cfDUR, 1));
 end
-features = features_extraction(data, bands, qda.bands, qda.idchans);
+features = features_extraction(cf_data, bands, qda.bands, qda.idchans);
 X = features;
 save('features.mat', 'X', 'y')
 
 
 %% compute the classification and the integrator buffer
-features = features_extraction(data, bands, qda.bands, qda.idchans);
+features = features_extraction(cf_data, bands, qda.bands, qda.idchans);
 nfeature = size(features, 1);
 idx_trial = 1;
 idx_integrator = 1;
 integrator_buffer = [];
-ntrial = size(info.startCf, 1);
+ntrial = size(cf_info.startEvent, 1);
 prob_integrated_B = inf(nfeature, nclasses);
 probs = inf(nfeature, nclasses);
 for idx_feature=1:nfeature
     % reset
-    if idx_feature == info.startCf(idx_trial)
+    if idx_feature == cf_info.startEvent(idx_trial)
         if idx_trial == ntrial
             idx_trial = ntrial;
         else
             idx_trial = idx_trial + 1;
         end
-        bufferSize_integrator = info.bufferSize_integrator(idx_trial);
+        bufferSize_integrator = cf_info.bufferSize_integrator(idx_trial);
         idx_integrator = 1;
         integrator_buffer = repmat(classes, 1, bufferSize_integrator/nclasses);
-        ths_rejection = info.ths_rejection(idx_trial,:);
+        ths_rejection = cf_info.ths_rejection(idx_trial,:);
     end
     if idx_integrator > bufferSize_integrator
         idx_integrator = 1;
@@ -135,21 +139,18 @@ end
 
 %% Compute the integrator exponential
 prob_integrated_E = inf(nfeature, nclasses);
-alpha = 0.97;
 idx_trial = 1;
 for idx_feature=1:nfeature
     % reset
-    if idx_feature == info.startCf(idx_trial)
+    if idx_feature == cf_info.startEvent(idx_trial)
         if idx_trial == ntrial
             idx_trial = ntrial;
         else
             idx_trial = idx_trial + 1;
         end
+        alpha = cf_info.alpha(idx_trial);
         c_prob_integ = [0.5 0.5];
-        ths_rejection = info.ths_rejection(idx_trial,:);
-    end
-    if idx_integrator > bufferSize_integrator
-        idx_integrator = 1;
+        ths_rejection = cf_info.ths_rejection(idx_trial,:);
     end
 
     % classify
@@ -166,12 +167,14 @@ for idx_feature=1:nfeature
 end
 
 %% plot the trials
-last_trials = 20;
+last_trials = 30;
 time_plot = 0.5; % in sec
+nrows = 3;
+figure();
 for idx_trial=ntrial-last_trials+1:ntrial
-    ths = info.ths(idx_trial,:);
-    start_trial = info.startCf(idx_trial);
-    end_trial = info.endCf(idx_trial);
+    ths = cf_info.ths(idx_trial,:);
+    start_trial = cf_info.startEvent(idx_trial);
+    end_trial = cf_info.endEvent(idx_trial);
     
     c_prob = probs(start_trial:end_trial - 1, :);
     c_prob = cat(1, nan(1, nclasses), c_prob);
@@ -182,7 +185,7 @@ for idx_trial=ntrial-last_trials+1:ntrial
     c_prob_integrated_E = prob_integrated_E(start_trial:end_trial - 1,:);
     c_prob_integrated_E = cat(1, repmat(1/nclasses, 1, nclasses), c_prob_integrated_E);
 
-    figure();
+    subplot(nrows, ceil(last_trials/nrows), idx_trial- (ntrial-last_trials))
     hold on;
     x = 1:end_trial-start_trial + 1;
     plot(c_prob_integrated_B(:,1));
@@ -192,14 +195,64 @@ for idx_trial=ntrial-last_trials+1:ntrial
     yline(ths(1), '-g');
     yline(1.0 - ths(2), '-g');
     scatter(x, c_prob(:,1), 5, 'k', 'filled');
-    legend({'integrated prob of 730 with buffer', 'integrated prof of 730 with exponential', ...
-        'rejection 730', 'rejection 731', 'threhsold 730', 'threhsold 731', 'qda prob'}, 'Location', 'best');
-    title(['class asked: ' num2str(data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)]);
+    
+    title({['cue: ' num2str(cf_data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(idx_trial))]});
     ylim([0,1])
-
-    xticks_ = [(1:info.sampleRate*time_plot:max(x))-1 max(x)];
+    xticks_ = [(1:cf_info.sampleRate*time_plot:max(x))-1 max(x)];
     xticks(xticks_)
-    xticklabels(string((xticks_)/info.sampleRate))
+    xticklabels(string((xticks_)/cf_info.sampleRate))
+    drawnow;
     hold off;
 end
+legend({'integrated prob of 730 with buffer', 'integrated prof of 730 with exponential', ...
+        'rejection 730', 'rejection 731', 'threhsold 730', 'threhsold 731', 'qda prob'}, 'Location', 'best');
 
+%% plot the features for each trial
+% plot with scatter
+% figure();
+% nfeatures = qda.nfeatures;
+% colors = rand(nfeatures, 3);
+% for idx_trial=ntrial-last_trials+1:ntrial
+%     start_trial = cf_info.startEvent(idx_trial);
+%     end_trial = cf_info.endEvent(idx_trial);
+%     c_features = features(start_trial:end_trial,:);
+% 
+%     x = 1:end_trial-start_trial + 1;
+%     leg = cell(nfeatures, 1);
+%     subplot(nrows, ceil(last_trials/nrows), idx_trial- (ntrial-last_trials))
+%     hold on
+%     scatter(x, c_features, 10, colors, 'filled'); 
+%     hold off
+%     xticks_ = [(1:cf_info.sampleRate*time_plot:max(x))-1 max(x)];
+%     xticks(xticks_)
+%     xticklabels(string((xticks_)/cf_info.sampleRate))
+%     title({['cue: ' num2str(cf_data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(idx_trial))]});
+%     drawnow;
+% end
+% legend( headers{1}.channels_labels{qda.idchans});
+
+% plot with imagesc
+figure();
+nfeatures = qda.nfeatures;
+for idx_trial=ntrial-last_trials+1:ntrial
+    start_trial = cf_info.startEvent(idx_trial);
+    end_trial = cf_info.endEvent(idx_trial);
+    c_features = features(start_trial:end_trial,:);
+
+    x = 1:end_trial-start_trial + 1;
+    leg = cell(nfeatures, 1);
+    subplot(nrows, ceil(last_trials/nrows), idx_trial- (ntrial-last_trials))
+    hold on
+    imagesc(c_features')
+    hold off
+    xlim([0 size(c_features, 1)])
+    xticks_ = [(1:cf_info.sampleRate*time_plot:max(x))-1 max(x)];
+    xticks(xticks_)
+    xticklabels(string((xticks_)/cf_info.sampleRate))
+    ylim([1, nfeatures])
+    yticks(1:nfeatures)
+    yticklabels([headers{1}.channels_labels(qda.idchans)])
+    title({['cue: ' num2str(cf_data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(idx_trial))]});
+    drawnow;
+end
+sgtitle('Features received for the QDA');

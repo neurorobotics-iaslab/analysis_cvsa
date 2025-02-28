@@ -2,10 +2,10 @@
 % OUTPUT: 
 %        - signal struct contains all the data in samples x channels x trial:
 %               signal.trial: signal of each trial
-%               signal.fix: data during only fization
+%               signal.fix: data during only fixation
 %               signal.cue: data during only cue
 %               signal.cf:  data during only cf
-%        - typ is a vector 1 x trial contain the value of the cue
+%               signal.typ is a vector 1 x trial contain the value of the cue
 function signal = extract_all(s, header, classes, fix_event, cf_event, startTrial_event)
 cueDUR = header.DUR(ismember(header.TYP, classes));
 cueTYP = header.TYP(ismember(header.TYP, classes));
