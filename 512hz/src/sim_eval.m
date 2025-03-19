@@ -1,6 +1,7 @@
 %% in this file we use the evaluation file to check if the cf will hit or miss. We use the same processing used in ros
 clc; clearvars;% close all;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils');
+addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils');
 
 %% variables
 bands = {[8 10], [10 12], [12 14], [14 16], [8 14]};
@@ -94,6 +95,7 @@ for idx_file= 1: nFiles
     miss(idx_file) = sum(header.EVENT.TYP == miss_event);
     timeout(idx_file) = sum(header.EVENT.TYP == timeout_event);
 end
+subject = filenames{1}(1:2);
 
 %% extract all data of the cf
 % now data contains all the cf data and the info give the positions and
@@ -233,31 +235,9 @@ for idx_trial=ntrial-last_trials+1:ntrial
 end
 legend({'integrated prob of 730 with buffer', 'integrated prob of 730 with exponential', ...
         'rejection 730', 'rejection 731', 'threhsold 730', 'threhsold 731', 'qda probs'}, 'Location', 'best');
+sgtitle(['subject: ' subject ' | cf probabilities'])
 
-%% plot the features for each trial
-% plot with scatter
-% figure();
-% nfeatures = qda.nfeatures;
-% colors = rand(nfeatures, 3);
-% for idx_trial=ntrial-last_trials+1:ntrial
-%     start_trial = info.startCf(idx_trial);
-%     end_trial = info.endCf(idx_trial);
-%     c_features = features(start_trial:end_trial,:);
-% 
-%     x = 1:end_trial-start_trial + 1;
-%     leg = cell(nfeatures, 1);
-%     subplot(nrows, ceil(last_trials/nrows), idx_trial- (ntrial-last_trials))
-%     hold on
-%     scatter(x, c_features, 10, colors, 'filled'); 
-%     hold off
-%     xticks_ = [(1:info.sampleRate*time_plot:max(x))-1 max(x)];
-%     xticks(xticks_)
-%     xticklabels(string((xticks_)/info.sampleRate))
-%     title({['cue: ' num2str(data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(info.hit(idx_trial))]});
-%     drawnow;
-% end
-% legend(headers{1}.channels_labels{qda.idchans});
-
+%% plot the features for each last trial
 % plot with imagesc
 figure();
 % nfeatures = qda.nfeatures;
@@ -284,7 +264,7 @@ for idx_trial=ntrial-last_trials+1:ntrial
     title({['cue: ' num2str(cf_data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(idx_trial))]});
     drawnow;
 end
-sgtitle('Features received for the QDA');
+sgtitle(['subject: ' subject ' | features received for the QDA']);
 
 %% Compute accuracy raw prob
 count_allProb = zeros(nclasses, 4); % general, hit, miss, timeout

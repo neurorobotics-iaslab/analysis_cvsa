@@ -3,10 +3,11 @@ clc; clear all; %close all;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils');
 
 %% files variables
-subject  = 'c7';
-day      = '20250217';
-path_gdf = ['/home/paolo/cvsa_ws/record/' subject '/' day '/calibration/gdf'];
-files = dir(fullfile(path_gdf, '*.gdf')); 
+[filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
+if ischar(filenames)
+    filenames = {filenames};
+end
+subject = filenames{1}(1:2);
 
 %% processing variables
 avg = 1;
@@ -34,7 +35,7 @@ end
 channels_select = {'FP1', 'FP2', 'F3', 'FZ', 'F4', 'FC1', 'FC2', 'C3', 'CZ', 'C4', 'CP1', 'CP2', 'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'EOG', ...
         'F1', 'F2', 'FC3', 'FCZ', 'FC4', 'C1', 'C2', 'CP3', 'CP4', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
 nselected_channels = size(channels_select, 2);
-normalize_std = false;
+normalize_std = true;
 normalization_baseline = false;
 
 %% variables chancslog
@@ -42,10 +43,11 @@ chanlocs_path = '/home/paolo/chanlocs39.mat';
 load(chanlocs_path);
 
 %% Concatenate all + processing + extract selected channels
-for idx_file= 1: length(files)
-    file = fullfile(path_gdf, files(idx_file).name);
-    disp(['file (' num2str(idx_file) '/' num2str(length(files))  '): ', file]);
-    [signal,header] = sload(file);
+nFiles = length(filenames);
+for idx_file= 1: nFiles
+    fullpath_file = fullfile(pathname, filenames{idx_file});
+    disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', filenames{idx_file}]);
+    [signal,header] = sload(fullpath_file);
     signal = signal(:,1:nchannels);
     channels_label = header.Label;
     [~, idx_channels_select] = ismember(channels_select, channels_label);
@@ -116,139 +118,139 @@ xlabel('Hz');
 ylabel('channel');
 title(['Total CVA Subj: ' subject]);
 
-%% compute the topoplot
-topo = cell(1, nbands);
-for idx_band = 1:nbands
-    if normalization_baseline
-        baseline = mean(data{1}.fix, 1)
-        topo{idx_band}.cf = data{idx_band}.cf ./ repmat(baseline, [size(data{idx_band}.cf, 1) 1 1]);
-    else
-        topo{idx_band}.cf = data{idx_band}.cf;
-    end
-end
+% %% compute the topoplot
+% topo = cell(1, nbands);
+% for idx_band = 1:nbands
+%     if normalization_baseline
+%         baseline = mean(data{1}.fix, 1)
+%         topo{idx_band}.cf = data{idx_band}.cf ./ repmat(baseline, [size(data{idx_band}.cf, 1) 1 1]);
+%     else
+%         topo{idx_band}.cf = data{idx_band}.cf;
+%     end
+% end
+% 
+% % show the plotting
+% figure();
+% handles = [];
+% cl = -inf;
+% for idx_band = 1:nbands
+%     data_1 = mean(mean(topo{idx_band}.cf(:,:,data{idx_band}.typ == classes(1)), 3), 1);
+%     data_2 = mean(mean(topo{idx_band}.cf(:,:,data{idx_band}.typ == classes(2)), 3), 1);
+%     diff = data_2 - data_1;
+%     chanlocs_data = zeros(nchannels, 1);
+%     chanlocs_data(idx_channels_select) = diff(idx_channels_select);
+%     subplot(2, ceil(nbands/2), idx_band)
+%     topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))], 'electrodes', 'labelpoint');
+%     cl = max(cl, max(abs(chanlocs_data)));
+%     handles = [handles gca];
+%     axis image;
+%     colorbar;
+%     title(['band: ' bands_str{idx_band}])
+% end
+% 
+% 
+% set(handles, 'clim', [-cl cl])
+% all_title = 'br-bl | only cf | all files concatenated';
+% sgtitle(all_title)
 
-% show the plotting
-figure();
-handles = [];
-cl = -inf;
-for idx_band = 1:nbands
-    data_1 = mean(mean(topo{idx_band}.cf(:,:,data{idx_band}.typ == classes(1)), 3), 1);
-    data_2 = mean(mean(topo{idx_band}.cf(:,:,data{idx_band}.typ == classes(2)), 3), 1);
-    diff = data_2 - data_1;
-    chanlocs_data = zeros(nchannels, 1);
-    chanlocs_data(idx_channels_select) = diff(idx_channels_select);
-    subplot(2, ceil(nbands/2), idx_band)
-    topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))], 'electrodes', 'labelpoint');
-    cl = max(cl, max(abs(chanlocs_data)));
-    handles = [handles gca];
-    axis image;
-    colorbar;
-    title(['band: ' bands_str{idx_band}])
-end
+% %% show topoplot in time
+% step_time_toplot = 0.25; %sec
+% rows_plot = 3;
+% handles = [];
+% cl = -inf;
+% for idx_band=1:nbands
+%     sampleRate = headers{idx_band}.sampleRate;
+%     nplotFIX = floor(size(data{idx_band}.fix, 1) / (sampleRate * step_time_toplot));
+%     nplotCUE = floor(size(data{idx_band}.cue, 1) / (sampleRate * step_time_toplot));
+%     nplotCF  = floor(size(data{idx_band}.cf,  1) / (sampleRate * step_time_toplot));
+%     nplot = nplotFIX + nplotCUE + nplotCF;
+% 
+%     figure();
+%     
+%     % plot the fixation
+%     for idx_nplot = 1:nplotFIX
+%         start_topo = (idx_nplot - 1) * (sampleRate * step_time_toplot) + 1;
+%         end_topo   = start_topo + (sampleRate * step_time_toplot) - 1;
+%         data_1 = mean(mean(data{idx_band}.fix(start_topo:end_topo,:, data{idx_band}.typ == classes(1)), 3), 1);
+%         data_2 = mean(mean(data{idx_band}.fix(start_topo:end_topo,:, data{idx_band}.typ == classes(2)), 3), 1);
+%         diff = data_2 - data_1;
+%         chanlocs_data = zeros(nchannels, 1);
+%         chanlocs_data(idx_channels_select) = diff(idx_channels_select);
+%         subplot(rows_plot, ceil(nplot/rows_plot), idx_nplot)
+%         topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
+%         cl = max(cl, max(abs(chanlocs_data)));
+%         handles = [handles gca];
+%         axis image;
+%         colorbar;
+%         title(['FIX: ' num2str(((start_topo -1 ) / sampleRate)) 's - ' num2str((end_topo/sampleRate)) 's'])
+%     end
+% 
+%     % plot the cue
+%     for idx_nplot = 1:nplotCUE
+%         start_topo = (idx_nplot - 1) * (sampleRate * step_time_toplot) + 1;
+%         end_topo   = start_topo + (sampleRate * step_time_toplot) - 1;
+%         data_1 = mean(mean(data{idx_band}.cue(start_topo:end_topo,:, data{idx_band}.typ == classes(1)), 3), 1);
+%         data_2 = mean(mean(data{idx_band}.cue(start_topo:end_topo,:, data{idx_band}.typ == classes(2)), 3), 1);
+%         diff = data_2 - data_1;
+%         chanlocs_data = zeros(nchannels, 1);
+%         chanlocs_data(idx_channels_select) = diff(idx_channels_select);
+%         subplot(rows_plot, ceil(nplot/rows_plot), idx_nplot + nplotFIX)
+%         topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
+%         cl = max(cl, max(abs(chanlocs_data)));
+%         handles = [handles gca];
+%         axis image;
+%         colorbar;
+%         title(['CUE: ' num2str(((start_topo -1)/ sampleRate)) 's - ' num2str((end_topo/sampleRate)) 's'])
+%     end
+% 
+%     % plot the cf
+%     for idx_nplot = 1:nplotCF
+%         start_topo = (idx_nplot - 1) * (sampleRate * step_time_toplot) + 1;
+%         end_topo   = start_topo + (sampleRate * step_time_toplot) - 1;
+%         data_1 = mean(mean(data{idx_band}.cf(start_topo:end_topo,:, data{idx_band}.typ == classes(1)), 3), 1);
+%         data_2 = mean(mean(data{idx_band}.cf(start_topo:end_topo,:, data{idx_band}.typ == classes(2)), 3), 1);
+%         diff = data_2 - data_1;
+%         chanlocs_data = zeros(nchannels, 1);
+%         chanlocs_data(idx_channels_select) = diff(idx_channels_select);
+%         subplot(rows_plot, ceil(nplot/rows_plot), idx_nplot + nplotFIX + nplotCUE)
+%         topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
+%         cl = max(cl, max(abs(chanlocs_data)));
+%         handles = [handles gca];
+%         axis image;
+%         colorbar;
+%         title(['CF: ' num2str(((start_topo -1) / sampleRate)) 's - ' num2str((end_topo/sampleRate)) 's'])
+%     end
+% 
+%     set(handles, 'clim', [-cl cl])
+%     all_title = ['br-bl | band: ' bands_str{idx_band} ' | all files concatenated'];
+%     sgtitle(all_title)
+% end
 
-
-set(handles, 'clim', [-cl cl])
-all_title = 'br-bl | only cf | all files concatenated';
-sgtitle(all_title)
-
-%% show topoplot in time
-step_time_toplot = 0.25; %sec
-rows_plot = 3;
-handles = [];
-cl = -inf;
-for idx_band=1:nbands
-    sampleRate = headers{idx_band}.sampleRate;
-    nplotFIX = floor(size(data{idx_band}.fix, 1) / (sampleRate * step_time_toplot));
-    nplotCUE = floor(size(data{idx_band}.cue, 1) / (sampleRate * step_time_toplot));
-    nplotCF  = floor(size(data{idx_band}.cf,  1) / (sampleRate * step_time_toplot));
-    nplot = nplotFIX + nplotCUE + nplotCF;
-
-    figure();
-    
-    % plot the fixation
-    for idx_nplot = 1:nplotFIX
-        start_topo = (idx_nplot - 1) * (sampleRate * step_time_toplot) + 1;
-        end_topo   = start_topo + (sampleRate * step_time_toplot) - 1;
-        data_1 = mean(mean(data{idx_band}.fix(start_topo:end_topo,:, data{idx_band}.typ == classes(1)), 3), 1);
-        data_2 = mean(mean(data{idx_band}.fix(start_topo:end_topo,:, data{idx_band}.typ == classes(2)), 3), 1);
-        diff = data_2 - data_1;
-        chanlocs_data = zeros(nchannels, 1);
-        chanlocs_data(idx_channels_select) = diff(idx_channels_select);
-        subplot(rows_plot, ceil(nplot/rows_plot), idx_nplot)
-        topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
-        cl = max(cl, max(abs(chanlocs_data)));
-        handles = [handles gca];
-        axis image;
-        colorbar;
-        title(['FIX: ' num2str(((start_topo -1 ) / sampleRate)) 's - ' num2str((end_topo/sampleRate)) 's'])
-    end
-
-    % plot the cue
-    for idx_nplot = 1:nplotCUE
-        start_topo = (idx_nplot - 1) * (sampleRate * step_time_toplot) + 1;
-        end_topo   = start_topo + (sampleRate * step_time_toplot) - 1;
-        data_1 = mean(mean(data{idx_band}.cue(start_topo:end_topo,:, data{idx_band}.typ == classes(1)), 3), 1);
-        data_2 = mean(mean(data{idx_band}.cue(start_topo:end_topo,:, data{idx_band}.typ == classes(2)), 3), 1);
-        diff = data_2 - data_1;
-        chanlocs_data = zeros(nchannels, 1);
-        chanlocs_data(idx_channels_select) = diff(idx_channels_select);
-        subplot(rows_plot, ceil(nplot/rows_plot), idx_nplot + nplotFIX)
-        topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
-        cl = max(cl, max(abs(chanlocs_data)));
-        handles = [handles gca];
-        axis image;
-        colorbar;
-        title(['CUE: ' num2str(((start_topo -1)/ sampleRate)) 's - ' num2str((end_topo/sampleRate)) 's'])
-    end
-
-    % plot the cf
-    for idx_nplot = 1:nplotCF
-        start_topo = (idx_nplot - 1) * (sampleRate * step_time_toplot) + 1;
-        end_topo   = start_topo + (sampleRate * step_time_toplot) - 1;
-        data_1 = mean(mean(data{idx_band}.cf(start_topo:end_topo,:, data{idx_band}.typ == classes(1)), 3), 1);
-        data_2 = mean(mean(data{idx_band}.cf(start_topo:end_topo,:, data{idx_band}.typ == classes(2)), 3), 1);
-        diff = data_2 - data_1;
-        chanlocs_data = zeros(nchannels, 1);
-        chanlocs_data(idx_channels_select) = diff(idx_channels_select);
-        subplot(rows_plot, ceil(nplot/rows_plot), idx_nplot + nplotFIX + nplotCUE)
-        topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
-        cl = max(cl, max(abs(chanlocs_data)));
-        handles = [handles gca];
-        axis image;
-        colorbar;
-        title(['CF: ' num2str(((start_topo -1) / sampleRate)) 's - ' num2str((end_topo/sampleRate)) 's'])
-    end
-
-    set(handles, 'clim', [-cl cl])
-    all_title = ['br-bl | band: ' bands_str{idx_band} ' | all files concatenated'];
-    sgtitle(all_title)
-end
-
-%% show the difference as an image
-for idx_band=1:nbands
-    data_1 = mean(data{idx_band}.fix(:,:, data{idx_band}.typ == classes(1)), 3);
-    data_2 = mean(data{idx_band}.fix(:,:, data{idx_band}.typ == classes(2)), 3);
-    data_fix = data_2-data_1;
-    data_1 = mean(data{idx_band}.cue(:,:,data{idx_band}.typ == classes(1)), 3);
-    data_2 = mean(data{idx_band}.cue(:,:,data{idx_band}.typ == classes(2)), 3);
-    data_cue = data_2 - data_1;
-    data_1 = mean(data{idx_band}.cf(:,:,data{idx_band}.typ == classes(1)), 3);
-    data_2 = mean(data{idx_band}.cf(:,:,data{idx_band}.typ == classes(2)), 3);
-    data_cf = data_2 - data_1;
-
-    data_trials = [data_fix; data_cue; data_cf];
-
-    figure();
-    hold on;
-    imagesc(data_trials')
-    xline(size(data_fix, 1), '--k');
-    xline(size(data_cue, 1) + size(data_fix, 1), '--k');
-    xticks_ = (1:sampleRate:size(data_cue, 1) + size(data_fix, 1) + size(data_cf, 1))-1;
-    xticks(xticks_)
-    xticklabels(string((xticks_)/sampleRate))
-    yticks(1:39);
-    yticklabels(headers{1}.channels_labels);
-    title(['Difference between classes in mean | band: ' bands_str{idx_band}]);
-    hold off;
-end
+% %% show the difference as an image
+% for idx_band=1:nbands
+%     data_1 = mean(data{idx_band}.fix(:,:, data{idx_band}.typ == classes(1)), 3);
+%     data_2 = mean(data{idx_band}.fix(:,:, data{idx_band}.typ == classes(2)), 3);
+%     data_fix = data_2-data_1;
+%     data_1 = mean(data{idx_band}.cue(:,:,data{idx_band}.typ == classes(1)), 3);
+%     data_2 = mean(data{idx_band}.cue(:,:,data{idx_band}.typ == classes(2)), 3);
+%     data_cue = data_2 - data_1;
+%     data_1 = mean(data{idx_band}.cf(:,:,data{idx_band}.typ == classes(1)), 3);
+%     data_2 = mean(data{idx_band}.cf(:,:,data{idx_band}.typ == classes(2)), 3);
+%     data_cf = data_2 - data_1;
+% 
+%     data_trials = [data_fix; data_cue; data_cf];
+% 
+%     figure();
+%     hold on;
+%     imagesc(data_trials')
+%     xline(size(data_fix, 1), '--k');
+%     xline(size(data_cue, 1) + size(data_fix, 1), '--k');
+%     xticks_ = (1:sampleRate:size(data_cue, 1) + size(data_fix, 1) + size(data_cf, 1))-1;
+%     xticks(xticks_)
+%     xticklabels(string((xticks_)/sampleRate))
+%     yticks(1:39);
+%     yticklabels(headers{1}.channels_labels);
+%     title(['Difference between classes in mean | band: ' bands_str{idx_band}]);
+%     hold off;
+% end
 

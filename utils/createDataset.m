@@ -6,7 +6,7 @@
 %               - data{}.fix:
 %               - data{}.cue:
 %               - data{}.typ: contains the label of the trial (1 x trial)
-%           - selectedFeatures:  (features x 2) first element channle, second the band
+%           - selectedFeatures:  (features x 2) first element channel, second the band
 %           - bands: list of all the bands (1 x bands)
 %       OUTPUT:
 %           - dataset:

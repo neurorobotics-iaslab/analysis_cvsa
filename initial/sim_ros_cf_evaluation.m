@@ -232,98 +232,33 @@ legend({'integrated prob of 730 with buffer', 'integrated prob of 730 with expon
         'rejection 730', 'rejection 731', 'threhsold 730', 'threhsold 731', 'qda probs'}, 'Location', 'best');
 
 %% plot the features for each trial
-% plot with scatter
+% % plot with imagesc
 % figure();
-% nfeatures = qda.nfeatures;
-% colors = rand(nfeatures, 3);
+% % nfeatures = qda.nfeatures;
+% nfeatures = size(features, 2);
 % for idx_trial=ntrial-last_trials+1:ntrial
-%     start_trial = info.startCf(idx_trial);
-%     end_trial = info.endCf(idx_trial);
+%     start_trial = cf_info.startEvent(idx_trial);
+%     end_trial = cf_info.endEvent(idx_trial);
 %     c_features = features(start_trial:end_trial,:);
 % 
 %     x = 1:end_trial-start_trial + 1;
 %     leg = cell(nfeatures, 1);
 %     subplot(nrows, ceil(last_trials/nrows), idx_trial- (ntrial-last_trials))
 %     hold on
-%     scatter(x, c_features, 10, colors, 'filled'); 
+%     imagesc(c_features')
 %     hold off
-%     xticks_ = [(1:info.sampleRate*time_plot:max(x))-1 max(x)];
+%     xlim([0 size(c_features, 1)])
+%     xticks_ = [(1:cf_info.sampleRate*time_plot:max(x))-1 max(x)];
 %     xticks(xticks_)
-%     xticklabels(string((xticks_)/info.sampleRate))
-%     title({['cue: ' num2str(data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(info.hit(idx_trial))]});
+%     xticklabels(string((xticks_)/cf_info.sampleRate))
+%     ylim([0.5, nfeatures+0.5])
+%     yticks(1:nfeatures)
+%     yticklabels([headers{1}.channels_labels(qda.idchans)])
+% %     yticklabels([headers{1}.channels_labels(idx_select)])
+%     title({['cue: ' num2str(cf_data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(idx_trial))]});
 %     drawnow;
 % end
-% legend(headers{1}.channels_labels{qda.idchans});
-
-% plot with imagesc
-figure();
-% nfeatures = qda.nfeatures;
-nfeatures = size(features, 2);
-for idx_trial=ntrial-last_trials+1:ntrial
-    start_trial = cf_info.startEvent(idx_trial);
-    end_trial = cf_info.endEvent(idx_trial);
-    c_features = features(start_trial:end_trial,:);
-
-    x = 1:end_trial-start_trial + 1;
-    leg = cell(nfeatures, 1);
-    subplot(nrows, ceil(last_trials/nrows), idx_trial- (ntrial-last_trials))
-    hold on
-    imagesc(c_features')
-    hold off
-    xlim([0 size(c_features, 1)])
-    xticks_ = [(1:cf_info.sampleRate*time_plot:max(x))-1 max(x)];
-    xticks(xticks_)
-    xticklabels(string((xticks_)/cf_info.sampleRate))
-    ylim([0.5, nfeatures+0.5])
-    yticks(1:nfeatures)
-    yticklabels([headers{1}.channels_labels(qda.idchans)])
-%     yticklabels([headers{1}.channels_labels(idx_select)])
-    title({['cue: ' num2str(cf_data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(idx_trial))]});
-    drawnow;
-end
-sgtitle('Features received for the QDA');
-
-%% Compute accuracy raw prob
-count_allProb = zeros(nclasses, 4); % general, hit, miss, timeout
-count_correctProb = zeros(nclasses, 4);
-
-for idx_trial=1:ntrial
-    start_cf = cf_info.startEvent(idx_trial);
-    end_cf = cf_info.endEvent(idx_trial);
-
-    c_cueTYP = cf_data{1}.typ(idx_trial);
-    c_prob = probs(start_cf:end_cf, :);
-    idx_cue = find(classes == c_cueTYP);
-    c_prob = c_prob(:,idx_cue);
-    ths_rejection = cf_info.ths_rejection(idx_trial,idx_cue);
-
-    count_allProb(idx_cue, 1) = count_allProb(idx_cue, 1) + size(c_prob, 1);
-    count_correctProb(idx_cue, 1) = count_correctProb(idx_cue, 1) + sum(c_prob > ths_rejection);
-
-    if cf_info.hit(idx_trial) == hit_event
-        count_allProb(idx_cue, 2) = count_allProb(idx_cue, 2) + size(c_prob, 1);
-        count_correctProb(idx_cue, 2) = count_correctProb(idx_cue, 2) + sum(c_prob > ths_rejection);
-    elseif cf_info.hit(idx_trial) == miss_event
-        count_allProb(idx_cue, 3) = count_allProb(idx_cue, 3) + size(c_prob, 1);
-        count_correctProb(idx_cue, 3) = count_correctProb(idx_cue, 3) + sum(c_prob > ths_rejection);
-    elseif cf_info.hit(idx_trial) == timeout_event
-        count_allProb(idx_cue, 4) = count_allProb(idx_cue, 4) + size(c_prob, 1);
-        count_correctProb(idx_cue, 4) = count_correctProb(idx_cue, 4) + sum(c_prob > ths_rejection);
-    end
-end
-disp('Raw accuracy');
-for idx_class=1:nclasses
-    disp(['   class: ' num2str(classes(idx_class))]);
-    disp(['      Accuracy: ' num2str(count_correctProb(idx_class, 1)/count_allProb(idx_class, 1)) ...
-        ' | correct: ' num2str(count_correctProb(idx_class, 1)) ' all: ' num2str(count_allProb(idx_class, 1))]);
-    disp(['      Accuracy while hit: ' num2str(count_correctProb(idx_class, 2) / count_allProb(idx_class, 2)) ' | ' ...
-        'correct: ' num2str(count_correctProb(idx_class, 2)) ' all: ' num2str(count_allProb(idx_class, 2))]);
-    disp(['      Accuracy while miss: ' num2str(count_correctProb(idx_class, 3) / count_allProb(idx_class, 3)) ' | ' ...
-        'correct: ' num2str(count_correctProb(idx_class, 3)) ' all: ' num2str(count_allProb(idx_class, 3))]);
-    disp(['      Accuracy while timeout: ' num2str(count_correctProb(idx_class, 4) / count_allProb(idx_class, 4)) ' | ' ...
-        'correct: ' num2str(count_correctProb(idx_class, 4)) ' all: ' num2str(count_allProb(idx_class, 4))]);
-end
-disp(['   General ' num2str(sum(count_correctProb(:,1))/sum(count_allProb(:,1))) ]);
+% sgtitle('Features received for the QDA');
 
 %% Compute accuracy trial
 disp('Trial acuracy')
@@ -339,72 +274,102 @@ disp(['   Mean all file: Accuracy: ' num2str(count_allProb(1)/sum(count_allProb)
     ' | hit: ' num2str(count_allProb(1)) ' miss: ' num2str(count_allProb(2)) ' timeout: ' num2str(count_allProb(3))])
 
 %% QDA analysis
-y_true_label = nan(nsamples, 1);
-for idx_trial=1:ntrial
-    c_start = cf_info.startEvent(idx_trial);
-    c_end = cf_info.endEvent(idx_trial);
-    if cf_data{1}.typ(idx_trial) == classes(1)
-        y_true_label(c_start:c_end) = classes(1);
-    else
-        y_true_label(c_start:c_end) = classes(2);
-    end
+disp('QDA analysis');
+% take the y_true and the predict for each file
+c_filenames = cell(1, nFiles + 1);
+y_true_label = cell(1, nFiles+1);
+y_predict_label = cell(1, nFiles + 1);
+probs_file = cell(1, nFiles + 1);
+for i = 1:size(y_true_label, 2)
+    y_true_label{i} = [];
+    y_predict_label{i} = [];
+    c_filenames{i} = num2str(i);
+    probs_file{i} = [];
 end
-
-y_predict_label = nan(nsamples, 1);
+c_filenames{end} = 'all';
+idx_file = 1;
+end_file = [cf_info.startNewFile; size(cf_data{1}.data, 1)];
+end_file = end_file(2:end);
 positive_class = 1;
 negative_class = 2;
-for idx_sample=1:nsamples
-    feature = features(idx_sample,:);
-    prob = apply_qda(qda,feature);
-    if prob(positive_class) > 1/nclasses
-        y_predict_label(idx_sample) = classes(positive_class);
-    else
-        y_predict_label(idx_sample) = classes(negative_class);
+for idx_trial = 1:ntrial
+    c_start = cf_info.startEvent(idx_trial);
+    c_end = cf_info.endEvent(idx_trial);
+    if c_end > end_file(idx_file)
+        idx_file = idx_file + 1;
+    end
+
+    if cf_info.hit(idx_trial) ~= timeout_event % compute only hit and miss
+        if cf_data{1}.typ(idx_trial) == classes(1)
+            y_true_label{idx_file} = cat(1, y_true_label{idx_file}, repmat(classes(1), c_end - c_start + 1, 1));
+            y_true_label{end} = cat(1, y_true_label{end}, repmat(classes(1), c_end - c_start + 1, 1));
+        else
+            y_true_label{idx_file} = cat(1, y_true_label{idx_file}, repmat(classes(2), c_end - c_start + 1, 1));
+            y_true_label{end} = cat(1, y_true_label{end}, repmat(classes(2), c_end - c_start + 1, 1));
+        end
+
+        c_features = features(c_start:c_end,:);
+        for idx_c_f = 1:size(c_features, 1)
+            c_f = c_features(idx_c_f, :);
+            prob = apply_qda(qda, c_f);
+
+            probs_file{idx_file} = cat(1, probs_file{idx_file}, prob);
+            probs_file{end} = cat(1, probs_file{end}, prob);
+
+            if prob(positive_class) > 1/nclasses
+                y_predict_label{idx_file} = cat(1, y_predict_label{idx_file}, classes(positive_class));
+                y_predict_label{end} = cat(1, y_predict_label{end}, classes(positive_class));
+            else
+                y_predict_label{idx_file} = cat(1, y_predict_label{idx_file}, classes(negative_class));
+                y_predict_label{end} = cat(1, y_predict_label{end}, classes(negative_class));
+            end
+
+        end
     end
 end
 
-conf_matrix = confusionmat(y_true_label, y_predict_label); % [TN FP; FN TP]
-TN = conf_matrix(1,1); FP = conf_matrix(1,2); FN = conf_matrix(2,1); TP = conf_matrix(2,2);
+% compute the metrics for each files and in general
+for idx = 1:nFiles + 1
+    conf_matrix = confusionmat(y_true_label{idx}, y_predict_label{idx}); % [TN FP; FN TP]
+    disp(['   file ' c_filenames{idx}])
 
-% some metrics
-disp(['Accuracy: ', num2str((TP+TN)/(TP + TN + FP + FN))]);
-precision = TP/(TP + FP);
-disp(['Precision: ', num2str(precision)]);
-recall = TP/(TP + FN);
-disp(['Recall: ', num2str(recall)]);
-disp(['F1 score: ', num2str(2*((precision*recall)/(precision+recall)))])
-disp(['True negative rate: ', num2str(TN/(TN + FP))])
-disp(['False positive rate; ', num2str(FP/(FP + TN))])
-disp(['False negative rate: ', num2str(FN/(FN + TP))])
-disp(['Balanced Accuracy: ', num2str((recall + TN/(TN + FP))/2)]);
-disp(['MCC: ', num2str((TP*TN-FP*FN)/sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN)))]);
+    TN = conf_matrix(1,1); FP = conf_matrix(1,2); FN = conf_matrix(2,1); TP = conf_matrix(2,2);
+    disp(['      Accuracy: ', num2str((TP+TN)/(TP + TN + FP + FN))]);
+    precision = TP/(TP + FP);
+    disp(['      Precision: ', num2str(precision)]);
+    recall = TP/(TP + FN);
+    disp(['      Recall: ', num2str(recall)]);
+    disp(['      F1 score: ', num2str(2*((precision*recall)/(precision+recall)))])
+    disp(['      True negative rate: ', num2str(TN/(TN + FP))])
+    disp(['      False positive rate; ', num2str(FP/(FP + TN))])
+    disp(['      False negative rate: ', num2str(FN/(FN + TP))])
+    disp(['      Balanced Accuracy: ', num2str((recall + TN/(TN + FP))/2)]);
+    disp(['      MCC: ', num2str((TP*TN-FP*FN)/sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN)))]);
 
-% F1-score
-[precision, recall, ~] = perfcurve(y_true_label, probs(:, positive_class), classes(positive_class), 'XCrit', 'TPR', 'YCrit', 'PPV');
-f1_score = 2 * (precision .* recall) ./ (precision + recall);
-disp(['F1-Score: ', num2str(max(f1_score))]);
+    % ROC Curve
+    [roc_x, roc_y, ~, auc, optrocpt] = perfcurve(y_true_label{idx}, probs_file{idx}(:, positive_class), classes(positive_class));
+    figure;
+    subplot(1, 2, 1);
+    hold on;
+    plot(roc_x, roc_y, 'b-', 'LineWidth', 2);
+    plot([0 1], [0, 1], 'r-', 'LineWidth', 2)
+    xlabel('False Positive Rate');
+    ylabel('True Positive Rate');
+    title(['ROC Curve (AUC = ' num2str(auc) ')']);
+    hold off;
+    grid on;
 
+    % precision-recall curve
+    [prec, recall, ~, auc_pr] = perfcurve(y_true_label{idx}, probs_file{idx}(:, positive_class), classes(positive_class), 'XCrit', 'reca', 'YCrit', 'prec');
+    subplot(1, 2, 2);
+    plot(recall, prec, 'r-', 'LineWidth', 2);
+    xlabel('Recall');
+    ylabel('Precision');
+    title(['Precision-Recall Curve (AUC = ' num2str(auc_pr) ')']);
+    grid on;
 
-% ROC Curve
-[roc_x, roc_y, ~, auc, optrocpt] = perfcurve(y_true_label, probs(:, positive_class), classes(positive_class));
-figure;
-subplot(1, 2, 1);
-hold on;
-plot(roc_x, roc_y, 'b-', 'LineWidth', 2);
-plot([0 1], [0, 1], 'r-', 'LineWidth', 2)
-xlabel('False Positive Rate');
-ylabel('True Positive Rate');
-title(['ROC Curve (AUC = ' num2str(auc) ')']);
-hold off;
-grid on;
+    sgtitle(['file: ' c_filenames{idx}])
+end
 
-% precision-recall curve
-[prec, recall, ~, auc_pr] = perfcurve(y_true_label, probs(:, positive_class), classes(positive_class), 'XCrit', 'reca', 'YCrit', 'prec');
-subplot(1, 2, 2);
-plot(recall, prec, 'r-', 'LineWidth', 2);
-xlabel('Recall');
-ylabel('Precision');
-title(['Precision-Recall Curve (AUC = ' num2str(auc_pr) ')']);
-grid on;
 
 

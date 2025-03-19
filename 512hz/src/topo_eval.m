@@ -204,7 +204,7 @@ end
 % sgtitle(['subject: ' subject ' | difference between classes in mean durign cf ']);
 
 %% show the topoplot of last n trial with respect to the fixation
-last_trials = 20;
+trials4file = 20;
 rows_plot = 2;
 handles = [];
 cl = -inf;
@@ -213,7 +213,7 @@ for idx_band=nbands:nbands
 
     figure();
 
-    for idx_trial = ntrials-last_trials+1:ntrials
+    for idx_trial = ntrials-trials4file+1:ntrials
         cueAsked = cf_data{1}.typ(idx_trial);
 
         c_cf_data = squeeze(cf_data_reshape{idx_band}(:,:,idx_trial));
@@ -225,7 +225,7 @@ for idx_band=nbands:nbands
         diff = c_mean_cf_data - c_mean_fix_data;
         chanlocs_data = zeros(nchannels, 1);
         chanlocs_data(idx_channels_select) = diff(idx_channels_select);
-        subplot(rows_plot, ceil(last_trials/rows_plot), idx_trial - ntrials+last_trials)
+        subplot(rows_plot, ceil(trials4file/rows_plot), idx_trial - ntrials+trials4file)
         topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
         cl = max(cl, max(abs(chanlocs_data)));
         handles = [handles gca];
@@ -243,6 +243,8 @@ end
 fix_data = cell(1, nbands);
 cue_data = cell(1, nbands);
 cf_data = cell(1, nbands); 
+step_time_toplot = 0.5; %sec
+rows_plot = 2;
 
 for idx_band = 1:nbands
     [cf_data{idx_band}, cf_info] = extract_event(signals{idx_band}, headers{idx_band}, classes, [cf_event]);
@@ -251,47 +253,50 @@ for idx_band = 1:nbands
 end
 
 
-last_trials = 20;
+trials4file = 20;
 ntrial = size(cf_data{1}.typ,1);
 nfeatures = size(idx_channels_select, 2);
 nrows = 2;
-for idx_band =nbands:nbands
-    figure();
-    handles = [];
-    cl = -inf;
-    for idx_trial=ntrial-last_trials+1:ntrial
-        start_cf = cf_info.startEvent(idx_trial);
-        end_cf = cf_info.endEvent(idx_trial);
-        start_cue = cue_info.startEvent(idx_trial);
-        end_cue = cue_info.endEvent(idx_trial);
-        start_fix = fix_info.startEvent(idx_trial);
-        end_fix = fix_info.endEvent(idx_trial);
+for idx_file = 1:nFiles
+    for idx_band =nbands:nbands
+        figure();
+        handles = [];
+        cl = -inf;
+        for idx_trial=1:trials4file
+            c_idx_trial = (idx_file - 1)*trials4file + idx_trial;
+            start_cf = cf_info.startEvent(c_idx_trial);
+            end_cf = cf_info.endEvent(c_idx_trial);
+            start_cue = cue_info.startEvent(c_idx_trial);
+            end_cue = cue_info.endEvent(c_idx_trial);
+            start_fix = fix_info.startEvent(c_idx_trial);
+            end_fix = fix_info.endEvent(c_idx_trial);
 
-        fix_features = fix_data{idx_band}.data(start_fix:end_fix, idx_channels_select);
-        cue_features = cue_data{idx_band}.data(start_cue:end_cue, idx_channels_select);
-        cf_features = cf_data{idx_band}.data(start_cf:end_cf, idx_channels_select);
-        c_features = [fix_features; cue_features; cf_features];
+            fix_features = fix_data{idx_band}.data(start_fix:end_fix, idx_channels_select);
+            cue_features = cue_data{idx_band}.data(start_cue:end_cue, idx_channels_select);
+            cf_features = cf_data{idx_band}.data(start_cf:end_cf, idx_channels_select);
+            c_features = [fix_features; cue_features; cf_features];
 
-        x = 1:size(c_features, 1) + 1;
-        subplot(nrows, ceil(last_trials/nrows), idx_trial- (ntrial-last_trials))
-        hold on
-        imagesc(c_features')
-        plot([size(fix_features,1) size(fix_features, 1)], ylim, 'Color', 'k');
-        plot([size(fix_features,1) + size(cue_features, 1) size(fix_features, 1)+ size(cue_features, 1)], ylim, 'Color', 'k');
-        hold off
-        xlim([0 size(c_features, 1)])
-        xticks_ = [(1:cf_info.sampleRate*step_time_toplot:max(x))-1 max(x)];
-        xticks(xticks_)
-        xticklabels(string((xticks_)/cf_info.sampleRate))
-        ylim([0.5, nfeatures+0.5])
-        yticks(1:nfeatures)
-        yticklabels([headers{1}.channels_labels(idx_channels_select)])
-        title({['cue: ' num2str(cf_data{1}.typ(idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(idx_trial))]});
-        drawnow;
-        handles = [handles gca];
-        cl = max(cl, max(abs(c_features), [], 'all'));
+            x = 1:size(c_features, 1) + 1;
+            subplot(nrows, ceil(trials4file/nrows), idx_trial)
+            hold on
+            imagesc(c_features')
+            plot([size(fix_features,1) size(fix_features, 1)], ylim, 'Color', 'k');
+            plot([size(fix_features,1) + size(cue_features, 1) size(fix_features, 1)+ size(cue_features, 1)], ylim, 'Color', 'k');
+            hold off
+            xlim([0 size(c_features, 1)])
+            xticks_ = [(1:cf_info.sampleRate*step_time_toplot:max(x))-1 max(x)];
+            xticks(xticks_)
+            xticklabels(string((xticks_)/cf_info.sampleRate))
+            ylim([0.5, nfeatures+0.5])
+            yticks(1:nfeatures)
+            yticklabels([headers{1}.channels_labels(idx_channels_select)])
+            title({['cue: ' num2str(cf_data{1}.typ(c_idx_trial)) ' | trial ' num2str(idx_trial)] [' | ' num2str(cf_info.hit(c_idx_trial))]});
+            drawnow;
+            handles = [handles gca];
+            cl = max(cl, max(abs(c_features), [], 'all'));
+        end
+        set(handles, 'clim', [0 cl])
+        sgtitle(['subject: ' subject ' | file ' filenames{idx_file} ' | band: ' bands_str{idx_band}]);
+%         colorbar;
     end
-    set(handles, 'clim', [0 cl])
-    sgtitle(['subject: ' subject ' | last ' num2str(last_trials) ' trials features' ' | band: ' bands_str{idx_band}]);
-    colorbar;
 end

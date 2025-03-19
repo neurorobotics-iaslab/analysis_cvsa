@@ -22,8 +22,13 @@ function qda = loadQDA(path_file)
     lbchans = cell(1, qda.nfeatures);
     for i = 1:qda.nfeatures
         bands(i, :) = [c_qda.QdaCfg.params.band{i, 1}, c_qda.QdaCfg.params.band{i, 2}];
-        idchans(i) = c_qda.QdaCfg.params.idchans{i};
-        lbchans{i} = c_qda.QdaCfg.params.chans{i};
+        if qda.nfeatures == 1
+            idchans(i) = c_qda.QdaCfg.params.idchans;
+            lbchans{i} = c_qda.QdaCfg.params.chans{i};
+        else
+            idchans(i) = c_qda.QdaCfg.params.idchans{i};
+            lbchans{i} = c_qda.QdaCfg.params.chans{i};
+        end
     end
     qda.bands = bands;
     qda.idchans = idchans;
