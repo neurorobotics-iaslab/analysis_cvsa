@@ -23,25 +23,27 @@ count_trials4class = accumarray(idx_classes, 1);
 trial4class = min(count_trials4class);
 
 % reshape the data
-X = [];
-y = [];
-info.startTrial    = [];
-info.bandSelected  = [];
-info.chSelected    = [];
 info.channelsLabel = channels_label;
 nbands = size(bands, 2);
-ntrial = size(data{1}.typ);
+ntrial = size(data{1}.typ, 1);
+info.startTrial    = nan(ntrial,1);
 features = cell(1, nbands);
+nsample_cf = size(data{1}.cf, 1);
+for i = 1:nbands
+    features{i} = nan(nsample_cf*ntrial, size(data{1}.cf, 2));
+end
+y = nan(nsample_cf*ntrial, 1);
 for idx_band=1:nbands
     count_trials4class = [0, 0];
     for idx_trial=1:ntrial
         idx_class = find(classes == data{idx_band}.typ(idx_trial));
         if ~(count_trials4class(idx_class) >= trial4class)
             if idx_band == 1 % we need it only once
-                info.startTrial = cat(1, info.startTrial, size(features{idx_band}, 1));
-                y = cat(1, y, repmat(classes(idx_class), size(data{idx_band}.cf, 1), 1));
+                info.startTrial(idx_trial) = (idx_trial-1)*nsample_cf;
+                y((idx_trial-1)*nsample_cf+1:idx_trial*nsample_cf) = repmat(classes(idx_class), size(data{idx_band}.cf, 1), 1);
             end
-            features{idx_band} = cat(1, features{idx_band}, data{idx_band}.cf(:,:,idx_trial));
+%             features{idx_band} = cat(1, features{idx_band}, data{idx_band}.cf(:,:,idx_trial));
+            features{idx_band}((idx_trial-1)*nsample_cf +1:idx_trial*nsample_cf,:) = data{idx_band}.cf(:,:,idx_trial);
             count_trials4class(idx_class) = count_trials4class(idx_class) + 1;
         end
     end
@@ -49,12 +51,16 @@ end
 
 % extract only useful data
 nfeatures = size(selectedFeatures, 1);
+X = nan(nsample_cf*ntrial, nfeatures);
+info.bandSelected  = nan(nfeatures, 2);
+info.chSelected    = nan(nfeatures, 1);
 
 for idx_feature = 1:nfeatures
     tmp_features = features{selectedFeatures(idx_feature, 2)}; % take the correct band
-    X = cat(2, X, tmp_features(:,selectedFeatures(idx_feature, 1))); % take the chns
-    info.chSelected = cat(1, info.chSelected, selectedFeatures(idx_feature, 1));
-    info.bandSelected = cat(1, info.bandSelected, bands{selectedFeatures(idx_feature, 2)});
+%     X = cat(2, X, tmp_features(:,selectedFeatures(idx_feature, 1))); % take the chns
+    X(:,idx_feature) = tmp_features(:,selectedFeatures(idx_feature, 1));
+    info.chSelected(idx_feature) = selectedFeatures(idx_feature, 1);
+    info.bandSelected(idx_feature,:) = bands{selectedFeatures(idx_feature, 2)};
 end
 end
 

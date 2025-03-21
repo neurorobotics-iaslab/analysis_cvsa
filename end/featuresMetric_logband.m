@@ -4,6 +4,7 @@ addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 
 %% Initialization
+create_dataset = false;
 a = 4:2:18;
 b = a+2;
 c = [a; b];
@@ -15,6 +16,8 @@ end
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
+% channels_select = {'FP1', 'FP2', 'F3', 'FZ', 'F4', 'FC1', 'FC2', 'C3', 'CZ', 'C4', 'CP1', 'CP2', 'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'EOG', ...
+%         'F1', 'F2', 'FC3', 'FCZ', 'FC4', 'C1', 'C2', 'CP3', 'CP4', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
 signals = cell(1, nbands);
 headers = cell(1, nbands);
 for idx_band = 1:nbands
@@ -220,14 +223,15 @@ for c_nf=1:max_nfeatures_allxw
     [tot_sortedValues, tot_linearIndices_calib] = maxk(fisher_all_calib(:), c_nf);
     [tot_rows, tot_cols] = ind2sub(size(fisher_all_calib), tot_linearIndices_calib);
 
-    selectedFeatures = [channelsSelected(tot_rows)', tot_cols];
-    disp(['create the dataset with ' num2str(c_nf) ' features'])
-    [X, y, info] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
-    info.sampleRate = sampleRate;
-    info.filterOrder = filterOrder;
-    save_path = [pathname(1:end-4) 'test/dataset/dataset' num2str(c_nf) '.mat'];
-    save(save_path, 'X', 'y', 'info')
-
+    if create_dataset
+        selectedFeatures = [channelsSelected(tot_rows)', tot_cols];
+        disp(['create the dataset with ' num2str(c_nf) ' features'])
+        [X, y, info] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
+        info.sampleRate = sampleRate;
+        info.filterOrder = filterOrder;
+        save_path = [pathname(1:end-4) 'test/dataset/dataset' num2str(c_nf) '.mat'];
+        save(save_path, 'X', 'y', 'info')
+    end
 
     for idx_w=1:nwindows
         c_fischer = fischers(:,:,idx_w); % take only interested values

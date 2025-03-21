@@ -94,13 +94,19 @@ end
 if ischar(qda_filenames)
     qda_filenames = {qda_filenames};
 end
+%%
 subject = pathname(28:29);
 numbers = cellfun(@(x) str2double(regexp(x, '\d+', 'match', 'once')), qda_filenames);
 [~, sortedIdx] = sort(numbers);
 qda_filenames = qda_filenames(sortedIdx);
 nqda = size(qda_filenames, 2);
 classified_data = cell(1, nqda);
+ntrial = size(data{1}.cf,3);
+for i = 1:nqda
+    classified_data{i} = nan(size(data{1}.cf, 1)*ntrial, 2);
+end
 classified_info = cell(1, nqda);
+acc_total = zeros(nqda, 1);
 
 for idx_qda = 1:nqda
     fullpath_file = fullfile(pathname, qda_filenames{idx_qda});
@@ -112,25 +118,26 @@ for idx_qda = 1:nqda
         selectedFeatures = [qda.idchans, c_idx_band];
     else
         c_idx_band = [];
-        for i = 1:length(qda.bands)
-            c_idx_band = [c_idx_band find(cellfun(@(x) isequal(x, qda.bands(i,:)), bands))];
+        for i = 1:length(qda.bands) 
+            c_idx_band = [c_idx_band find(ismember(cell2mat(bands'), qda.bands(i,:), 'rows'))];
         end
         selectedFeatures = [qda.idchans', c_idx_band'];
     end
-    disp(['n features: ' num2str(size(selectedFeatures, 1))])
     [X, y, classified_info{idx_qda}] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
 
-    classified_tmp = nan(size(X, 1), nclasses);
-    for idx_sample = 1:size(X, 1)
-        classified_tmp(idx_sample,:) = apply_qda(qda, X(idx_sample,:));
-    end
-    classified_data{idx_qda} = classified_tmp;
+    classified_tmp = apply_qda_matrix(qda, X);
+    classified_data{idx_qda}(:,:) = classified_tmp;
+
+    y_pred = ones(size(classified_tmp, 1), 1) * classes(1);
+    y_pred(classified_tmp(:,1) < 0.5) = classes(2);
+    acc_total(idx_qda) = sum(y_pred == y) / length(y);
+    disp(['  accuracy all runs: ' num2str(acc_total(idx_qda))])
 end
+
 %% plot the last 20 trials
 n_last = 20;
 nrows = 2;
 ntrial = size(classified_info{1}.startTrial,1);
-cl = -inf;
 handles = [];
 figure();
 for idx_trial = ntrial - n_last + 1 : ntrial
@@ -138,7 +145,7 @@ for idx_trial = ntrial - n_last + 1 : ntrial
     if idx_trial == ntrial
         c_end = size(classified_data{1}, 1);
     else 
-        c_end = classified_info{1}.startTrial(idx_trial + 1) - 1;
+        c_end = classified_info{1}.startTrial(idx_trial + 1);
     end
 
     qda_performance = nan(nqda, c_end-c_start + 1);
@@ -155,53 +162,120 @@ for idx_trial = ntrial - n_last + 1 : ntrial
     xticks(x_label)
     xticklabels(x_label / sampleRate)
     handles = [handles, gca];
-    cl = max(cl, max(abs(qda_performance), [], 'all'));
     title(['cue: ' num2str(data{1}.typ(idx_trial))])
     drawnow;
 end
-set(handles, 'clim', [0 cl])
+set(handles, 'clim', [0 1])
 sgtitle([ subject ' | Only the cf | 1 means 730, 0 means 731'])
 
-%% plot the mean for each class
-a =  classified_info{1}.startTrial;
-b = a(2:end); b = [b; size(X,1)];
-minDurCf = min(b-a);
-data_cf = nan(minDurCf, nqda, nclasses);
-nrows = 4;
+%% plot each qda and each trial
+start_trial_id = 41;
+end_trial_id = ntrial;
+nrows = 2;
+nfigure = 4;
+idx_figure = 1;
+ntrial = size(classified_info{1}.startTrial,1);
+handles = [];
+a = classified_info{1}.startTrial;
+b = a(2:end);
+b = [b; size(classified_data{1}, 1)];
+min_durCF = min(b-a);
+idx_max_acc = nan;
+max_acc = -inf;
+figure();
 for idx_qda = 1:nqda
+    needed_trial = start_trial_id:end_trial_id;
+    n_needed_trial = length(needed_trial);
+    qda_performance = nan(n_needed_trial, min_durCF);
+    y_label = cell(n_needed_trial, 1);
     c_data = classified_data{idx_qda};
-    c_data_cf = nan(minDurCf, ntrial);
-    for idx_trial = 1:ntrial
+    y_pred_selTrial = nan(n_needed_trial*min_durCF, 1);
+    y_true_selTrial = nan(n_needed_trial*min_durCF, 1);
+    for idx_needed_trial = 1:n_needed_trial
+        idx_trial = needed_trial(idx_needed_trial);
         c_start = classified_info{1}.startTrial(idx_trial) + 1;
-        c_end = c_start + minDurCf - 1;
-        c_data_cf(:,idx_trial) = c_data(c_start:c_end,1);
+        if idx_trial == ntrial
+            c_end = size(classified_data{1}, 1);
+        else
+            c_end = classified_info{1}.startTrial(idx_trial + 1);
+        end
+        qda_performance(idx_needed_trial,:) = c_data(c_start:c_end,1);
+
+        y_pred = ones(min_durCF, 1) * classes(1);
+        y_pred(qda_performance(idx_needed_trial,:) < 0.5) = classes(2);
+        y = repmat(data{1}.typ(idx_trial), min_durCF, 1);
+        y_label{idx_needed_trial} = [num2str(data{1}.typ(idx_trial)) ': ' sprintf('%.2f', sum(y_pred == y) / min_durCF*100)];
+
+        y_pred_selTrial((idx_needed_trial-1)*min_durCF+1:idx_needed_trial*min_durCF) = y_pred;
+        y_true_selTrial((idx_needed_trial-1)*min_durCF+1:idx_needed_trial*min_durCF) = y;
     end
 
-    data_cf(:,idx_qda, 1) = mean(c_data_cf(:,data{1}.typ == classes(1)), 2);
-    data_cf(:,idx_qda, 2) = mean(c_data_cf(:,data{1}.typ == classes(2)), 2);
+    acc_selTrial = sum(y_pred_selTrial == y_true_selTrial) / length(y_true_selTrial)*100;
+    acc_selTrial_src = sprintf('%.2f', acc_selTrial);
+    if max_acc < acc_selTrial
+        idx_max_acc = idx_qda;
+        max_acc = acc_selTrial;
+    end
+
+    if idx_qda == round(nqda/nfigure)*idx_figure + 1
+        set(handles, 'clim', [0 1])
+        sgtitle([ subject ' | Only the cf | 1 means 730, 0 means 731'])
+        handles = [];
+        idx_figure = idx_figure + 1;
+        figure();
+    end
+
+    correctness = (y_pred_selTrial == y_true_selTrial);
+    correctness_matrix = reshape(correctness, [min_durCF, n_needed_trial])';
+    green_component = correctness_matrix .* qda_performance; % if prediction correct
+    red_component = (~correctness_matrix) .* qda_performance; % 
+    color_map = cat(3, red_component, green_component, zeros(size(green_component))); % No blue component
+    subplot(nrows, ceil(nqda/nrows/nfigure), mod(idx_qda-1, round(nqda/nfigure)) + 1)
+    imagesc(color_map)
+    yticks(1:ntrial)
+    yticklabels(y_label);
+    xticks(x_label)
+    xticklabels(x_label / sampleRate)
+    handles = [handles, gca];
+    title(['qda ' num2str(idx_qda) ' | acc: ' acc_selTrial_src])
+    drawnow;
 end
+set(handles, 'clim', [0 1])
+sgtitle([ subject ' | Only the cf | 1 means 730, 0 means 731'])
 
-handles = [];
-cl = max(data_cf, [], 'all');
-x_label = 0:256:size(data_cf, 1);
-figure()
-subplot(1,2,1)
-imagesc(data_cf(:,:,1)')
-yticks(1:nqda)
-yticklabels(1:nqda)
+%%
+idx_qda = idx_max_acc;
+c_data = classified_data{idx_qda};
+for idx_needed_trial = 1:n_needed_trial
+    idx_trial = needed_trial(idx_needed_trial);
+    c_start = classified_info{1}.startTrial(idx_trial) + 1;
+    if idx_trial == ntrial
+        c_end = size(classified_data{1}, 1);
+    else
+        c_end = classified_info{1}.startTrial(idx_trial + 1);
+    end
+    qda_performance(idx_needed_trial,:) = c_data(c_start:c_end,1);
+
+    y_pred = ones(min_durCF, 1) * classes(1);
+    y_pred(qda_performance(idx_needed_trial,:) < 0.5) = classes(2);
+    y = repmat(data{1}.typ(idx_trial), min_durCF, 1);
+    y_label{idx_needed_trial} = [num2str(data{1}.typ(idx_trial)) ': ' sprintf('%.2f', sum(y_pred == y) / min_durCF*100)];
+
+    y_pred_selTrial((idx_needed_trial-1)*min_durCF+1:idx_needed_trial*min_durCF) = y_pred;
+    y_true_selTrial((idx_needed_trial-1)*min_durCF+1:idx_needed_trial*min_durCF) = y;
+end
+acc_selTrial = sprintf('%.2f', sum(y_pred_selTrial == y_true_selTrial) / length(y_true_selTrial)*100);
+
+figure();
+correctness = (y_pred_selTrial == y_true_selTrial);
+correctness_matrix = reshape(correctness, [min_durCF, n_needed_trial])';
+green_component = correctness_matrix .* qda_performance; % if prediction correct
+red_component = (~correctness_matrix) .* qda_performance; %
+color_map = cat(3, red_component, green_component, zeros(size(green_component))); % No blue component
+imagesc(color_map)
+yticks(1:ntrial)
+yticklabels(y_label);
 xticks(x_label)
 xticklabels(x_label / sampleRate)
-title([num2str(classes(1)) ' | close to 1']);
-
-handles = [handles, gca];
-subplot(1,2,2)
-imagesc(data_cf(:,:,2)')
-yticks(1:nqda)
-yticklabels(1:nqda)
-xticks(x_label)
-xticklabels(x_label / sampleRate)
-title([num2str(classes(2)) ' | close to 0']);
-handles = [handles, gca];
-set(handles, 'clim', [0 cl]);
-sgtitle([subject ' | Trial mean depending on class']);
+title(['qda ' num2str(idx_qda) ' | acc: ' acc_selTrial])
 
