@@ -229,7 +229,7 @@ for c_nf=1:max_nfeatures_allxw
         [X, y, info] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
         info.sampleRate = sampleRate;
         info.filterOrder = filterOrder;
-        save_path = [pathname(1:end-4) 'test/dataset/dataset' num2str(c_nf) '.mat'];
+        save_path = [pathname(1:end-4) 'test/dataset/mantained/dataset' num2str(c_nf) '.mat'];
         save(save_path, 'X', 'y', 'info')
     end
 
@@ -320,7 +320,7 @@ end
 pathname = [pathname(1:39) 'evaluation/gdf/'];
 files = dir(fullfile(pathname, '*.gdf'));
 % concatenate the files
-nFiles = length(filenames);
+nFiles = length(files);
 for idx_file= 1: nFiles
     fullpath_file = fullfile(pathname, files(1).name);
     disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', files(1).name]);

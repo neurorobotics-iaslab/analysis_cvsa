@@ -39,7 +39,7 @@ for idx_band=1:nbands
         idx_class = find(classes == data{idx_band}.typ(idx_trial));
         if ~(count_trials4class(idx_class) >= trial4class)
             if idx_band == 1 % we need it only once
-                info.startTrial(idx_trial) = (idx_trial-1)*nsample_cf;
+                info.startTrial(idx_trial) = (idx_trial-1)*nsample_cf +1;
                 y((idx_trial-1)*nsample_cf+1:idx_trial*nsample_cf) = repmat(classes(idx_class), size(data{idx_band}.cf, 1), 1);
             end
 %             features{idx_band} = cat(1, features{idx_band}, data{idx_band}.cf(:,:,idx_trial));
