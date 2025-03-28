@@ -4,7 +4,7 @@ addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 
 %% Initialization
-create_dataset = false;
+create_dataset = true;
 a = 4:2:18;
 b = a+2;
 c = [a; b];
@@ -221,17 +221,6 @@ max_nfeatures_allxw = 40;
 allxw_img_calib = zeros(max_nfeatures_allxw, nwindows);
 for c_nf=1:max_nfeatures_allxw
     [tot_sortedValues, tot_linearIndices_calib] = maxk(fisher_all_calib(:), c_nf);
-    [tot_rows, tot_cols] = ind2sub(size(fisher_all_calib), tot_linearIndices_calib);
-
-    if create_dataset
-        selectedFeatures = [channelsSelected(tot_rows)', tot_cols];
-        disp(['create the dataset with ' num2str(c_nf) ' features'])
-        [X, y, info] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
-        info.sampleRate = sampleRate;
-        info.filterOrder = filterOrder;
-        save_path = [pathname(1:end-4) 'test/dataset/mantained/dataset' num2str(c_nf) '.mat'];
-        save(save_path, 'X', 'y', 'info')
-    end
 
     for idx_w=1:nwindows
         c_fischer = fischers(:,:,idx_w); % take only interested values
@@ -304,6 +293,44 @@ for idx_c_nf = 1:length(nfeatures_wxw)
 end
 sgtitle([subject ' | overlap ratio between windows | CALIBRATION FILES'])
 
+%% save the datasets %%%%%%%%%%%%%%%%%%
+if create_dataset
+    min_durCF = min(cfDUR);
+    start_period = 1; % s ---> time to start teh creation of dataset (from the end of cue)
+    period = [start_period*sampleRate, min_durCF]; % period of interest in samples
+    period_dur = period(2) - period(1);
+    ntrial = length(trial_start);
+    info.files = filenames;
+    info.channelsLabel = channels_label;
+    info.startTrial    = nan(ntrial,1);
+    for c_nf=1:max_nfeatures_allxw
+        [tot_sortedValues, tot_linearIndices_calib] = maxk(fisher_all_calib(:), c_nf);
+        [f_idx_selChans, f_idx_band] = ind2sub(size(fisher_all_calib), tot_linearIndices_calib);
+
+        info.bandSelected = bands(f_idx_band);
+        info.bandSelected = vertcat(info.bandSelected{:});
+        info.chSelected = channelsSelected(f_idx_selChans);
+
+        X = nan(period_dur, c_nf);
+        y = nan(period_dur, 1);
+
+        for idx_trial = 1:ntrial
+            for idx_f = 1:c_nf
+                c_channel = channelsSelected(f_idx_selChans(idx_f));
+                c_band = f_idx_band(idx_f);
+                X((idx_trial-1)*period_dur+1:idx_trial*period_dur, idx_f) = ...
+                    trial_data(minDurCue+period(1)+1:minDurCue+period(2),c_band,c_channel,idx_trial);
+            end
+            y((idx_trial-1)*period_dur+1:idx_trial*period_dur) = repmat(data{1}.typ(idx_trial), period_dur, 1);
+
+            info.startTrial(idx_trial) = (idx_trial-1)*period_dur +1;
+        end
+        info.sampleRate = sampleRate;
+        info.filterOrder = filterOrder;
+        save_path = [pathname(1:end-4) 'test/dataset/mantained/dataset' num2str(c_nf) '.mat'];
+        save(save_path, 'X', 'y', 'info')
+    end
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% -------------- reasoning for EVALUATION ---------------- %%

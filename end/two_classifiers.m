@@ -107,7 +107,7 @@ numbers = cellfun(@(x) str2double(regexp(x, '\d+', 'match', 'once')), qda_filena
 [~, sortedIdx] = sort(numbers);
 qda_filenames_mantained = qda_filenames_mantained(sortedIdx);
 
-%%
+%% compute the classificaitons
 nqda = size(qda_filenames_shift, 2);
 ntrial = size(data{1}.cf,3);
 classified_data_shift = cell(1, nqda);
@@ -164,17 +164,14 @@ time = 1; %s
 samples = time * sampleRate;
 acc_shift = nan(1, nqda);
 start_trial_id = 41; % trial at which start the test set
-end_trial_id = ntrial;
-test_trial = start_trial_id:end_trial_id;
-ntest_trial = length(test_trial);
-qda_performance_shift = cell(nqda, 1);
-y_label = cell(ntest_trial, 1);
+train_trial = 1:start_trial_id-1;
+ntrain_trial = length(train_trial);
 for idx_qda = 1:nqda
-    y_pred = nan(samples*ntest_trial, 1);
-    y_true = nan(samples*ntest_trial, 1);
-    qda_shift = nan(ntest_trial, samples);
-    for idx_test_trial = 1:ntest_trial
-        idx_trial = test_trial(idx_test_trial);
+    y_pred = nan(samples*ntrain_trial, 1);
+    y_true = nan(samples*ntrain_trial, 1);
+    qda_shift = nan(ntrain_trial, samples);
+    for idx_test_trial = 1:ntrain_trial
+        idx_trial = train_trial(idx_test_trial);
         c_start = classified_info_shift{idx_qda}.startTrial(idx_trial);
         c_end = c_start + samples - 1;
         c_data = classified_data_shift{idx_qda};
@@ -189,18 +186,8 @@ for idx_qda = 1:nqda
         y_true((idx_test_trial-1)*samples+1:idx_test_trial*samples) = c_true;
     end
 
-    qda_performance_shift{idx_qda} = qda_shift;
     acc_shift(idx_qda) = sum(y_pred == y_true) / length(y_true)*100;
 end
-
-% [val_qda_shift, idx_qda_shift] = max(acc_shift);
-% figure();
-% imagesc(qda_performance_shift{idx_qda_shift});
-% yticks(1:ntrial)
-% yticklabels(y_label);
-% xticks(1:256:min_durCF)
-% xticklabels(1:256:min_durCF  / sampleRate)
-% title([subject ' | acc: ' num2str(val_qda_shift) ' | n features: ' num2str(idx_qda_shift)]);
 
 %% compute for the accuracy form x to end (only for the MANTAINED)
 time = 1; %s
@@ -208,10 +195,10 @@ min_durCF = size(data{1}.cf, 1);
 samples = min_durCF - time * sampleRate;
 acc_mantained = nan(1, nqda);
 for idx_qda = 1:nqda
-    y_pred = nan(samples*ntest_trial, 1);
-    y_true = nan(samples*ntest_trial, 1);
-    for idx_test_trial = 1:ntest_trial
-        idx_trial = test_trial(idx_test_trial);
+    y_pred = nan(samples*ntrain_trial, 1);
+    y_true = nan(samples*ntrain_trial, 1);
+    for idx_test_trial = 1:ntrain_trial
+        idx_trial = train_trial(idx_test_trial);
         c_start = classified_info_shift{idx_qda}.startTrial(idx_trial) + time * sampleRate;
         c_end = c_start + samples - 1;
         c_data = classified_data_mantained{idx_qda};
@@ -228,7 +215,10 @@ for idx_qda = 1:nqda
     acc_mantained(idx_qda) = sum(y_pred == y_true) / length(y_true)*100;
 end
 
-%% take the two best classifier and merge them
+%% take the two best classifier (on train) and merge them
+end_trial_id = ntrial;
+test_trial = start_trial_id:end_trial_id;
+ntest_trial = length(test_trial);
 [val_qda_shift, idx_qda_shift] = max(acc_shift);
 [val_qda_mantained, idx_qda_mantained] = max(acc_mantained);
 data_shift = classified_data_shift{idx_qda_shift};
