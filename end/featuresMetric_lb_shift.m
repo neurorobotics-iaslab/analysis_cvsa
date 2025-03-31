@@ -4,11 +4,11 @@ addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 
 %% Initialization
-create_dataset = false;
+create_dataset = true;
 a = 4:2:18;
 b = a+2;
 c = [a; b];
-bands = [];
+bands = cell(1, size(a, 2));
 for i=1:length(a)
     bands{i} = [a(i), b(i)];
 end
@@ -285,7 +285,7 @@ if create_dataset
         end
         info.sampleRate = sampleRate;
         info.filterOrder = filterOrder;
-        save_path = [pathname(1:end-4) 'test/dataset/shift/dataset' num2str(c_nf) '.mat'];
+        save_path = [pathname(1:end-4) 'test/dataset/shift/shift_data' num2str(c_nf) '.mat'];
         save(save_path, 'X', 'y', 'info')
     end
 end

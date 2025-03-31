@@ -8,7 +8,7 @@ addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 a = 4:2:18;
 b = a+2;
 c = [a; b];
-bands = [];
+bands = cell(1, size(a, 2));
 for i=1:length(a)
     bands{i} = [a(i), b(i)];
 end
@@ -199,7 +199,7 @@ for idx_qda = 1:nqda
     y_true = nan(samples*ntrain_trial, 1);
     for idx_test_trial = 1:ntrain_trial
         idx_trial = train_trial(idx_test_trial);
-        c_start = classified_info_shift{idx_qda}.startTrial(idx_trial) + time * sampleRate;
+        c_start = classified_info_mantained{idx_qda}.startTrial(idx_trial) + time * sampleRate;
         c_end = c_start + samples - 1;
         c_data = classified_data_mantained{idx_qda};
         qda_performance = c_data(c_start:c_end,1);
@@ -221,6 +221,9 @@ test_trial = start_trial_id:end_trial_id;
 ntest_trial = length(test_trial);
 [val_qda_shift, idx_qda_shift] = max(acc_shift);
 [val_qda_mantained, idx_qda_mantained] = max(acc_mantained);
+disp('TRAIN: ')
+disp(['acc shift: ' num2str(val_qda_shift) ' nfeatures: ' num2str(idx_qda_shift) ' | acc mantained: ' num2str(val_qda_mantained) ' nfeatures: ' num2str(idx_qda_mantained)]);
+
 data_shift = classified_data_shift{idx_qda_shift};
 data_mantained = classified_data_mantained{idx_qda_mantained};
 qda_performance = nan(ntest_trial, min_durCF);
@@ -231,6 +234,10 @@ weight = [ones(time*sampleRate, 1), zeros(time*sampleRate, 1);
 y_label = cell(ntest_trial, 1);
 y_true_total = nan(ntest_trial*min_durCF, 1);
 y_pred_total = nan(ntest_trial*min_durCF, 1);
+y_pred_shift = nan(ntest_trial*time*sampleRate, 1);
+y_true_shift = nan(ntest_trial*time*sampleRate, 1);
+y_pred_mantained = nan(ntest_trial*(min_durCF - time*sampleRate), 1);
+y_true_mantained = nan(ntest_trial*(min_durCF - time*sampleRate), 1);
 correctness = nan(ntest_trial, min_durCF);
 for idx_test_trial = 1:ntest_trial
     idx_trial = test_trial(idx_test_trial);
@@ -239,23 +246,39 @@ for idx_test_trial = 1:ntest_trial
 
     qda_shift = weight(:,1) .* data_shift(c_start:c_end, 1);
     qda_mantained = weight(:,2) .* data_mantained(c_start:c_end, 1);
-%     qda_performance(idx_test_trial,:) = [qda_shift(1:time*sampleRate,:); qda_mantained(time*sampleRate+1:min_durCF)];
+
     qda_performance(idx_test_trial,:) = qda_shift + qda_mantained;
 
-    % compute the new accuracy
+    % compute the new accuracy for the merge of the two classifiers
     y_pred = ones(min_durCF, 1) * classes(1);
     y_pred(qda_performance(idx_test_trial,:) < 0.5) = classes(2);
     y_true = repmat(data{1}.typ(idx_trial), min_durCF, 1);
     y_label{idx_test_trial} = [num2str(data{1}.typ(idx_trial)) ': ' sprintf('%.2f', sum(y_pred == y_true) / min_durCF*100)];
 
-    % compute the total accuracy
+    % compute the total accuracy for the merge of the two classifiers
     y_true_total((idx_test_trial-1)*min_durCF+1:idx_test_trial*min_durCF) = y_true;
     y_pred_total((idx_test_trial-1)*min_durCF+1:idx_test_trial*min_durCF) = y_pred;
+
+    % compute the accuracy for the shift and for the mantained part sparetly
+    y_true_shift((idx_test_trial-1)*time*sampleRate+1:idx_test_trial*time*sampleRate) = repmat(data{1}.typ(idx_trial), time*sampleRate, 1);
+    temp = qda_shift(qda_shift ~= 0);
+    tmp_pred = ones(time*sampleRate, 1) * classes(1);
+    tmp_pred(temp < 0.5) = classes(2);
+    y_pred_shift((idx_test_trial-1)*time*sampleRate+1:idx_test_trial*time*sampleRate) = tmp_pred;
+    y_true_mantained((idx_test_trial-1)*(min_durCF-time*sampleRate)+1:idx_test_trial*(min_durCF-time*sampleRate)) = repmat(data{1}.typ(idx_trial), min_durCF-time*sampleRate, 1);
+    temp = qda_mantained(qda_mantained ~= 0);
+    tmp_pred = ones(min_durCF-time*sampleRate, 1) * classes(1);
+    tmp_pred(temp < 0.5) = classes(2);
+    y_pred_mantained((idx_test_trial-1)*(min_durCF-time*sampleRate)+1:idx_test_trial*(min_durCF-time*sampleRate)) = tmp_pred;
 
     correctness(idx_test_trial,:) = y_pred == y_true;
 end
 acc_total = sum(y_pred_total == y_true_total) / length(y_pred_total) * 100;
-disp(['acc shift: ' num2str(val_qda_shift) ' acc mantained: ' num2str(val_qda_mantained)]);
+acc_shift = sum(y_pred_shift == y_true_shift) / length(y_pred_shift) * 100;
+acc_mantained = sum(y_pred_mantained == y_true_mantained) / length(y_pred_mantained) * 100;
+
+disp('TEST:');
+disp(['acc shift: ' num2str(acc_shift) ' | acc mantained: ' num2str(acc_mantained)]);
 
 figure();
 qda_performance(qda_performance < 0.3) = 0.3;
@@ -267,5 +290,5 @@ yticks(1:ntrial)
 yticklabels(y_label);
 xticks(1:256:min_durCF)
 xticklabels(((1:256:min_durCF) - 1)  / sampleRate)
-title([subject ' | total: ' num2str(acc_total) ' | shift: ' num2str(val_qda_shift) ...
-    ' | mantained: ' num2str(val_qda_mantained)])
+title([subject ' | total: ' num2str(acc_total) ' | shift: ' num2str(acc_shift) ...
+    ' | mantained: ' num2str(acc_mantained)])

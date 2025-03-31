@@ -7,7 +7,7 @@ addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 a = 4:2:18;
 b = a+2;
 c = [a; b];
-bands = [];
+bands = cell(1, size(a, 2));
 for i=1:length(a)
     bands{i} = [a(i), b(i)];
 end

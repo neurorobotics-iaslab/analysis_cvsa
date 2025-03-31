@@ -94,7 +94,6 @@ end
 if ischar(qda_filenames_shift)
     qda_filenames_shift = {qda_filenames_shift};
 end
-subject = pathname_shift(28:29);
 numbers = cellfun(@(x) str2double(regexp(x, '\d+', 'match', 'once')), qda_filenames_shift);
 [~, sortedIdx] = sort(numbers);
 qda_filenames_shift = qda_filenames_shift(sortedIdx);
@@ -190,7 +189,7 @@ for idx_qda = 1:nqda
 
         % take only the correct probs in order to have 1 as correct an 0 as wrong classification
         idx_class = find(data{1}.typ(idx_trial) == classes);
-        c_mean_acc(idx_train_trial,:) = c_data(c_start:c_end, idx_class); %%% ?????????????????????????????????
+        c_mean_acc(idx_train_trial,:) = c_data(c_start:c_end, idx_class);
     end
 
     % compute the mean of all the trials
@@ -202,7 +201,7 @@ end
 
 % show the linear plot for each qda (in bigger the best one)
 [val_qda_shift, idx_qda_shift] = max(acc_shift);
-disp(['Max acc: ' num2str(val_qda_shift) ' | QDA with ' num2str(idx_qda_shift) ' features']);
+disp(['SHIFT | Max acc: ' num2str(val_qda_shift) ' | QDA with ' num2str(idx_qda_shift) ' features']);
 figure();
 hold on
 for idx_qda=1:nqda
@@ -260,7 +259,7 @@ end
 
 % show the linear plot for each qda (in bigger the best one)
 [val_qda_mantained, idx_qda_mantained] = max(acc_mantained);
-disp(['Max acc: ' num2str(val_qda_mantained) ' | QDA with ' num2str(idx_qda_mantained) ' features']);
+disp(['MANTAINED | Max acc: ' num2str(val_qda_mantained) ' | QDA with ' num2str(idx_qda_mantained) ' features']);
 figure();
 hold on
 for idx_qda=1:nqda
@@ -409,7 +408,7 @@ xticks(1:256:min_durCF)
 xticklabels(((1:256:min_durCF) - 1)  / sampleRate)
 title('integrated with soft probabilities')
 
-% mean and std for the hard (before qwas onlu soft)
+% mean and std for the hard (before was only soft)
 subplot(1,3,3)
 hold on;
 plot(mean(qda_best_shift_integrated_hard, 1), 'Color','b');
@@ -482,5 +481,131 @@ end
 qda_mantained_mean_acc = mean(mantained_raw_best, 1);
 qda_mantained_std_acc = std(mantained_raw_best, 0, 1);
 
-% integration!
+% integration
+qda_best_shift_integrated_soft = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+qda_best_mantained_integrated_soft = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+qda_merge_integrated_soft = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+qda_best_shift_integrated_hard = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+qda_best_mantained_integrated_hard = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+qda_merge_integrated_hard = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+for idx_test_trial=1:ntest_trial
+    idx_trial = test_trial(idx_test_trial);
+    c_start = classified_info_shift{idx_qda_shift}.startTrial(idx_trial); % taking shift or maintain in equal
+    c_end = c_start + min_durCF - 1;
+    idx_class = find(data{1}.typ(idx_trial) == classes);
 
+    c_data_shift = classified_data_shift{idx_qda_shift};
+    c_shift_soft = c_data_shift(c_start:c_end,idx_class);
+    c_shift_hard = ones(min_durCF, 1);
+    c_shift_hard(c_shift_soft < 0.5) = 0;
+    c_shift_hard(c_shift_soft == 0.5) = 0.5;
+
+    c_data_mantained = classified_data_mantained{idx_qda_mantained};
+    c_mantained_soft = c_data_mantained(c_start:c_end,idx_class);
+    c_mantained_hard = ones(min_durCF, 1);
+    c_mantained_hard(c_mantained_soft < 0.5) = 0;
+    c_mantained_hard(c_mantained_soft == 0.5) = 0.5;
+
+    % compute the integration
+    for idx_sample=1:min_durCF
+        % compute with soft predict
+        qda_best_shift_integrated_soft(idx_test_trial, idx_sample + 1) = ...
+           qda_best_shift_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
+        qda_best_mantained_integrated_soft(idx_test_trial, idx_sample + 1) = ...
+           qda_best_mantained_integrated_soft(idx_test_trial, idx_sample)* alpha + (1.0-alpha)*c_mantained_soft(idx_sample);
+
+        if idx_sample < time_merge*sampleRate
+            qda_merge_integrated_soft(idx_test_trial, idx_sample + 1) = ...
+               qda_merge_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
+        else
+            qda_merge_integrated_soft(idx_test_trial, idx_sample + 1) = ...
+               qda_merge_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_mantained_soft(idx_sample);
+        end
+
+        % compute for hard predict
+        qda_best_shift_integrated_hard(idx_test_trial, idx_sample + 1) = ...
+           qda_best_shift_integrated_hard(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_hard(idx_sample);
+        qda_best_mantained_integrated_hard(idx_test_trial, idx_sample + 1) = ...
+           qda_best_mantained_integrated_hard(idx_test_trial, idx_sample)* alpha + (1.0-alpha)*c_mantained_hard(idx_sample);
+
+        if idx_sample < time_merge*sampleRate
+            qda_merge_integrated_hard(idx_test_trial, idx_sample + 1) = ...
+               qda_merge_integrated_hard(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_hard(idx_sample);
+        else
+            qda_merge_integrated_hard(idx_test_trial, idx_sample + 1) = ...
+               qda_merge_integrated_hard(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_mantained_hard(idx_sample);
+        end
+    end
+end
+
+% plot
+figure();
+subplot(1,3,1)
+hold on;
+plot(qda_shift_mean_acc, 'Color','b');
+plot(qda_shift_mean_acc + 0.3*qda_shift_std_acc, '--', 'Color','b');
+plot(qda_shift_mean_acc - 0.3*qda_shift_std_acc, '--', 'Color','b');
+plot(qda_mantained_mean_acc, 'Color','r');
+plot(qda_mantained_mean_acc + 0.3*qda_mantained_std_acc, '--', 'Color','r');
+plot(qda_mantained_mean_acc - 0.3*qda_mantained_std_acc, '--', 'Color','r');
+hold off;
+legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', 'QDA mantained mean', ...
+    'QDA mantained + std', 'QDA mantained - std'});
+xlim([0 min_durCF])
+ylim([0.0 1.0])
+xticks(1:256:min_durCF)
+xticklabels(((1:256:min_durCF) - 1)  / sampleRate)
+title('raws probabilities')
+
+% mean and std of integrated probabilities + the merged integration
+subplot(1,3,2)
+hold on;
+plot(mean(qda_best_shift_integrated_soft, 1), 'Color','b');
+plot(mean(qda_best_shift_integrated_soft, 1) + 0.3*std(qda_best_shift_integrated_soft,0,1), '--', 'Color','b');
+plot(mean(qda_best_shift_integrated_soft, 1) - 0.3*std(qda_best_shift_integrated_soft,0,1), '--', 'Color','b');
+
+plot(mean(qda_best_mantained_integrated_soft, 1), 'Color','r');
+plot(mean(qda_best_mantained_integrated_soft, 1) + 0.3*std(qda_best_mantained_integrated_soft,0,1), '--', 'Color','r');
+plot(mean(qda_best_mantained_integrated_soft, 1) - 0.3*std(qda_best_mantained_integrated_soft,0,1), '--', 'Color','r');
+
+plot(mean(qda_merge_integrated_soft, 1), 'Color','k');
+plot(mean(qda_merge_integrated_soft, 1) + 0.3*std(qda_merge_integrated_soft,0,1), '--', 'Color','k');
+plot(mean(qda_merge_integrated_soft, 1) - 0.3*std(qda_merge_integrated_soft,0,1), '--', 'Color','k');
+hold off;
+legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
+    'QDA mantained mean', 'QDA mantained + std', 'QDA mantained - std', ...
+    'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
+xlim([0 min_durCF])
+ylim([0.0 1.0])
+xticks(1:256:min_durCF)
+xticklabels(((1:256:min_durCF) - 1)  / sampleRate)
+title('integrated with soft probabilities')
+
+% mean and std for the hard (before was only soft)
+subplot(1,3,3)
+hold on;
+plot(mean(qda_best_shift_integrated_hard, 1), 'Color','b');
+% plot(mean(qda_best_shift_integrated_hard, 1) + 0.3*std(qda_best_shift_integrated_hard,0,1), '--', 'Color','b');
+% plot(mean(qda_best_shift_integrated_hard, 1) - 0.3*std(qda_best_shift_integrated_hard,0,1), '--', 'Color','b');
+
+plot(mean(qda_best_mantained_integrated_hard, 1), 'Color','r');
+% plot(mean(qda_best_mantained_integrated_hard, 1) + 0.3*std(qda_best_mantained_integrated_hard,0,1), '--', 'Color','r');
+% plot(mean(qda_best_mantained_integrated_hard, 1) - 0.3*std(qda_best_mantained_integrated_hard,0,1), '--', 'Color','r');
+
+plot(mean(qda_merge_integrated_hard, 1), 'Color','k');
+% plot(mean(qda_merge_integrated_hard, 1) + 0.3*std(qda_merge_integrated_hard,0,1), '--', 'Color','k');
+% plot(mean(qda_merge_integrated_hard, 1) - 0.3*std(qda_merge_integrated_hard,0,1), '--', 'Color','k');
+hold off;
+% legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
+%     'QDA mantained mean', 'QDA mantained + std', 'QDA mantained - std', ...
+%     'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
+legend({'QDA shift mean', ...
+    'QDA mantained mean', ...
+    'QDA merge mean'});
+xlim([0 min_durCF])
+ylim([0.0 1.0])
+xticks(1:256:min_durCF)
+xticklabels(((1:256:min_durCF) - 1)  / sampleRate)
+title('integrated with hard probabilities')
+
+sgtitle([subject ' | raw probabilities and integration | TEST'])
