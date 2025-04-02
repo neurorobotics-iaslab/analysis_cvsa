@@ -53,13 +53,20 @@ for idx_file= 1: nFiles
         band = bands{idx_band};
 
         signal_processed = proc_512hz(c_signal, header.SampleRate, band, filterOrder, avg);
-        
+
         c_header = headers{idx_band};
         c_header.sampleRate = header.SampleRate;
         c_header.channels_labels = header.Label;
-        c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
-        c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
-        c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        if isempty(find(header.EVENT.TYP == 2, 1)) % no eye calibration
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        else
+            k = find(header.EVENT.TYP == 1, 1);
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP(k:end));
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR(k:end));
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS(k:end) + size(signals{idx_band}, 1));
+        end
 
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
         headers{idx_band} = c_header;
@@ -93,13 +100,13 @@ for idx_band=1:nbands
 end
 
 %% Trial extraction
-n_trial = size(fixPOS, 1);
-trial_start = nan(n_trial, 1);
-trial_end = nan(n_trial, 1);
-trial_typ = nan(n_trial, 1);
-fix_start = nan(n_trial, 1);
-fix_end = nan(n_trial, 1);
-for idx_trial = 1:n_trial
+ntrial = size(fixPOS, 1);
+trial_start = nan(ntrial, 1);
+trial_end = nan(ntrial, 1);
+trial_typ = nan(ntrial, 1);
+fix_start = nan(ntrial, 1);
+fix_end = nan(ntrial, 1);
+for idx_trial = 1:ntrial
     trial_start(idx_trial) = cuePOS(idx_trial);
     trial_typ(idx_trial) = cueTYP(idx_trial);
     trial_end(idx_trial) = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
@@ -109,11 +116,11 @@ end
 
 min_trial_data = min(trial_end - trial_start);
 min_fix_data = min(fix_end - fix_start);
-trial_data = nan(min_trial_data, nbands, nchannels, n_trial);
-basline_data = nan(min_fix_data, nbands, nchannels, n_trial);
+trial_data = nan(min_trial_data, nbands, nchannels, ntrial);
+basline_data = nan(min_fix_data, nbands, nchannels, ntrial);
 for idx_band = 1:nbands
     c_signal = signals{idx_band};
-    for trial = 1:n_trial
+    for trial = 1:ntrial
         c_start = trial_start(trial);
         c_end = trial_start(trial) + min_trial_data - 1;
         trial_data(:,idx_band,:,trial) = c_signal(c_start:c_end,:);
@@ -122,6 +129,9 @@ for idx_band = 1:nbands
         basline_data(:,idx_band,:,trial) = c_signal(c_fix_start:c_fix_end,:);
     end
 end
+trial_data_train = trial_data(:,:,:,1:end-ntrial/nFiles);%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% last file is for the test
+ntrial_trial = ntrial - ntrial/nFiles;
+trial_typ  = trial_typ(1:ntrial_trial);
 
 
 %% Fisher score for -x and x centered at the startng of the cf
@@ -142,10 +152,10 @@ for idx_interval = 1:nInterval
     for idx_ch=1:nchannelsSelected
         idx_chSel = channelsSelected(idx_ch);
         for idx_band=1:nbands
-            mean_c1(idx_ch, idx_band) = mean(trial_data(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(1)), 'all');
-            mean_c2(idx_ch, idx_band) = mean(trial_data(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(2)), 'all');
-            std_c1(idx_ch, idx_band) = std(trial_data(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(1)), 0, 'all');
-            std_c2(idx_ch, idx_band) = std(trial_data(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(2)), 0, 'all');
+            mean_c1(idx_ch, idx_band) = mean(trial_data_train(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(1)), 'all');
+            mean_c2(idx_ch, idx_band) = mean(trial_data_train(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(2)), 'all');
+            std_c1(idx_ch, idx_band) = std(trial_data_train(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(1)), 0, 'all');
+            std_c2(idx_ch, idx_band) = std(trial_data_train(minDurCue-c_interval:minDurCue+c_interval,idx_band,idx_chSel,trial_typ == classes(2)), 0, 'all');
         end
     end
     subplot(nrows, ceil(nInterval/nrows), idx_interval)
@@ -182,17 +192,17 @@ for idx_w = 1:nwindows
     std_c2 = nan(nchannelsSelected, nbands);
     start_w = (idx_w-1)*overlap + 1;
     end_w = start_w + wlength - 1;
-    if end_w > size(trial_data, 1)
-        end_w = size(trial_data, 1);
+    if end_w > size(trial_data_train, 1)
+        end_w = size(trial_data_train, 1);
     end
 
     for idx_ch=1:nchannelsSelected
         idx_chSel = channelsSelected(idx_ch);
         for idx_band=1:nbands
-            mean_c1(idx_ch, idx_band) = mean(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(1)), 'all');
-            mean_c2(idx_ch, idx_band) = mean(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(2)), 'all');
-            std_c1(idx_ch, idx_band) = std(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(1)), 0, 'all');
-            std_c2(idx_ch, idx_band) = std(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(2)), 0, 'all');
+            mean_c1(idx_ch, idx_band) = mean(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(1)), 'all');
+            mean_c2(idx_ch, idx_band) = mean(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(2)), 'all');
+            std_c1(idx_ch, idx_band) = std(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(1)), 0, 'all');
+            std_c2(idx_ch, idx_band) = std(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(2)), 0, 'all');
         end
     end
 
@@ -205,7 +215,7 @@ end
 
 
 %% metrics for the features selection all x w --> all is all the fisher computed in the interested time
-max_nfeatures_allxw = 40;
+max_nfeatures_allxw = 27;
 figure();
 handles = [];
 for idx_interval = 1:nInterval
@@ -258,7 +268,6 @@ if create_dataset
     interval_sample = intervals_sample(idx_interval);
     period = interval_sample*2;
     sel_fisher_time = squeeze(fisher_intervals(idx_interval,:,:));
-    ntrial = length(trial_start);
     info.files = filenames;
     info.channelsLabel = channels_label;
     info.startTrial    = nan(ntrial,1);
@@ -285,7 +294,7 @@ if create_dataset
         end
         info.sampleRate = sampleRate;
         info.filterOrder = filterOrder;
-        save_path = [pathname(1:end-4) 'test/dataset/shift/shift_data' num2str(c_nf) '.mat'];
+        save_path = [pathname(1:end-4) 'two_classifier/dataset/shift/shift_data' num2str(c_nf) '.mat'];
         save(save_path, 'X', 'y', 'info')
     end
 end
@@ -301,7 +310,7 @@ for idx_band = 1:nbands
     signals{idx_band} = [];
 end
 
-pathname = [pathname(1:39) 'evaluation/gdf/'];
+pathname = [pathname(1:end-16) 'evaluation/gdf/'];
 files = dir(fullfile(pathname, '*.gdf'));
 % concatenate the files
 nFiles = length(files);
@@ -320,9 +329,16 @@ for idx_file= 1: nFiles
         c_header = headers{idx_band};
         c_header.sampleRate = header.SampleRate;
         c_header.channels_labels = header.Label;
-        c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
-        c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
-        c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        if isempty(find(header.EVENT.TYP == 2, 1)) % no eye calibration
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        else
+            k = find(header.EVENT.TYP == 1, 1);
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP(k:end));
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR(k:end));
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS(k:end) + size(signals{idx_band}, 1));
+        end
 
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
         headers{idx_band} = c_header;
@@ -355,13 +371,13 @@ for idx_band=1:nbands
 end
 
 % Trial extraction
-n_trial = size(fixPOS, 1);
-trial_start = nan(n_trial, 1);
-trial_end = nan(n_trial, 1);
-trial_typ = nan(n_trial, 1);
-fix_start = nan(n_trial, 1);
-fix_end = nan(n_trial, 1);
-for idx_trial = 1:n_trial
+ntrial = size(fixPOS, 1);
+trial_start = nan(ntrial, 1);
+trial_end = nan(ntrial, 1);
+trial_typ = nan(ntrial, 1);
+fix_start = nan(ntrial, 1);
+fix_end = nan(ntrial, 1);
+for idx_trial = 1:ntrial
     trial_start(idx_trial) = cuePOS(idx_trial);
     trial_typ(idx_trial) = cueTYP(idx_trial);
     trial_end(idx_trial) = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
@@ -371,11 +387,11 @@ end
 
 min_trial_data = min(trial_end - trial_start);
 min_fix_data = min(fix_end - fix_start);
-trial_data = nan(min_trial_data, nbands, nchannels, n_trial);
-basline_data = nan(min_fix_data, nbands, nchannels, n_trial);
+trial_data = nan(min_trial_data, nbands, nchannels, ntrial);
+basline_data = nan(min_fix_data, nbands, nchannels, ntrial);
 for idx_band = 1:nbands
     c_signal = signals{idx_band};
-    for trial = 1:n_trial
+    for trial = 1:ntrial
         c_start = trial_start(trial);
         c_end = trial_start(trial) + min_trial_data - 1;
         trial_data(:,idx_band,:,trial) = c_signal(c_start:c_end,:);
@@ -466,7 +482,7 @@ end
 
 
 %% metrics for the features selection all x w --> all is all the fisher computed at interested time of calibration files
-max_nfeatures_allxw = 40;
+max_nfeatures_allxw = 27;
 figure();
 handles = [];
 for idx_interval = 1:nInterval
@@ -513,7 +529,7 @@ set(handles, 'clim', [0 1])
 sgtitle([subject ' | 0 is start cf | ALL_CAL vs WIND_EVAL'])
 
 %% metrics for the features selection all x w --> all is all the fisher computed at interested time of eval files
-max_nfeatures_allxw = 40;
+max_nfeatures_allxw = 27;
 figure();
 handles = [];
 for idx_interval = 1:nInterval

@@ -137,7 +137,7 @@ plot_downsampling = 2;
 handles = [];
 cl = -inf;
 figure();
-fischers = zeros(nchannelsSelected, nbands, nwindows);
+fischers_calib = zeros(nchannelsSelected, nbands, nwindows);
 typ = nan(nwindows, 1);
 for idx_w = 1:nwindows
     mean_c1 = nan(nchannelsSelected, nbands);
@@ -161,11 +161,11 @@ for idx_w = 1:nwindows
     end
 
     windows_center(idx_w) = (start_w + end_w) / 2;
-    fischers(:,:,idx_w) = abs(mean_c1 - mean_c2) ./ sqrt(std_c1.^2 + std_c2.^2);
+    fischers_calib(:,:,idx_w) = abs(mean_c1 - mean_c2) ./ sqrt(std_c1.^2 + std_c2.^2);
     if mod(idx_w, plot_downsampling) == 0
         % calculate fisher
         subplot(nrows, ceil(nwindows/nrows/plot_downsampling), idx_w/plot_downsampling)
-        c_fisher = fischers(:,:,idx_w);
+        c_fisher = fischers_calib(:,:,idx_w);
 
         % show the fisher features
         imagesc(c_fisher);
@@ -192,8 +192,10 @@ end
 set(handles, 'clim', [0 cl])
 sgtitle([subject ' | fisher score for some windows | CALIBRATION FILES']);
 
-% fisher for all cf trial no cue
+%% fisher for all cf trial no cue
 minDurCue = min(cueDUR);
+% trial_data_train = trial_data(:,:,:,1:end-20);
+% trial_typ_train = trial_typ(1:end-20);
 for idx_ch=1:nchannelsSelected
     idx_chSel = channelsSelected(idx_ch);
     for idx_band=1:nbands
@@ -217,13 +219,13 @@ set(handles, 'clim', [0 cl])
 title([subject ' | fisher score for cf | CALIBRATION FILES']);
 
 %% metrics for the features selection all x w
-max_nfeatures_allxw = 40;
+max_nfeatures_allxw = 27;
 allxw_img_calib = zeros(max_nfeatures_allxw, nwindows);
 for c_nf=1:max_nfeatures_allxw
     [tot_sortedValues, tot_linearIndices_calib] = maxk(fisher_all_calib(:), c_nf);
 
     for idx_w=1:nwindows
-        c_fischer = fischers(:,:,idx_w); % take only interested values
+        c_fischer = fischers_calib(:,:,idx_w); % take only interested values
         [c_sortedValues, c_linearIndices] = maxk(c_fischer(:), c_nf);
         [c_rows, c_cols] = ind2sub(size(c_fischer), c_linearIndices);
 
@@ -254,7 +256,7 @@ xlabel('time [s]')
 title([subject ' | window features vs all cf features | CALIBRATION FILES'])
 
 %% metrics for the features selection w x w
-max_nfeatures_wxw = 30;
+max_nfeatures_wxw = 27;
 min_nfeatures_wxw = 1;
 nfeatures_wxw = min_nfeatures_wxw:max_nfeatures_wxw;
 nrows = 5;
@@ -263,10 +265,10 @@ for idx_c_nf = 1:length(nfeatures_wxw)
     c_nf = nfeatures_wxw(idx_c_nf);
     wxw_img = zeros(nwindows);
     for idx_w1=1:nwindows
-        c1_fischer = fischers(:,:,idx_w1);
+        c1_fischer = fischers_calib(:,:,idx_w1);
         [c1_sortedValues, c1_linearIndices] = maxk(c1_fischer(:), c_nf);
         for idx_w2=1:nwindows
-            c2_fischer = fischers(:,:,idx_w2);
+            c2_fischer = fischers_calib(:,:,idx_w2);
             [c2_sortedValues, c2_linearIndices] = maxk(c2_fischer(:), c_nf);
 
             n_wxw_intersection = length(intersect(c1_linearIndices, c2_linearIndices));
@@ -386,7 +388,7 @@ windows_center = zeros(1, nwindows);
 handles = [];
 cl = -inf;
 figure();
-fischers = zeros(nchannelsSelected, nbands, nwindows);
+fischers_eval = zeros(nchannelsSelected, nbands, nwindows);
 typ = nan(nwindows, 1);
 for idx_w = 1:nwindows
     mean_c1 = nan(nchannelsSelected, nbands);
@@ -410,11 +412,11 @@ for idx_w = 1:nwindows
     end
 
     windows_center(idx_w) = (start_w + end_w) / 2;
-    fischers(:,:,idx_w) = abs(mean_c1 - mean_c2) ./ sqrt(std_c1.^2 + std_c2.^2);
+    fischers_eval(:,:,idx_w) = abs(mean_c1 - mean_c2) ./ sqrt(std_c1.^2 + std_c2.^2);
     if mod(idx_w, plot_downsampling) == 0
         % calculate fisher
         subplot(nrows, ceil(nwindows/nrows/plot_downsampling), idx_w/plot_downsampling)
-        c_fisher = fischers(:,:,idx_w);
+        c_fisher = fischers_eval(:,:,idx_w);
 
         % show the fisher features
         imagesc(c_fisher);
@@ -472,7 +474,7 @@ for c_nf=1:max_nfeatures_allxw
     [~, tot_linearIndices_calib] = maxk(fisher_all_calib(:), c_nf);
 %     [tot_rows, tot_cols] = ind2sub(size(fisher_all_calib), tot_linearIndices_calib);
     for idx_w=1:nwindows
-        c_fischer = fischers(:,:,idx_w); % take only interested values
+        c_fischer = fischers_eval(:,:,idx_w); % take only interested values
         [c_sortedValues, c_linearIndices] = maxk(c_fischer(:), c_nf);
         [c_rows, c_cols] = ind2sub(size(c_fischer), c_linearIndices);
 
@@ -484,7 +486,7 @@ for c_nf=1:max_nfeatures_allxw
     [~, tot_linearIndices_eval] = maxk(fisher_all_eval(:), c_nf);
 %     [tot_rows, tot_cols] = ind2sub(size(fisher_all_calib), tot_linearIndices_calib);
     for idx_w=1:nwindows
-        c_fischer = fischers(:,:,idx_w); % take only interested values
+        c_fischer = fischers_eval(:,:,idx_w); % take only interested values
         [c_sortedValues, c_linearIndices] = maxk(c_fischer(:), c_nf);
 %         [c_rows, c_cols] = ind2sub(size(c_fischer), c_linearIndices);
 
@@ -541,10 +543,10 @@ for idx_c_nf = 1:length(nfeatures_wxw)
     c_nf = nfeatures_wxw(idx_c_nf);
     wxw_img = zeros(nwindows);
     for idx_w1=1:nwindows
-        c1_fischer = fischers(:,:,idx_w1);
+        c1_fischer = fischers_eval(:,:,idx_w1);
         [c1_sortedValues, c1_linearIndices] = maxk(c1_fischer(:), c_nf);
         for idx_w2=1:nwindows
-            c2_fischer = fischers(:,:,idx_w2);
+            c2_fischer = fischers_eval(:,:,idx_w2);
             [c2_sortedValues, c2_linearIndices] = maxk(c2_fischer(:), c_nf);
 
             n_wxw_intersection = length(intersect(c1_linearIndices, c2_linearIndices));
@@ -570,3 +572,46 @@ for idx_c_nf = 1:length(nfeatures_wxw)
     title(['n features: ' num2str(c_nf)])
 end
 sgtitle([subject ' | overlap ratio between windows | EVALUATION FILES'])
+
+%% metrics for the features selection w x w -> calib vs eval
+figure();
+for idx_c_nf = 1:length(nfeatures_wxw)
+    c_nf = nfeatures_wxw(idx_c_nf);
+    wxw_img = zeros(nwindows);
+    for idx_w1=1:nwindows
+        c1_fischer = fischers_calib(:,:,idx_w1);
+        [c1_sortedValues, c1_linearIndices] = maxk(c1_fischer(:), c_nf);
+        for idx_w2=1:nwindows
+            c2_fischer = fischers_eval(:,:,idx_w2);
+            [c2_sortedValues, c2_linearIndices] = maxk(c2_fischer(:), c_nf);
+
+            n_wxw_intersection = length(intersect(c1_linearIndices, c2_linearIndices));
+            n_wxw_union = length(union(c1_linearIndices, c2_linearIndices));
+
+            wxw_img(idx_w1,idx_w2) = n_wxw_intersection / c_nf;
+        end
+    end
+    max_wxw = max(abs(wxw_img), [], 'all');
+    if ~max_wxw == 0
+        wxw_img = wxw_img / max_wxw;
+    end
+    max_wxw = max(abs(wxw_img), [], 'all');
+    if max_wxw == 0
+        max_wxw = 1;
+    end
+
+    subplot(nrows, ceil((max_nfeatures_wxw-min_nfeatures_wxw + 1)/nrows), idx_c_nf)
+    hold on;
+    imagesc(wxw_img);
+    plot([cf_start, cf_start], [0 nwindows], 'k');
+    hold off
+    set(gca, 'clim', [0 max_wxw])
+    xticks(1:7:size(windows_center,2))
+    xticklabels(windows_center(1:7:end)/sampleRate)
+    yticks(1:7:size(windows_center,2))
+    yticklabels(windows_center(1:7:end)/sampleRate)
+    xlabel('calib')
+    ylabel('eval')
+    title(['n features: ' num2str(c_nf)])
+end
+sgtitle([subject ' | overlap ratio between windows | EVALUATION and CALIBRATION FILES'])

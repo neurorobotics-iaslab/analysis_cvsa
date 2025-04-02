@@ -54,9 +54,16 @@ for idx_file= 1: nFiles
         c_header = headers{idx_band};
         c_header.sampleRate = header.SampleRate;
         c_header.channels_labels = header.Label;
-        c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
-        c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
-        c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        if isempty(find(header.EVENT.TYP == 2, 1)) % no eye calibration
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        else
+            k = find(header.EVENT.TYP == 1, 1);
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP(k:end));
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR(k:end));
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS(k:end) + size(signals{idx_band}, 1));
+        end
 
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
         headers{idx_band} = c_header;
@@ -98,25 +105,20 @@ numbers = cellfun(@(x) str2double(regexp(x, '\d+', 'match', 'once')), qda_filena
 [~, sortedIdx] = sort(numbers);
 qda_filenames_shift = qda_filenames_shift(sortedIdx);
 
-[qda_filenames_mantained, pathname_mantained] = uigetfile('*.yaml', 'Select QDA MANTAINED Files', 'MultiSelect', 'on');
-if ischar(qda_filenames_mantained)
-    qda_filenames_mantained = {qda_filenames_mantained};
+[qda_filenames_sustained, pathname_sustained] = uigetfile('*.yaml', 'Select QDA sustained Files', 'MultiSelect', 'on');
+if ischar(qda_filenames_sustained)
+    qda_filenames_sustained = {qda_filenames_sustained};
 end
-numbers = cellfun(@(x) str2double(regexp(x, '\d+', 'match', 'once')), qda_filenames_mantained);
+numbers = cellfun(@(x) str2double(regexp(x, '\d+', 'match', 'once')), qda_filenames_sustained);
 [~, sortedIdx] = sort(numbers);
-qda_filenames_mantained = qda_filenames_mantained(sortedIdx);
+qda_filenames_sustained = qda_filenames_sustained(sortedIdx);
 
-%% compute the classification for each qda (shift and mantained)
+%% compute the classification for each qda (shift and sustained)
 nqda = size(qda_filenames_shift, 2);
-ntrial = size(data{1}.cf,3);
 classified_data_shift = cell(1, nqda);
-classified_data_mantained = cell(1, nqda);
-for i = 1:nqda
-    classified_data_shift{i} = nan(size(data{1}.cf, 1)*ntrial, 2);
-    classified_data_mantained{i} = nan(size(data{1}.cf, 1)*ntrial, 2);
-end
+classified_data_sustained = cell(1, nqda);
 classified_info_shift = cell(1, nqda);
-classified_info_mantained = cell(1, nqda);
+classified_info_sustained = cell(1, nqda);
 
 for idx_qda = 1:nqda
     % reasoning for shift classifier
@@ -136,35 +138,35 @@ for idx_qda = 1:nqda
     [X, ~, classified_info_shift{idx_qda}] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
 
     classified_tmp = apply_qda_matrix(qda_shift, X);
-    classified_data_shift{idx_qda}(:,:) = classified_tmp;
+    classified_data_shift{idx_qda} = classified_tmp;
 
-    % reasoning for mantained classifier
-    fullpath_file_mantained = fullfile(pathname_mantained, qda_filenames_mantained{idx_qda});
-    disp(['QDA mantained ' qda_filenames_mantained{idx_qda}]);
-    qda_mantained = loadQDA(fullpath_file_mantained);
-    if qda_mantained.nfeatures == 1
-        c_idx_band = find(cellfun(@(x) isequal(x, qda_mantained.bands), bands));
-        selectedFeatures = [qda_mantained.idchans, c_idx_band];
+    % reasoning for sustained classifier
+    fullpath_file_sustained = fullfile(pathname_sustained, qda_filenames_sustained{idx_qda});
+    disp(['QDA sustained ' qda_filenames_sustained{idx_qda}]);
+    qda_sustained = loadQDA(fullpath_file_sustained);
+    if qda_sustained.nfeatures == 1
+        c_idx_band = find(cellfun(@(x) isequal(x, qda_sustained.bands), bands));
+        selectedFeatures = [qda_sustained.idchans, c_idx_band];
     else
         c_idx_band = [];
-        for i = 1:length(qda_mantained.bands) 
-            c_idx_band = [c_idx_band find(ismember(cell2mat(bands'), qda_mantained.bands(i,:), 'rows'))];
+        for i = 1:length(qda_sustained.bands) 
+            c_idx_band = [c_idx_band find(ismember(cell2mat(bands'), qda_sustained.bands(i,:), 'rows'))];
         end
-        selectedFeatures = [qda_mantained.idchans', c_idx_band'];
+        selectedFeatures = [qda_sustained.idchans', c_idx_band'];
     end
-    [X, ~, classified_info_mantained{idx_qda}] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
+    [X, ~, classified_info_sustained{idx_qda}] = createDataset(filenames, data, selectedFeatures, bands, channels_label);
 
-    classified_tmp = apply_qda_matrix(qda_mantained, X);
-    classified_data_mantained{idx_qda}(:,:) = classified_tmp;
+    classified_tmp = apply_qda_matrix(qda_sustained, X);
+    classified_data_sustained{idx_qda} = classified_tmp;
 end
 
 %% compute for the accuracy from start to x (only for the SHIFT) and select the best one
 time = 1; %s
-samples = time * sampleRate;
+samples = ceil(time * sampleRate);
 min_durCF = size(data{1}.cf, 1);
 acc_shift = nan(1, nqda);
-start_trial_id = 41; % trial at which start the test set
-train_trial = 1:start_trial_id-1;
+start_trial_id_train = 41; % trial at which start the test set
+train_trial = 1:start_trial_id_train-1;
 ntrain_trial = length(train_trial);
 qda_shift_mean_acc = nan(nqda, min_durCF);
 qda_shift_std_acc = nan(nqda, min_durCF);
@@ -219,13 +221,13 @@ ylim([0.3 1.0]);
 title('All QDA shift | raw prob mean trials | TRAIN')
 
 
-%% compute for the accuracy form x to end (only for the MANTAINED) and select the best one
+%% compute for the accuracy form x to end (only for the sustained) and select the best one
 time = 1; %s
 min_durCF = size(data{1}.cf, 1);
-samples = min_durCF - time * sampleRate;
-acc_mantained = nan(1, nqda);
-qda_mantained_mean_acc = nan(nqda, min_durCF);
-qda_mantained_std_acc = nan(nqda, min_durCF);
+samples = min_durCF - ceil(time * sampleRate);
+acc_sustained = nan(1, nqda);
+qda_sustained_mean_acc = nan(nqda, min_durCF);
+qda_sustained_std_acc = nan(nqda, min_durCF);
 for idx_qda = 1:nqda
     y_pred = nan(samples*ntrain_trial, 1);
     y_true = nan(samples*ntrain_trial, 1);
@@ -234,12 +236,12 @@ for idx_qda = 1:nqda
         idx_trial = train_trial(idx_train_trial);
         c_start = classified_info_shift{idx_qda}.startTrial(idx_trial);
         c_end = c_start + min_durCF - 1;
-        c_data = classified_data_mantained{idx_qda};
+        c_data = classified_data_sustained{idx_qda};
         qda_performance = c_data(c_start:c_end,1);
 
         c_pred = ones(samples, 1) * classes(1);
-        c_pred(qda_performance(samples:end,1) < 0.5) = classes(2);
-        c_pred(qda_performance(samples:end,1) == 0.5) = nan;
+        c_pred(qda_performance(ceil(time * sampleRate)+1:end,1) < 0.5) = classes(2);
+        c_pred(qda_performance(ceil(time * sampleRate)+1:end,1) == 0.5) = nan;
         y_pred((idx_train_trial-1)*samples+1:idx_train_trial*samples) = c_pred;
 
         c_true = repmat(data{1}.typ(idx_trial), samples, 1);
@@ -251,22 +253,22 @@ for idx_qda = 1:nqda
     end
 
     % compute the mean of all the trials
-    qda_mantained_mean_acc(idx_qda,:) = mean(c_mean_acc, 1);
-    qda_mantained_std_acc(idx_qda,:) = std(c_mean_acc, 0, 1);
+    qda_sustained_mean_acc(idx_qda,:) = mean(c_mean_acc, 1);
+    qda_sustained_std_acc(idx_qda,:) = std(c_mean_acc, 0, 1);
 
-    acc_mantained(idx_qda) = sum(y_pred == y_true) / length(y_true)*100;
+    acc_sustained(idx_qda) = sum(y_pred == y_true) / length(y_true)*100;
 end
 
 % show the linear plot for each qda (in bigger the best one)
-[val_qda_mantained, idx_qda_mantained] = max(acc_mantained);
-disp(['MANTAINED | Max acc: ' num2str(val_qda_mantained) ' | QDA with ' num2str(idx_qda_mantained) ' features']);
+[val_qda_sustained, idx_qda_sustained] = max(acc_sustained);
+disp(['SUSTAINED | Max acc: ' num2str(val_qda_sustained) ' | QDA with ' num2str(idx_qda_sustained) ' features']);
 figure();
 hold on
 for idx_qda=1:nqda
-    if idx_qda == idx_qda_mantained
-        plot(qda_mantained_mean_acc(idx_qda,:), 'LineWidth',5);
+    if idx_qda == idx_qda_sustained
+        plot(qda_sustained_mean_acc(idx_qda,:), 'LineWidth',5);
     else
-        plot(qda_mantained_mean_acc(idx_qda, :), 'LineWidth', 1);
+        plot(qda_sustained_mean_acc(idx_qda, :), 'LineWidth', 1);
     end
 end
 hold off;
@@ -274,17 +276,17 @@ xticks(1:256:min_durCF)
 xticklabels(((1:256:min_durCF) - 1)  / sampleRate)
 xlim([0 min_durCF]); 
 ylim([0.3 1.0]); 
-title('All QDA mantained | raw prob mean trials | TRAIN')
+title('All QDA sustained | raw prob mean trials | TRAIN')
 
 %% integrate the two best qda performances
 alpha = 0.9;
 time_merge = 1.0; % time in sec at which perform the merge
 start_itegrator = 0.5;
 qda_best_shift_integrated_soft = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
-qda_best_mantained_integrated_soft = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
+qda_best_sustained_integrated_soft = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
 qda_merge_integrated_soft = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
 qda_best_shift_integrated_hard = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
-qda_best_mantained_integrated_hard = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
+qda_best_sustained_integrated_hard = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
 qda_merge_integrated_hard = ones(ntrain_trial, min_durCF + 1) * start_itegrator;
 for idx_train_trial=1:ntrain_trial
     idx_trial = train_trial(idx_train_trial);
@@ -298,40 +300,40 @@ for idx_train_trial=1:ntrain_trial
     c_shift_hard(c_shift_soft < 0.5) = 0;
     c_shift_hard(c_shift_soft == 0.5) = 0.5;
 
-    c_data_mantained = classified_data_mantained{idx_qda_mantained};
-    c_mantained_soft = c_data_mantained(c_start:c_end,idx_class);
-    c_mantained_hard = ones(min_durCF, 1);
-    c_mantained_hard(c_mantained_soft < 0.5) = 0;
-    c_mantained_hard(c_mantained_soft == 0.5) = 0.5;
+    c_data_sustained = classified_data_sustained{idx_qda_sustained};
+    c_sustained_soft = c_data_sustained(c_start:c_end,idx_class);
+    c_sustained_hard = ones(min_durCF, 1);
+    c_sustained_hard(c_sustained_soft < 0.5) = 0;
+    c_sustained_hard(c_sustained_soft == 0.5) = 0.5;
 
     % compute the integration
     for idx_sample=1:min_durCF
         % compute with soft predict
         qda_best_shift_integrated_soft(idx_train_trial, idx_sample + 1) = ...
            qda_best_shift_integrated_soft(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
-        qda_best_mantained_integrated_soft(idx_train_trial, idx_sample + 1) = ...
-           qda_best_mantained_integrated_soft(idx_train_trial, idx_sample)* alpha + (1.0-alpha)*c_mantained_soft(idx_sample);
+        qda_best_sustained_integrated_soft(idx_train_trial, idx_sample + 1) = ...
+           qda_best_sustained_integrated_soft(idx_train_trial, idx_sample)* alpha + (1.0-alpha)*c_sustained_soft(idx_sample);
 
         if idx_sample < time_merge*sampleRate
             qda_merge_integrated_soft(idx_train_trial, idx_sample + 1) = ...
                qda_merge_integrated_soft(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
         else
             qda_merge_integrated_soft(idx_train_trial, idx_sample + 1) = ...
-               qda_merge_integrated_soft(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_mantained_soft(idx_sample);
+               qda_merge_integrated_soft(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_sustained_soft(idx_sample);
         end
 
         % compute for hard predict
         qda_best_shift_integrated_hard(idx_train_trial, idx_sample + 1) = ...
            qda_best_shift_integrated_hard(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_hard(idx_sample);
-        qda_best_mantained_integrated_hard(idx_train_trial, idx_sample + 1) = ...
-           qda_best_mantained_integrated_hard(idx_train_trial, idx_sample)* alpha + (1.0-alpha)*c_mantained_hard(idx_sample);
+        qda_best_sustained_integrated_hard(idx_train_trial, idx_sample + 1) = ...
+           qda_best_sustained_integrated_hard(idx_train_trial, idx_sample)* alpha + (1.0-alpha)*c_sustained_hard(idx_sample);
 
         if idx_sample < time_merge*sampleRate
             qda_merge_integrated_hard(idx_train_trial, idx_sample + 1) = ...
                qda_merge_integrated_hard(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_hard(idx_sample);
         else
             qda_merge_integrated_hard(idx_train_trial, idx_sample + 1) = ...
-               qda_merge_integrated_hard(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_mantained_hard(idx_sample);
+               qda_merge_integrated_hard(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_sustained_hard(idx_sample);
         end
     end
 end
@@ -340,7 +342,7 @@ figure();
 subplot(1,2,1)
 hold on
 plot(mean(qda_best_shift_integrated_soft, 1), 'LineWidth', 5);
-plot(mean(qda_best_mantained_integrated_soft, 1), 'LineWidth', 5);
+plot(mean(qda_best_sustained_integrated_soft, 1), 'LineWidth', 5);
 plot(mean(qda_merge_integrated_soft, 1), 'LineWidth', 5);
 hold off
 legend({'QDA shift', 'QDA manteined', 'QDA merge'})
@@ -353,7 +355,7 @@ xticklabels(((1:256:min_durCF) - 1)  / sampleRate)
 subplot(1,2,2)
 hold on
 plot(mean(qda_best_shift_integrated_hard, 1), 'LineWidth', 5);
-plot(mean(qda_best_mantained_integrated_hard, 1), 'LineWidth', 5);
+plot(mean(qda_best_sustained_integrated_hard, 1), 'LineWidth', 5);
 plot(mean(qda_merge_integrated_hard, 1), 'LineWidth', 5);
 hold off
 legend({'QDA shift', 'QDA manteined', 'QDA merge'})
@@ -372,12 +374,12 @@ hold on;
 plot(qda_shift_mean_acc(idx_qda_shift,:), 'Color','b');
 plot(qda_shift_mean_acc(idx_qda_shift,:) + 0.3*qda_shift_std_acc(idx_qda_shift,:), '--', 'Color','b');
 plot(qda_shift_mean_acc(idx_qda_shift,:) - 0.3*qda_shift_std_acc(idx_qda_shift,:), '--', 'Color','b');
-plot(qda_mantained_mean_acc(idx_qda_shift,:), 'Color','r');
-plot(qda_mantained_mean_acc(idx_qda_shift,:) + 0.3*qda_mantained_std_acc(idx_qda_shift,:), '--', 'Color','r');
-plot(qda_mantained_mean_acc(idx_qda_shift,:) - 0.3*qda_mantained_std_acc(idx_qda_shift,:), '--', 'Color','r');
+plot(qda_sustained_mean_acc(idx_qda_shift,:), 'Color','r');
+plot(qda_sustained_mean_acc(idx_qda_shift,:) + 0.3*qda_sustained_std_acc(idx_qda_shift,:), '--', 'Color','r');
+plot(qda_sustained_mean_acc(idx_qda_shift,:) - 0.3*qda_sustained_std_acc(idx_qda_shift,:), '--', 'Color','r');
 hold off;
-legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', 'QDA mantained mean', ...
-    'QDA mantained + std', 'QDA mantained - std'});
+legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', 'QDA sustained mean', ...
+    'QDA sustained + std', 'QDA sustained - std'});
 xlim([0 min_durCF])
 ylim([0.0 1.0])
 xticks(1:256:min_durCF)
@@ -391,16 +393,16 @@ plot(mean(qda_best_shift_integrated_soft, 1), 'Color','b');
 plot(mean(qda_best_shift_integrated_soft, 1) + 0.3*std(qda_best_shift_integrated_soft,0,1), '--', 'Color','b');
 plot(mean(qda_best_shift_integrated_soft, 1) - 0.3*std(qda_best_shift_integrated_soft,0,1), '--', 'Color','b');
 
-plot(mean(qda_best_mantained_integrated_soft, 1), 'Color','r');
-plot(mean(qda_best_mantained_integrated_soft, 1) + 0.3*std(qda_best_mantained_integrated_soft,0,1), '--', 'Color','r');
-plot(mean(qda_best_mantained_integrated_soft, 1) - 0.3*std(qda_best_mantained_integrated_soft,0,1), '--', 'Color','r');
+plot(mean(qda_best_sustained_integrated_soft, 1), 'Color','r');
+plot(mean(qda_best_sustained_integrated_soft, 1) + 0.3*std(qda_best_sustained_integrated_soft,0,1), '--', 'Color','r');
+plot(mean(qda_best_sustained_integrated_soft, 1) - 0.3*std(qda_best_sustained_integrated_soft,0,1), '--', 'Color','r');
 
 plot(mean(qda_merge_integrated_soft, 1), 'Color','k');
 plot(mean(qda_merge_integrated_soft, 1) + 0.3*std(qda_merge_integrated_soft,0,1), '--', 'Color','k');
 plot(mean(qda_merge_integrated_soft, 1) - 0.3*std(qda_merge_integrated_soft,0,1), '--', 'Color','k');
 hold off;
 legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
-    'QDA mantained mean', 'QDA mantained + std', 'QDA mantained - std', ...
+    'QDA sustained mean', 'QDA sustained + std', 'QDA sustained - std', ...
     'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
 xlim([0 min_durCF])
 ylim([0.0 1.0])
@@ -415,19 +417,19 @@ plot(mean(qda_best_shift_integrated_hard, 1), 'Color','b');
 % plot(mean(qda_best_shift_integrated_hard, 1) + 0.3*std(qda_best_shift_integrated_hard,0,1), '--', 'Color','b');
 % plot(mean(qda_best_shift_integrated_hard, 1) - 0.3*std(qda_best_shift_integrated_hard,0,1), '--', 'Color','b');
 
-plot(mean(qda_best_mantained_integrated_hard, 1), 'Color','r');
-% plot(mean(qda_best_mantained_integrated_hard, 1) + 0.3*std(qda_best_mantained_integrated_hard,0,1), '--', 'Color','r');
-% plot(mean(qda_best_mantained_integrated_hard, 1) - 0.3*std(qda_best_mantained_integrated_hard,0,1), '--', 'Color','r');
+plot(mean(qda_best_sustained_integrated_hard, 1), 'Color','r');
+% plot(mean(qda_best_sustained_integrated_hard, 1) + 0.3*std(qda_best_sustained_integrated_hard,0,1), '--', 'Color','r');
+% plot(mean(qda_best_sustained_integrated_hard, 1) - 0.3*std(qda_best_sustained_integrated_hard,0,1), '--', 'Color','r');
 
 plot(mean(qda_merge_integrated_hard, 1), 'Color','k');
 % plot(mean(qda_merge_integrated_hard, 1) + 0.3*std(qda_merge_integrated_hard,0,1), '--', 'Color','k');
 % plot(mean(qda_merge_integrated_hard, 1) - 0.3*std(qda_merge_integrated_hard,0,1), '--', 'Color','k');
 hold off;
 % legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
-%     'QDA mantained mean', 'QDA mantained + std', 'QDA mantained - std', ...
+%     'QDA sustained mean', 'QDA sustained + std', 'QDA sustained - std', ...
 %     'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
 legend({'QDA shift mean', ...
-    'QDA mantained mean', ...
+    'QDA sustained mean', ...
     'QDA merge mean'});
 xlim([0 min_durCF])
 ylim([0.0 1.0])
@@ -441,12 +443,13 @@ sgtitle([subject ' | raw probabilities and integration | TRAIN'])
 %% --> TEST set <--
 % test the best classifier in the test set
 time = 1; %s
-samples = time * sampleRate;
+samples = ceil(time * sampleRate);
 min_durCF = size(data{1}.cf, 1);
 acc_shift = nan(1, nqda);
-start_trial_id = 41; % trial at which start the test set
+start_trial_id_test = start_trial_id_train; % trial at which start the test set
+ntrial = size(classified_info_sustained{1}.startTrial, 1);
 end_trial_id = ntrial;
-test_trial = start_trial_id:end_trial_id;
+test_trial = start_trial_id_test:end_trial_id;
 ntest_trial = length(test_trial);
 
 % shift
@@ -465,28 +468,28 @@ end
 qda_shift_mean_acc = mean(shift_raw_best, 1);
 qda_shift_std_acc = std(shift_raw_best, 0, 1);
 
-% mantained
-mantained_raw_best = nan(ntest_trial, min_durCF);
-c_data = classified_data_mantained{idx_qda_mantained};
+% sustained
+sustained_raw_best = nan(ntest_trial, min_durCF);
+c_data = classified_data_sustained{idx_qda_sustained};
 for idx_test_trial = 1:ntest_trial
     idx_trial = test_trial(idx_test_trial);
-    c_start = classified_info_mantained{idx_qda_mantained}.startTrial(idx_trial);
+    c_start = classified_info_sustained{idx_qda_sustained}.startTrial(idx_trial);
     c_end = c_start + min_durCF - 1;
  
     qda_performance = c_data(c_start:c_end,1);
 
     idx_class = find(data{1}.typ(idx_trial) == classes);
-    mantained_raw_best(idx_test_trial,:) = c_data(c_start:c_end, idx_class);
+    sustained_raw_best(idx_test_trial,:) = c_data(c_start:c_end, idx_class);
 end
-qda_mantained_mean_acc = mean(mantained_raw_best, 1);
-qda_mantained_std_acc = std(mantained_raw_best, 0, 1);
+qda_sustained_mean_acc = mean(sustained_raw_best, 1);
+qda_sustained_std_acc = std(sustained_raw_best, 0, 1);
 
 % integration
 qda_best_shift_integrated_soft = ones(ntest_trial, min_durCF + 1) * start_itegrator;
-qda_best_mantained_integrated_soft = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+qda_best_sustained_integrated_soft = ones(ntest_trial, min_durCF + 1) * start_itegrator;
 qda_merge_integrated_soft = ones(ntest_trial, min_durCF + 1) * start_itegrator;
 qda_best_shift_integrated_hard = ones(ntest_trial, min_durCF + 1) * start_itegrator;
-qda_best_mantained_integrated_hard = ones(ntest_trial, min_durCF + 1) * start_itegrator;
+qda_best_sustained_integrated_hard = ones(ntest_trial, min_durCF + 1) * start_itegrator;
 qda_merge_integrated_hard = ones(ntest_trial, min_durCF + 1) * start_itegrator;
 for idx_test_trial=1:ntest_trial
     idx_trial = test_trial(idx_test_trial);
@@ -500,40 +503,40 @@ for idx_test_trial=1:ntest_trial
     c_shift_hard(c_shift_soft < 0.5) = 0;
     c_shift_hard(c_shift_soft == 0.5) = 0.5;
 
-    c_data_mantained = classified_data_mantained{idx_qda_mantained};
-    c_mantained_soft = c_data_mantained(c_start:c_end,idx_class);
-    c_mantained_hard = ones(min_durCF, 1);
-    c_mantained_hard(c_mantained_soft < 0.5) = 0;
-    c_mantained_hard(c_mantained_soft == 0.5) = 0.5;
+    c_data_sustained = classified_data_sustained{idx_qda_sustained};
+    c_sustained_soft = c_data_sustained(c_start:c_end,idx_class);
+    c_sustained_hard = ones(min_durCF, 1);
+    c_sustained_hard(c_sustained_soft < 0.5) = 0;
+    c_sustained_hard(c_sustained_soft == 0.5) = 0.5;
 
     % compute the integration
     for idx_sample=1:min_durCF
         % compute with soft predict
         qda_best_shift_integrated_soft(idx_test_trial, idx_sample + 1) = ...
            qda_best_shift_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
-        qda_best_mantained_integrated_soft(idx_test_trial, idx_sample + 1) = ...
-           qda_best_mantained_integrated_soft(idx_test_trial, idx_sample)* alpha + (1.0-alpha)*c_mantained_soft(idx_sample);
+        qda_best_sustained_integrated_soft(idx_test_trial, idx_sample + 1) = ...
+           qda_best_sustained_integrated_soft(idx_test_trial, idx_sample)* alpha + (1.0-alpha)*c_sustained_soft(idx_sample);
 
         if idx_sample < time_merge*sampleRate
             qda_merge_integrated_soft(idx_test_trial, idx_sample + 1) = ...
                qda_merge_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
         else
             qda_merge_integrated_soft(idx_test_trial, idx_sample + 1) = ...
-               qda_merge_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_mantained_soft(idx_sample);
+               qda_merge_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_sustained_soft(idx_sample);
         end
 
         % compute for hard predict
         qda_best_shift_integrated_hard(idx_test_trial, idx_sample + 1) = ...
            qda_best_shift_integrated_hard(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_hard(idx_sample);
-        qda_best_mantained_integrated_hard(idx_test_trial, idx_sample + 1) = ...
-           qda_best_mantained_integrated_hard(idx_test_trial, idx_sample)* alpha + (1.0-alpha)*c_mantained_hard(idx_sample);
+        qda_best_sustained_integrated_hard(idx_test_trial, idx_sample + 1) = ...
+           qda_best_sustained_integrated_hard(idx_test_trial, idx_sample)* alpha + (1.0-alpha)*c_sustained_hard(idx_sample);
 
         if idx_sample < time_merge*sampleRate
             qda_merge_integrated_hard(idx_test_trial, idx_sample + 1) = ...
                qda_merge_integrated_hard(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_hard(idx_sample);
         else
             qda_merge_integrated_hard(idx_test_trial, idx_sample + 1) = ...
-               qda_merge_integrated_hard(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_mantained_hard(idx_sample);
+               qda_merge_integrated_hard(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_sustained_hard(idx_sample);
         end
     end
 end
@@ -545,12 +548,12 @@ hold on;
 plot(qda_shift_mean_acc, 'Color','b');
 plot(qda_shift_mean_acc + 0.3*qda_shift_std_acc, '--', 'Color','b');
 plot(qda_shift_mean_acc - 0.3*qda_shift_std_acc, '--', 'Color','b');
-plot(qda_mantained_mean_acc, 'Color','r');
-plot(qda_mantained_mean_acc + 0.3*qda_mantained_std_acc, '--', 'Color','r');
-plot(qda_mantained_mean_acc - 0.3*qda_mantained_std_acc, '--', 'Color','r');
+plot(qda_sustained_mean_acc, 'Color','r');
+plot(qda_sustained_mean_acc + 0.3*qda_sustained_std_acc, '--', 'Color','r');
+plot(qda_sustained_mean_acc - 0.3*qda_sustained_std_acc, '--', 'Color','r');
 hold off;
-legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', 'QDA mantained mean', ...
-    'QDA mantained + std', 'QDA mantained - std'});
+legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', 'QDA sustained mean', ...
+    'QDA sustained + std', 'QDA sustained - std'});
 xlim([0 min_durCF])
 ylim([0.0 1.0])
 xticks(1:256:min_durCF)
@@ -564,16 +567,16 @@ plot(mean(qda_best_shift_integrated_soft, 1), 'Color','b');
 plot(mean(qda_best_shift_integrated_soft, 1) + 0.3*std(qda_best_shift_integrated_soft,0,1), '--', 'Color','b');
 plot(mean(qda_best_shift_integrated_soft, 1) - 0.3*std(qda_best_shift_integrated_soft,0,1), '--', 'Color','b');
 
-plot(mean(qda_best_mantained_integrated_soft, 1), 'Color','r');
-plot(mean(qda_best_mantained_integrated_soft, 1) + 0.3*std(qda_best_mantained_integrated_soft,0,1), '--', 'Color','r');
-plot(mean(qda_best_mantained_integrated_soft, 1) - 0.3*std(qda_best_mantained_integrated_soft,0,1), '--', 'Color','r');
+plot(mean(qda_best_sustained_integrated_soft, 1), 'Color','r');
+plot(mean(qda_best_sustained_integrated_soft, 1) + 0.3*std(qda_best_sustained_integrated_soft,0,1), '--', 'Color','r');
+plot(mean(qda_best_sustained_integrated_soft, 1) - 0.3*std(qda_best_sustained_integrated_soft,0,1), '--', 'Color','r');
 
 plot(mean(qda_merge_integrated_soft, 1), 'Color','k');
 plot(mean(qda_merge_integrated_soft, 1) + 0.3*std(qda_merge_integrated_soft,0,1), '--', 'Color','k');
 plot(mean(qda_merge_integrated_soft, 1) - 0.3*std(qda_merge_integrated_soft,0,1), '--', 'Color','k');
 hold off;
 legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
-    'QDA mantained mean', 'QDA mantained + std', 'QDA mantained - std', ...
+    'QDA sustained mean', 'QDA sustained + std', 'QDA sustained - std', ...
     'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
 xlim([0 min_durCF])
 ylim([0.0 1.0])
@@ -588,19 +591,19 @@ plot(mean(qda_best_shift_integrated_hard, 1), 'Color','b');
 % plot(mean(qda_best_shift_integrated_hard, 1) + 0.3*std(qda_best_shift_integrated_hard,0,1), '--', 'Color','b');
 % plot(mean(qda_best_shift_integrated_hard, 1) - 0.3*std(qda_best_shift_integrated_hard,0,1), '--', 'Color','b');
 
-plot(mean(qda_best_mantained_integrated_hard, 1), 'Color','r');
-% plot(mean(qda_best_mantained_integrated_hard, 1) + 0.3*std(qda_best_mantained_integrated_hard,0,1), '--', 'Color','r');
-% plot(mean(qda_best_mantained_integrated_hard, 1) - 0.3*std(qda_best_mantained_integrated_hard,0,1), '--', 'Color','r');
+plot(mean(qda_best_sustained_integrated_hard, 1), 'Color','r');
+% plot(mean(qda_best_sustained_integrated_hard, 1) + 0.3*std(qda_best_sustained_integrated_hard,0,1), '--', 'Color','r');
+% plot(mean(qda_best_sustained_integrated_hard, 1) - 0.3*std(qda_best_sustained_integrated_hard,0,1), '--', 'Color','r');
 
 plot(mean(qda_merge_integrated_hard, 1), 'Color','k');
 % plot(mean(qda_merge_integrated_hard, 1) + 0.3*std(qda_merge_integrated_hard,0,1), '--', 'Color','k');
 % plot(mean(qda_merge_integrated_hard, 1) - 0.3*std(qda_merge_integrated_hard,0,1), '--', 'Color','k');
 hold off;
 % legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
-%     'QDA mantained mean', 'QDA mantained + std', 'QDA mantained - std', ...
+%     'QDA sustained mean', 'QDA sustained + std', 'QDA sustained - std', ...
 %     'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
 legend({'QDA shift mean', ...
-    'QDA mantained mean', ...
+    'QDA sustained mean', ...
     'QDA merge mean'});
 xlim([0 min_durCF])
 ylim([0.0 1.0])
