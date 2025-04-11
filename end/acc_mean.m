@@ -47,7 +47,7 @@ for idx_file= 1: nFiles
     c_signal = c_signal(:,1:nchannels);
     channels_label = header.Label;
 
-    c_trial_with_eog = eog_detection(c_signal, header, 35, {'FP1', 'FP2', 'EOG'});
+    c_trial_with_eog = eog_detection(c_signal, header, 500, {'FP1', 'FP2', 'EOG'});
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 
      for idx_band = 1:nbands
@@ -139,7 +139,7 @@ for idx_trial_class = 1:2:ntrial
     i = i + 1;
 end
 trial_data = tmp;
-percentual_test = 0.3;
+percentual_test = 0.2;
 ntrial_test = ceil(percentual_test*ntrial/2) * 2; % total trial for test
 
 ntrial_train = ntrial - ntrial_test;
@@ -167,7 +167,6 @@ else
 end
 
 %% compute the classification for each qda (shift and sustained)
-time = 0.5; %%%%%%%%%%%%%%%% time to see the auc
 nqda = size(qda_filenames_shift, 2);
 classified_data_shift = cell(1, nqda);
 classified_data_sustained = cell(1, nqda);
@@ -243,11 +242,72 @@ end
 
 %% show the best qda auc for the shift in all the cf
 % training set
-samples = ceil(time * sampleRate);
+% samples = ceil(time * sampleRate);
+% y_true_train = nan(samples * ntrial_train,1);
+% y_pred_train = nan(samples * ntrial_train,1);
+% for idx_trial=1:ntrial_train
+%     c_start = classified_start_trial_shift(idx_trial) + min_durCUE;
+%     c_end = c_start + samples - 1;
+%     qda_performance = classified_data_shift{idx_qda_shift}(c_start:c_end,:);
+% 
+%     c_y_true = repmat(trial_typ(idx_trial), samples, 1);
+%     c_y_true(c_y_true == classes(1)) = 0;
+%     c_y_true(c_y_true == classes(2)) = 1;
+%     y_true_train((idx_trial-1)*samples+1:idx_trial*samples) = c_y_true;
+% 
+%     % qda_performance of 2 since the qda uses 0 for calss 730 and 1 for class 731
+%     y_pred_train((idx_trial-1)*samples+1:idx_trial*samples) = qda_performance(:,2);
+% end
+% 
+% y_true_test = nan(samples * ntrial_test, 1);
+% y_pred_test = nan(samples * ntrial_test, 1);
+% trial_test = ntrial_train:ntrial_train+ntrial_test;
+% for idx_trial=1:ntrial_test
+%     c_trial = trial_test(idx_trial);
+%     c_start = classified_start_trial_shift(c_trial) + min_durCUE;
+%     c_end = c_start + samples - 1;
+%     qda_performance = classified_data_shift{idx_qda_shift}(c_start:c_end,:);
+% 
+%     c_y_true = repmat(trial_typ(c_trial), samples, 1);
+%     c_y_true(c_y_true == classes(1)) = 0;
+%     c_y_true(c_y_true == classes(2)) = 1;
+%     y_true_test((idx_trial-1)*samples+1:idx_trial*samples) = c_y_true;
+% 
+%     % qda_performance of 2 since the qda uses 0 for calss 730 and 1 for class 731
+%     y_pred_test((idx_trial-1)*samples+1:idx_trial*samples) = qda_performance(:,2);
+% end
+% 
+% fig = figure('Units','normalized','OuterPosition',[0 0 1 1]);
+% subplot(1,2,1);
+% [xROC_shift_train, yROC_shift_train, ~, AUC_shift_train] = perfcurve(y_true_train, y_pred_train, 1);
+% plot(xROC_shift_train, yROC_shift_train, 'b-', 'LineWidth', 2);
+% hold on;
+% plot([0 1], [0 1], 'r--'); % Random classifier line
+% xlabel('False Positive Rate');
+% ylabel('True Positive Rate');
+% title(['ROC Curve (AUC = ' num2str(AUC_shift_train) ') | TRAIN']);
+% grid on;
+% 
+% subplot(1,2,2);
+% [xROC_shift_test, yROC_shift_test, ~, AUC_shift_test] = perfcurve(y_true_test, y_pred_test, 1);
+% plot(xROC_shift_test, yROC_shift_test, 'b-', 'LineWidth', 2);
+% hold on;
+% plot([0 1], [0 1], 'r--'); % Random classifier line
+% xlabel('False Positive Rate');
+% ylabel('True Positive Rate');
+% title(['ROC Curve (AUC = ' num2str(AUC_shift_test) ') | TEST']);
+% grid on;
+% sgtitle('SHIFT')
+% path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/calibFiles_acc/auc_shift.svg'];
+% print(fig, path_figure, '-dsvg');
+
+interval = [50 700]; % ms
+interval_sample = ceil(interval * sampleRate / 1000);
+samples = (interval_sample(2) - interval_sample(1)) + 1;
 y_true_train = nan(samples * ntrial_train,1);
 y_pred_train = nan(samples * ntrial_train,1);
 for idx_trial=1:ntrial_train
-    c_start = classified_start_trial_shift(idx_trial) + min_durCUE;
+    c_start = classified_start_trial_shift(idx_trial) + interval_sample(1);
     c_end = c_start + samples - 1;
     qda_performance = classified_data_shift{idx_qda_shift}(c_start:c_end,:);
 
@@ -262,14 +322,14 @@ end
 
 y_true_test = nan(samples * ntrial_test, 1);
 y_pred_test = nan(samples * ntrial_test, 1);
-trial_test = ntrial_train:ntrial_train+ntrial_test;
+trial_test = ntrial_train + 1:ntrial_train+ntrial_test;
 for idx_trial=1:ntrial_test
     c_trial = trial_test(idx_trial);
-    c_start = classified_start_trial_shift(c_trial) + min_durCUE;
+    c_start = classified_start_trial_shift(c_trial) + interval_sample(1);
     c_end = c_start + samples - 1;
     qda_performance = classified_data_shift{idx_qda_shift}(c_start:c_end,:);
 
-    c_y_true = repmat(trial_typ(idx_trial), samples, 1);
+    c_y_true = repmat(trial_typ(c_trial), samples, 1);
     c_y_true(c_y_true == classes(1)) = 0;
     c_y_true(c_y_true == classes(2)) = 1;
     y_true_test((idx_trial-1)*samples+1:idx_trial*samples) = c_y_true;
@@ -278,7 +338,7 @@ for idx_trial=1:ntrial_test
     y_pred_test((idx_trial-1)*samples+1:idx_trial*samples) = qda_performance(:,2);
 end
 
-figure();
+fig = figure('Units','normalized','OuterPosition',[0 0 1 1]);
 subplot(1,2,1);
 [xROC_shift_train, yROC_shift_train, ~, AUC_shift_train] = perfcurve(y_true_train, y_pred_train, 1);
 plot(xROC_shift_train, yROC_shift_train, 'b-', 'LineWidth', 2);
@@ -299,15 +359,80 @@ ylabel('True Positive Rate');
 title(['ROC Curve (AUC = ' num2str(AUC_shift_test) ') | TEST']);
 grid on;
 sgtitle('SHIFT')
+path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/calibFiles_acc/auc_shift.svg'];
+print(fig, path_figure, '-dsvg');
+
 
 %% show the best qda auc for the sustained in all the cf
 % training set
-period = [ceil(time*sampleRate), min_trial_data - minDurCue];
-samples = period(2) - period(1);
+% period = [ceil(time*sampleRate), min_trial_data - minDurCue];
+% samples = period(2) - period(1);
+% y_true_train = nan(samples * ntrial_train,1);
+% y_pred_train = nan(samples * ntrial_train,1);
+% for idx_trial=1:ntrial_train
+%     c_start = classified_start_trial_sustained(idx_trial) + min_durCUE + period(1);
+%     c_end = c_start + samples - 1;
+%     qda_performance = classified_data_sustained{idx_qda_sus}(c_start:c_end,:);
+% 
+%     c_y_true = repmat(trial_typ(idx_trial), samples, 1);
+%     c_y_true(c_y_true == classes(1)) = 0;
+%     c_y_true(c_y_true == classes(2)) = 1;
+%     y_true_train((idx_trial-1)*samples+1:idx_trial*samples) = c_y_true;
+% 
+%     % qda_performance of 2 since the qda uses 0 for calss 730 and 1 for class 731
+%     y_pred_train((idx_trial-1)*samples+1:idx_trial*samples) = qda_performance(:,2);
+% end
+% 
+% y_true_test = nan(samples * ntrial_test, 1);
+% y_pred_test = nan(samples * ntrial_test, 1);
+% trial_test = ntrial_train:ntrial_train+ntrial_test;
+% for idx_trial=1:ntrial_test
+%     c_trial = trial_test(idx_trial);
+%     c_start = classified_start_trial_sustained(c_trial) + min_durCUE + period(1);
+%     c_end = c_start + samples - 1;
+%     qda_performance = classified_data_sustained{idx_qda_sus}(c_start:c_end,:);
+% 
+%     c_y_true = repmat(trial_typ(c_trial), samples, 1);
+%     c_y_true(c_y_true == classes(1)) = 0;
+%     c_y_true(c_y_true == classes(2)) = 1;
+%     y_true_test((idx_trial-1)*samples+1:idx_trial*samples) = c_y_true;
+% 
+%     % qda_performance of 2 since the qda uses 0 for calss 730 and 1 for class 731
+%     y_pred_test((idx_trial-1)*samples+1:idx_trial*samples) = qda_performance(:,2);
+% end
+% 
+% fig = figure('Units','normalized','OuterPosition',[0 0 1 1]);
+% subplot(1,2,1);
+% [xROC_shift_train, yROC_shift_train, ~, AUC_shift_train] = perfcurve(y_true_train, y_pred_train, 1);
+% plot(xROC_shift_train, yROC_shift_train, 'b-', 'LineWidth', 2);
+% hold on;
+% plot([0 1], [0 1], 'r--'); % Random classifier line
+% xlabel('False Positive Rate');
+% ylabel('True Positive Rate');
+% title(['ROC Curve (AUC = ' num2str(AUC_shift_train) ') | TRAIN']);
+% grid on;
+% 
+% subplot(1,2,2);
+% [xROC_shift_test, yROC_shift_test, ~, AUC_shift_test] = perfcurve(y_true_test, y_pred_test, 1);
+% plot(xROC_shift_test, yROC_shift_test, 'b-', 'LineWidth', 2);
+% hold on;
+% plot([0 1], [0 1], 'r--'); % Random classifier line
+% xlabel('False Positive Rate');
+% ylabel('True Positive Rate');
+% title(['ROC Curve (AUC = ' num2str(AUC_shift_test) ') | TEST']);
+% grid on;
+% sgtitle('SUSTAINED')
+% path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/calibFiles_acc/auc_sostained.svg'];
+% print(fig, path_figure, '-dsvg');
+
+% only the periodo taken into account
+interval = [1500 2700]; % ms --> keep into consideration the cue period (wxw)
+interval_sample = ceil(interval * sampleRate / 1000); % convert ms to sample
+samples = interval_sample(2) - interval_sample(1) + 1;
 y_true_train = nan(samples * ntrial_train,1);
 y_pred_train = nan(samples * ntrial_train,1);
 for idx_trial=1:ntrial_train
-    c_start = classified_start_trial_sustained(idx_trial) + min_durCUE + period(1);
+    c_start = classified_start_trial_sustained(idx_trial) + interval_sample(1);
     c_end = c_start + samples - 1;
     qda_performance = classified_data_sustained{idx_qda_sus}(c_start:c_end,:);
 
@@ -322,10 +447,10 @@ end
 
 y_true_test = nan(samples * ntrial_test, 1);
 y_pred_test = nan(samples * ntrial_test, 1);
-trial_test = ntrial_train:ntrial_train+ntrial_test;
+trial_test = ntrial_train + 1:ntrial_train+ntrial_test;
 for idx_trial=1:ntrial_test
     c_trial = trial_test(idx_trial);
-    c_start = classified_start_trial_sustained(c_trial) + min_durCUE + period(1);
+    c_start = classified_start_trial_sustained(c_trial) + interval_sample(1);
     c_end = c_start + samples - 1;
     qda_performance = classified_data_sustained{idx_qda_sus}(c_start:c_end,:);
 
@@ -338,7 +463,7 @@ for idx_trial=1:ntrial_test
     y_pred_test((idx_trial-1)*samples+1:idx_trial*samples) = qda_performance(:,2);
 end
 
-figure();
+fig = figure('Units','normalized','OuterPosition',[0 0 1 1]);
 subplot(1,2,1);
 [xROC_shift_train, yROC_shift_train, ~, AUC_shift_train] = perfcurve(y_true_train, y_pred_train, 1);
 plot(xROC_shift_train, yROC_shift_train, 'b-', 'LineWidth', 2);
@@ -359,21 +484,23 @@ ylabel('True Positive Rate');
 title(['ROC Curve (AUC = ' num2str(AUC_shift_test) ') | TEST']);
 grid on;
 sgtitle('SUSTAINED')
+path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/calibFiles_acc/auc_sostained.svg'];
+print(fig, path_figure, '-dsvg');
 
 %% integrate the two best qda performances 
 alpha = 0.9;
+time = 1.3; % 1 fro the cue
 start_itegrator = 0.5;
-cf_dur = min_trial_data - min_durCUE; % cf looking the min_trial_data (should be = to min_durCF)
-qda_best_shift_integrated_soft = ones(ntrial_train, cf_dur + 1) * start_itegrator;
-qda_best_sustained_integrated_soft = ones(ntrial_train, cf_dur + 1) * start_itegrator;
-qda_merge_integrated_soft = ones(ntrial_train, cf_dur + 1) * start_itegrator;
-qda_best_shift_integrated_hard = ones(ntrial_train, cf_dur + 1) * start_itegrator;
-qda_best_sustained_integrated_hard = ones(ntrial_train, cf_dur + 1) * start_itegrator;
-qda_merge_integrated_hard = ones(ntrial_train, cf_dur + 1) * start_itegrator;
+qda_best_shift_integrated_soft = ones(ntrial_train, min_trial_data + 1) * start_itegrator;
+qda_best_sustained_integrated_soft = ones(ntrial_train, min_trial_data + 1) * start_itegrator;
+qda_merge_integrated_soft = ones(ntrial_train, min_trial_data + 1) * start_itegrator;
+qda_best_shift_integrated_hard = ones(ntrial_train, min_trial_data + 1) * start_itegrator;
+qda_best_sustained_integrated_hard = ones(ntrial_train, min_trial_data + 1) * start_itegrator;
+qda_merge_integrated_hard = ones(ntrial_train, min_trial_data + 1) * start_itegrator;
 for idx_train_trial=1:ntrial_train
     idx_trial = trial_train(idx_train_trial);
-    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift) + min_durCUE; 
-    c_end = c_start + cf_dur - 1;
+    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift); 
+    c_end = c_start + min_trial_data - 1;
     idx_class = find(trial_typ(idx_trial) == classes);
 
     c_data_shift = classified_data_shift{idx_qda_shift};
@@ -389,7 +516,7 @@ for idx_train_trial=1:ntrial_train
     c_sustained_hard(c_sustained_soft == 0.5) = 0.5;
 
     % compute the integration
-    for idx_sample=1:cf_dur
+    for idx_sample=1:min_trial_data
         % compute with soft predict
         qda_best_shift_integrated_soft(idx_train_trial, idx_sample + 1) = ...
            qda_best_shift_integrated_soft(idx_train_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
@@ -449,25 +576,25 @@ xticklabels(((1:256:min_trial_data) - 1)  / sampleRate)
 sgtitle([subject ' | integrated probabilities mean among trials | TRAIN'])
 
 %% Save the raws probabilities of both classifiers for the train set
-qda_shift_raw_train = nan(ntrial_train, cf_dur);
-qda_sus_raw_train = nan(ntrial_train, cf_dur);
+qda_shift_raw_train = nan(ntrial_train, min_trial_data);
+qda_sus_raw_train = nan(ntrial_train, min_trial_data);
 c_data_shift = classified_data_shift{idx_qda_shift};
 c_data_sus = classified_data_sustained{idx_qda_sus};
 for idx_trial_train = 1:ntrial_train
     idx_trial = trial_train(idx_trial_train);
-    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift) + min_durCUE;
-    c_end = c_start + cf_dur - 1;
+    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift);
+    c_end = c_start + min_trial_data - 1;
     idx_class = find(trial_typ(idx_trial) == classes);
     qda_shift_raw_train(idx_trial_train, :) = c_data_shift(c_start:c_end,idx_class);
 
-    c_start = classified_start_trial_sustained(idx_trial, idx_qda_sus) + min_durCUE;
-    c_end = c_start + cf_dur - 1;
+    c_start = classified_start_trial_sustained(idx_trial, idx_qda_sus);
+    c_end = c_start + min_trial_data - 1;
     qda_sus_raw_train(idx_trial_train, :) = c_data_sus(c_start:c_end,idx_class);
 end
 
 %% plot the best QDA for the two period
 % mean and std of the raw probabilities
-figure();
+fig1 = figure('Units','normalized','OuterPosition',[0 0 1 1]);
 subplot(1,3,1)
 hold on;
 plot(mean(qda_shift_raw_train, 1), 'Color','b');
@@ -479,10 +606,10 @@ plot(mean(qda_sus_raw_train, 1) - 0.3*std(qda_sus_raw_train, 0, 1), '--', 'Color
 hold off;
 legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', 'QDA sustained mean', ...
     'QDA sustained + std', 'QDA sustained - std'});
-xlim([0 cf_dur])
+xlim([0 min_trial_data])
 ylim([0.0 1.0])
-xticks(1:256:cf_dur)
-xticklabels(((1:256:cf_dur) - 1)  / sampleRate)
+xticks(1:256:min_trial_data)
+xticklabels(((1:256:min_trial_data) - 1)  / sampleRate)
 title('raws probabilities')
 
 % mean and std of integrated probabilities + the merged integration
@@ -503,10 +630,10 @@ hold off;
 legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
     'QDA sustained mean', 'QDA sustained + std', 'QDA sustained - std', ...
     'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
-xlim([0 cf_dur])
+xlim([0 min_trial_data])
 ylim([0.0 1.0])
-xticks(1:256:cf_dur)
-xticklabels(((1:256:cf_dur) - 1)  / sampleRate)
+xticks(1:256:min_trial_data)
+xticklabels(((1:256:min_trial_data) - 1)  / sampleRate)
 title('integrated with soft probabilities')
 
 % mean and std for the hard (before was only soft)
@@ -530,59 +657,61 @@ hold off;
 legend({'QDA shift mean', ...
     'QDA sustained mean', ...
     'QDA merge mean'});
-xlim([0 cf_dur])
+xlim([0 min_trial_data])
 ylim([0.0 1.0])
-xticks(1:256:cf_dur)
-xticklabels(((1:256:cf_dur) - 1)  / sampleRate)
+xticks(1:256:min_trial_data)
+xticklabels(((1:256:min_trial_data) - 1)  / sampleRate)
 title('integrated with hard probabilities')
 
 sgtitle([subject ' | raw probabilities and integration | TRAIN'])
+path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/calibFiles_acc/results_train.svg'];
+print(fig1, path_figure, '-dsvg');
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% --> TEST set <--
 % raw probabilities
 c_data_shift = classified_data_shift{idx_qda_shift};
 c_data_sus = classified_data_sustained{idx_qda_sus};
-shift_raw_best = nan(ntrial_test, cf_dur);
-sustained_raw_best = nan(ntrial_test, cf_dur);
+shift_raw_best = nan(ntrial_test, min_trial_data);
+sustained_raw_best = nan(ntrial_test, min_trial_data);
 for idx_test_trial = 1:ntrial_test
     idx_trial = trial_test(idx_test_trial);
-    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift) + min_durCUE;
-    c_end = c_start + cf_dur - 1;
+    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift);
+    c_end = c_start + min_trial_data - 1;
     idx_class = find(trial_typ(idx_trial) == classes);
 
     shift_raw_best(idx_test_trial,:) = c_data_shift(c_start:c_end, idx_class);
 
-    c_start = classified_start_trial_sustained(idx_trial, idx_qda_sus) + min_durCUE;
-    c_end = c_start + cf_dur - 1;
+    c_start = classified_start_trial_sustained(idx_trial, idx_qda_sus);
+    c_end = c_start + min_trial_data - 1;
     sustained_raw_best(idx_test_trial,:) = c_data_sus(c_start:c_end, idx_class);
 end
 
 % integration
-qda_best_shift_integrated_soft = ones(ntrial_test, cf_dur + 1) * start_itegrator;
-qda_best_sustained_integrated_soft = ones(ntrial_test, cf_dur + 1) * start_itegrator;
-qda_merge_integrated_soft = ones(ntrial_test, cf_dur + 1) * start_itegrator;
-qda_best_shift_integrated_hard = ones(ntrial_test, cf_dur + 1) * start_itegrator;
-qda_best_sustained_integrated_hard = ones(ntrial_test, cf_dur + 1) * start_itegrator;
-qda_merge_integrated_hard = ones(ntrial_test, cf_dur + 1) * start_itegrator;
+qda_best_shift_integrated_soft = ones(ntrial_test, min_trial_data + 1) * start_itegrator;
+qda_best_sustained_integrated_soft = ones(ntrial_test, min_trial_data + 1) * start_itegrator;
+qda_merge_integrated_soft = ones(ntrial_test, min_trial_data + 1) * start_itegrator;
+qda_best_shift_integrated_hard = ones(ntrial_test, min_trial_data + 1) * start_itegrator;
+qda_best_sustained_integrated_hard = ones(ntrial_test, min_trial_data + 1) * start_itegrator;
+qda_merge_integrated_hard = ones(ntrial_test, min_trial_data + 1) * start_itegrator;
 for idx_test_trial=1:ntrial_test
     idx_trial = trial_test(idx_test_trial);
-    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift) + min_durCUE; 
-    c_end = c_start + cf_dur - 1;
+    c_start = classified_start_trial_shift(idx_trial, idx_qda_shift); 
+    c_end = c_start + min_trial_data - 1;
     idx_class = find(trial_typ(idx_trial) == classes);
 
     c_data_shift = classified_data_shift{idx_qda_shift};
     c_shift_soft = c_data_shift(c_start:c_end,idx_class);
-    c_shift_hard = ones(cf_dur, 1);
+    c_shift_hard = ones(min_trial_data, 1);
     c_shift_hard(c_shift_soft < 0.5) = 0;
 
     c_data_sustained = classified_data_sustained{idx_qda_sus};
     c_sustained_soft = c_data_sustained(c_start:c_end,idx_class);
-    c_sustained_hard = ones(cf_dur, 1);
+    c_sustained_hard = ones(min_trial_data, 1);
     c_sustained_hard(c_sustained_soft < 0.5) = 0;
 
     % compute the integration
-    for idx_sample=1:cf_dur
+    for idx_sample=1:min_trial_data
         % compute with soft predict
         qda_best_shift_integrated_soft(idx_test_trial, idx_sample + 1) = ...
            qda_best_shift_integrated_soft(idx_test_trial, idx_sample)*alpha + (1.0-alpha)*c_shift_soft(idx_sample);
@@ -614,7 +743,7 @@ for idx_test_trial=1:ntrial_test
 end
 
 % plot
-figure();
+fig2 = figure('Units','normalized','OuterPosition',[0 0 1 1]);
 subplot(1,3,1)
 hold on;
 plot(mean(shift_raw_best, 1), 'Color','b');
@@ -626,10 +755,10 @@ plot(mean(sustained_raw_best, 1) - 0.3*std(sustained_raw_best, 0, 1), '--', 'Col
 hold off;
 legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', 'QDA sustained mean', ...
     'QDA sustained + std', 'QDA sustained - std'});
-xlim([0 cf_dur])
+xlim([0 min_trial_data])
 ylim([0.0 1.0])
-xticks(1:256:cf_dur)
-xticklabels(((1:256:cf_dur) - 1)  / sampleRate)
+xticks(1:256:min_trial_data)
+xticklabels(((1:256:min_trial_data) - 1)  / sampleRate)
 title('raws probabilities')
 
 % mean and std of integrated probabilities + the merged integration
@@ -650,10 +779,10 @@ hold off;
 legend({'QDA shift mean', 'QDA shift + std', 'Qda shift - std', ...
     'QDA sustained mean', 'QDA sustained + std', 'QDA sustained - std', ...
     'QDA merge mean', 'QDA merge + std', 'QDA merge - std'});
-xlim([0 cf_dur])
+xlim([0 min_trial_data])
 ylim([0.0 1.0])
-xticks(1:256:cf_dur)
-xticklabels(((1:256:cf_dur) - 1)  / sampleRate)
+xticks(1:256:min_trial_data)
+xticklabels(((1:256:min_trial_data) - 1)  / sampleRate)
 title('integrated with soft probabilities')
 
 % mean and std for the hard (before was only soft)
@@ -677,10 +806,30 @@ hold off;
 legend({'QDA shift mean', ...
     'QDA sustained mean', ...
     'QDA merge mean'});
-xlim([0 cf_dur])
+xlim([0 min_trial_data])
 ylim([0.0 1.0])
-xticks(1:256:cf_dur)
-xticklabels(((1:256:cf_dur) - 1)  / sampleRate)
+xticks(1:256:min_trial_data)
+xticklabels(((1:256:min_trial_data) - 1)  / sampleRate)
 title('integrated with hard probabilities')
 
 sgtitle([subject ' | raw probabilities and integration | TEST'])
+path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/calibFiles_acc/results_test.svg'];
+print(fig2, path_figure, '-dsvg');
+
+
+%% save the probabilities
+test.raw.shift = mean(qda_shift_raw_train, 1);
+test.raw.sustained = mean(qda_shift_raw_train, 1);
+test.integrated.shift_hard = mean(qda_best_shift_integrated_hard, 1);
+test.integrated.shift_soft = mean(qda_best_shift_integrated_soft, 1);
+test.integrated.sustained_hard = mean(qda_best_sustained_integrated_hard, 1);
+test.integrated.sustained_soft = mean(qda_best_sustained_integrated_soft, 1);
+
+train.raw.shift = mean(shift_raw_best, 1);
+train.raw.sustained = mean(sustained_raw_best, 1);
+train.integrated.shift_hard = mean(qda_best_shift_integrated_hard, 1);
+train.integrated.shift_soft = mean(qda_best_shift_integrated_soft, 1);
+train.integrated.sustained_hard = mean(qda_best_sustained_integrated_hard, 1);
+train.integrated.sustained_soft = mean(qda_best_sustained_integrated_soft, 1);
+
+save(['/home/paolo/cvsa_ws/record/probabilities/' subject '.mat'], 'test',"train")
