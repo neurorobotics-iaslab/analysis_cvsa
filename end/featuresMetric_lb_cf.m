@@ -1,10 +1,11 @@
 %% compute the fischer to understand features using the log band
-%% REASONING IN ALL THE TRIAL
+%% REASONING FOR THE ALL CF PART --> create the dataset
 clc; clearvars;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 
 %% Initialization
+create_dataset = true;
 a = 4:2:18;
 b = a+2;
 c = [a; b];
@@ -42,8 +43,8 @@ if ischar(filenames)
 end
 subject = filenames{1}(1:2);
 %% concatenate the files
-trial_with_eog = [];
 nFiles = length(filenames);
+trial_with_eog = [];
 for idx_file= 1: nFiles
     fullpath_file = fullfile(pathname, filenames{idx_file});
     disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', filenames{idx_file}]);
@@ -77,7 +78,7 @@ for idx_file= 1: nFiles
         headers{idx_band} = c_header;
     end
 end
-
+disp(['trial remuved: ' num2str(sum(trial_with_eog))])
 
 %% Labelling data 
 [~, channelsSelected] = ismember(channels_select, channels_label);
@@ -93,6 +94,7 @@ fixDUR = events.DUR(events.TYP == 786);
 
 cfPOS = events.POS(events.TYP == 781);
 cfDUR = events.DUR(events.TYP == 781);
+mincueDur = min(cueDUR);
 
 %% Trial extraction
 ntrial = size(fixPOS, 1);
@@ -105,7 +107,7 @@ for idx_trial = 1:ntrial
     trial_end(idx_trial) = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
 end
 
-min_trial_data = min(trial_end - trial_start);
+min_trial_data = min(trial_end - trial_start+1);
 trial_data = nan(min_trial_data, nbands, nchannels, ntrial);
 for idx_band = 1:nbands
     c_signal = signals{idx_band};
@@ -138,91 +140,30 @@ for idx_trial_class = 1:2:ntrial
     i = i + 1;
 end
 trial_data = tmp;
+percentual_test = 0.2;
+ntrial_test = ceil(percentual_test*ntrial/2) * 2; % total trial for test
 
-%% Fisher score in all the trial (cue + cf) and for each window
-nrows = 4;
-logband_hz = sampleRate;
-wlength = 0.10; %s
-wlength = ceil(wlength * logband_hz);
-overlap = 0.05; %s
-overlap = ceil(overlap * logband_hz);
-nwindows_calib = round((min_trial_data - wlength)/overlap) + 1;
-windows_center = zeros(1, nwindows_calib);plot_downsampling = 2;
-handles = [];
-cl = -inf;
-fig1 = figure('Units','normalized','OuterPosition',[0 0 1 1], 'Visible','off');
-fischers_calib = zeros(nchannelsSelected, nbands, nwindows_calib);
-typ = nan(nwindows_calib, 1);
-for idx_w = 1:nwindows_calib
-    mean_c1 = nan(nchannelsSelected, nbands);
-    mean_c2 = nan(nchannelsSelected, nbands);
-    std_c1 = nan(nchannelsSelected, nbands);
-    std_c2 = nan(nchannelsSelected, nbands);
-    start_w = (idx_w-1)*overlap + 1;
-    end_w = start_w + wlength - 1;
-    if end_w > size(trial_data, 1)
-        end_w = size(trial_data, 1);
-    end
+trial_data_train = trial_data(:,:,:,1:end-ntrial_test);
+ntrial_train = ntrial - ntrial_test;
+trial_typ_train  = trial_typ(1:ntrial_train);
 
-    for idx_ch=1:nchannelsSelected
-        idx_chSel = channelsSelected(idx_ch);
-        for idx_band=1:nbands
-            mean_c1(idx_ch, idx_band) = mean(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(1)), 'all');
-            mean_c2(idx_ch, idx_band) = mean(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(2)), 'all');
-            std_c1(idx_ch, idx_band) = std(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(1)), 0, 'all');
-            std_c2(idx_ch, idx_band) = std(trial_data(start_w:end_w,idx_band,idx_chSel,trial_typ == classes(2)), 0, 'all');
-        end
-    end
-
-    windows_center(idx_w) = (start_w + end_w) / 2;
-    fischers_calib(:,:,idx_w) = abs(mean_c1 - mean_c2) ./ sqrt(std_c1.^2 + std_c2.^2);
-    if mod(idx_w, plot_downsampling) == 0
-        % calculate fisher
-        subplot(nrows, ceil(nwindows_calib/nrows/plot_downsampling), idx_w/plot_downsampling)
-        c_fisher = fischers_calib(:,:,idx_w);
-
-        % show the fisher features
-        imagesc(c_fisher);
-        ylabel('channels');
-        ynew = 1:nchannelsSelected;
-        set(gca, 'YTick',ynew, 'YTickLabel', channels_select);
-        xlabel('frequencies');
-        xnew = 1:nbands;
-        x_label = bands_str;
-        set(gca, 'XTick',xnew, 'XTickLabel',x_label);
-        handles = [handles gca];
-        cl = max(cl, max(abs(c_fisher), [], 'all'));
-        if start_w > min(cueDUR)
-            title(['cf | ' num2str(idx_w)])
-        else
-            title(['cue | ' num2str(idx_w)])
-        end
-    end
-
-    if start_w > min(cueDUR)
-        typ(idx_w) = cf_event;
-    end
-end
-set(handles, 'clim', [0 cl])
-sgtitle([subject ' | fisher score for some windows | CALIBRATION FILES']);
-path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/allFile_allCf/windows_fisher.svg'];
-print(fig1, path_figure, '-dsvg');
-close(fig1);
-
-%% fisher for all cf trial no cue
-minDurCue = min(cueDUR);
-% trial_data_train = trial_data(:,:,:,1:end-20);
-% trial_typ_train = trial_typ(1:end-20);
+%% fisher for the all cf part
+% only interest period
+mean_c1 = nan(nchannelsSelected, nbands);
+mean_c2 = nan(nchannelsSelected, nbands);
+std_c1 = nan(nchannelsSelected, nbands);
+std_c2 = nan(nchannelsSelected, nbands);
 for idx_ch=1:nchannelsSelected
     idx_chSel = channelsSelected(idx_ch);
+
     for idx_band=1:nbands
-        mean_c1(idx_ch, idx_band) = mean(trial_data(minDurCue:end,idx_band,idx_chSel,trial_typ == classes(1)), 'all');
-        mean_c2(idx_ch, idx_band) = mean(trial_data(minDurCue:end,idx_band,idx_chSel,trial_typ == classes(2)), 'all');
-        std_c1(idx_ch, idx_band) = std(trial_data(minDurCue:end,idx_band,idx_chSel,trial_typ == classes(1)), 0, 'all');
-        std_c2(idx_ch, idx_band) = std(trial_data(minDurCue:end,idx_band,idx_chSel,trial_typ == classes(2)), 0, 'all');
+        mean_c1(idx_ch, idx_band) = mean(trial_data_train(mincueDur:end,idx_band,idx_chSel,trial_typ_train == classes(1)), 'all');
+        mean_c2(idx_ch, idx_band) = mean(trial_data_train(mincueDur:end,idx_band,idx_chSel,trial_typ_train == classes(2)), 'all');
+        std_c1(idx_ch, idx_band) = std(trial_data_train(mincueDur:end,idx_band,idx_chSel,trial_typ_train == classes(1)), 0, 'all');
+        std_c2(idx_ch, idx_band) = std(trial_data_train(mincueDur:end,idx_band,idx_chSel,trial_typ_train == classes(2)), 0, 'all');
     end
 end
-fig2 = figure('Visible','off');
+fig1 = figure();
 fisher_all_calib = abs(mean_c1 - mean_c2) ./ sqrt(std_c1.^2 + std_c2.^2);
 imagesc(fisher_all_calib);
 ylabel('channels');
@@ -231,20 +172,58 @@ set(gca, 'YTick',ynew, 'YTickLabel', channels_select);
 xlabel('frequencies');
 xnew = 1:nbands;
 x_label = bands_str;
-set(gca, 'XTick',xnew, 'XTickLabel',x_label);
-title([subject ' | fisher score for cf | CALIBRATION FILES']);
-path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/allFile_allCf/fisher_allCF.svg'];
-print(fig2, path_figure, '-dsvg');
-close(fig2);
+set(gca, 'XTick',xnew, 'XTickLabel',x_label); 
+title([subject ' | fisher score for all cf | CALIBRATION FILES']);
+path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/trainFile_cf/fisher.svg'];
+print(fig1, path_figure, '-dsvg');
+
+%% Fisher score in all the trial (cue + cf) and for each window 
+logband_hz = sampleRate;
+wlength = 0.10; %s
+wlength = ceil(wlength * logband_hz);
+overlap = 0.05; %s
+overlap = ceil(overlap * logband_hz);
+nwindows = round((min_trial_data - wlength)/overlap) + 1;
+windows_center = zeros(1, nwindows);
+fischers = zeros(nchannelsSelected, nbands, nwindows);
+typ = nan(nwindows, 1);
+for idx_w = 1:nwindows
+    mean_c1 = nan(nchannelsSelected, nbands);
+    mean_c2 = nan(nchannelsSelected, nbands);
+    std_c1 = nan(nchannelsSelected, nbands);
+    std_c2 = nan(nchannelsSelected, nbands);
+    start_w = (idx_w-1)*overlap + 1;
+    end_w = start_w + wlength - 1;
+    if end_w > size(trial_data_train, 1)
+        end_w = size(trial_data_train, 1);
+    end
+
+    for idx_ch=1:nchannelsSelected
+        idx_chSel = channelsSelected(idx_ch);
+        for idx_band=1:nbands
+            mean_c1(idx_ch, idx_band) = mean(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ_train == classes(1)), 'all');
+            mean_c2(idx_ch, idx_band) = mean(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ_train == classes(2)), 'all');
+            std_c1(idx_ch, idx_band) = std(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ_train == classes(1)), 0, 'all');
+            std_c2(idx_ch, idx_band) = std(trial_data_train(start_w:end_w,idx_band,idx_chSel,trial_typ_train == classes(2)), 0, 'all');
+        end
+    end
+
+    windows_center(idx_w) = (start_w + end_w) / 2;
+    fischers(:,:,idx_w) = abs(mean_c1 - mean_c2) ./ sqrt(std_c1.^2 + std_c2.^2);
+
+    if start_w > min(cueDUR)
+        typ(idx_w) = cf_event;
+    end
+end
 
 %% metrics for the features selection all x w
 max_nfeatures_allxw = 27;
-allxw_img_calib = zeros(max_nfeatures_allxw, nwindows_calib);
+allxw_img_calib = zeros(max_nfeatures_allxw, nwindows);
 for c_nf=1:max_nfeatures_allxw
     [tot_sortedValues, tot_linearIndices_calib] = maxk(fisher_all_calib(:), c_nf);
 
-    for idx_w=1:nwindows_calib
-        c_fischer = fischers_calib(:,:,idx_w); % take only interested values
+    for idx_w=1:nwindows
+        c_fischer = fischers(:,:,idx_w); % take only interested values
         [c_sortedValues, c_linearIndices] = maxk(c_fischer(:), c_nf);
         [c_rows, c_cols] = ind2sub(size(c_fischer), c_linearIndices);
 
@@ -257,10 +236,10 @@ max_allxw_calib = max(abs(allxw_img_calib), [], 'all');
 allxw_img_calib = allxw_img_calib / max_allxw_calib;
 max_allxw_calib = max(abs(allxw_img_calib), [], 'all');
 
-time_diff = zeros(1, nwindows_calib);
+time_diff = zeros(1, nwindows);
 time_diff(2:end) = ((windows_center(1:end-1) + windows_center(2:end)) / 2) / sampleRate;
 
-fig3 = figure('Units','normalized','OuterPosition',[0 0 1 1]);
+fig2 = figure('Units','normalized','OuterPosition',[0 0 1 1]);
 cf_start = find(typ == cf_event, 1);
 imagesc(allxw_img_calib);
 hold on;
@@ -273,49 +252,45 @@ yticklabels(1:max_nfeatures_allxw)
 set(gca, 'clim', [0 max_allxw_calib])
 xlabel('time [s]')
 title([subject ' | window features vs all cf features | CALIBRATION FILES'])
-path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/allFile_allCf/fisher_allxw.svg'];
-print(fig3, path_figure, '-dsvg');
+path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/trainFile_cf/features_allxw.svg'];
+print(fig2, path_figure, '-dsvg');
 
+%% save the datasets %%%%%%%%%%%%%%%%%%
+% only interested period
+if create_dataset
+    mincfDur = size(trial_data_train, 1) - mincueDur + 1;
+    info.files = filenames;
+    info.channelsLabel = channels_label;
+    info.startTrial    = nan(ntrial,1);
+    for c_nf=1:max_nfeatures_allxw
+        [tot_sortedValues, tot_linearIndices_calib] = maxk(fisher_all_calib(:), c_nf);
+        [f_idx_selChans, f_idx_band] = ind2sub(size(fisher_all_calib), tot_linearIndices_calib);
 
-%% metrics for the features selection w x w
-max_nfeatures_wxw = 27;
-min_nfeatures_wxw = 1;
-nfeatures_wxw = min_nfeatures_wxw:max_nfeatures_wxw;
-nrows = 5;
-fig4 = figure('Units','normalized','OuterPosition',[0 0 1 1]);
-for idx_c_nf = 1:length(nfeatures_wxw)
-    c_nf = nfeatures_wxw(idx_c_nf);
-    wxw_img = zeros(nwindows_calib);
-    for idx_w1=1:nwindows_calib
-        c1_fischer = fischers_calib(:,:,idx_w1);
-        [c1_sortedValues, c1_linearIndices] = maxk(c1_fischer(:), c_nf);
-        for idx_w2=1:nwindows_calib
-            c2_fischer = fischers_calib(:,:,idx_w2);
-            [c2_sortedValues, c2_linearIndices] = maxk(c2_fischer(:), c_nf);
+        info.bandSelected = bands(f_idx_band);
+        info.bandSelected = vertcat(info.bandSelected{:});
+        info.chSelected = channelsSelected(f_idx_selChans);
 
-            n_wxw_intersection = length(intersect(c1_linearIndices, c2_linearIndices));
-            n_wxw_union = length(union(c1_linearIndices, c2_linearIndices));
+        X = nan(mincfDur*ntrial, c_nf);
+        y = nan(mincfDur*ntrial, 1);
 
-            wxw_img(idx_w1,idx_w2) = n_wxw_intersection / c_nf;
+        for idx_trial = 1:ntrial
+            
+            for idx_f = 1:c_nf
+                c_channel = channelsSelected(f_idx_selChans(idx_f));
+                c_band = f_idx_band(idx_f);
+                X((idx_trial-1)*mincfDur+1:idx_trial*mincfDur, idx_f) = ...
+                    trial_data(mincueDur:end,c_band, c_channel, idx_trial);
+            end
+            y((idx_trial-1)*mincfDur+1:idx_trial*mincfDur) = repmat(trial_typ(idx_trial), mincfDur, 1);
+
+            info.startTrial(idx_trial) = (idx_trial-1)*mincfDur +1;
         end
+        info.sampleRate = sampleRate;
+        info.filterOrder = filterOrder;
+        info.nTest = ntrial_test;
+        info.typ = trial_typ;
+        info.interval_sample = [0 min_trial_data];
+        save_path = [pathname(1:end-4) 'two_classifier/dataset/cf/cf_data' num2str(c_nf) '.mat'];
+        save(save_path, 'X', 'y', 'info')
     end
-    max_wxw = max(abs(wxw_img), [], 'all');
-    wxw_img = wxw_img / max_wxw;
-    max_wxw = max(abs(wxw_img), [], 'all');
-
-    subplot(nrows, ceil((max_nfeatures_wxw-min_nfeatures_wxw + 1)/nrows), idx_c_nf)
-    hold on;
-    imagesc(wxw_img);
-    plot([cf_start, cf_start], [0 nwindows_calib], 'k');
-    hold off
-    set(gca, 'clim', [0 max_wxw])
-    xticks(1:7:size(windows_center,2))
-    xticklabels(windows_center(1:7:end)/sampleRate)
-    yticks(1:7:size(windows_center,2))
-    yticklabels(windows_center(1:7:end)/sampleRate)
-    title(['n features: ' num2str(c_nf)])
 end
-sgtitle([subject ' | overlap ratio between windows | CALIBRATION FILES'])
-path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/allFile_allCf/fisher_wxw.svg'];
-print(fig4, path_figure, '-dsvg');
-

@@ -1,6 +1,6 @@
 %% compute the fischer to understand features using the log band
 %% REASONING FOR THE SUSTAINED PART --> create the dataset
-clc; %clearvars;
+clc; clearvars;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 
@@ -148,7 +148,7 @@ trial_typ_train  = trial_typ(1:ntrial_train);
 
 %% fisher for the susteined part
 % only interest period
-interval = [1500 2700]; % ms --> keep into consideration the cue period (wxw)
+interval = [2100 4500]; % ms --> keep into consideration the cue period (wxw)
 interval_sample = ceil(interval * sampleRate / 1000); % convert ms to sample
 
 mean_c1 = nan(nchannelsSelected, nbands);
@@ -260,7 +260,7 @@ print(fig2, path_figure, '-dsvg');
 %% save the datasets %%%%%%%%%%%%%%%%%%
 % only interested period
 if create_dataset
-    period = (interval_sample(2) - interval_sample(1)) + 1;
+    samples = (interval_sample(2) - interval_sample(1)) + 1;
     info.files = filenames;
     info.channelsLabel = channels_label;
     info.startTrial    = nan(ntrial,1);
@@ -272,26 +272,30 @@ if create_dataset
         info.bandSelected = vertcat(info.bandSelected{:});
         info.chSelected = channelsSelected(f_idx_selChans);
 
-        X = nan(period*ntrial, c_nf);
-        y = nan(period*ntrial, 1);
+        X = nan(samples*ntrial, c_nf);
+        y = nan(samples*ntrial, 1);
 
         for idx_trial = 1:ntrial
             
             for idx_f = 1:c_nf
                 c_channel = channelsSelected(f_idx_selChans(idx_f));
                 c_band = f_idx_band(idx_f);
-                X((idx_trial-1)*period+1:idx_trial*period, idx_f) = ...
+                X((idx_trial-1)*samples+1:idx_trial*samples, idx_f) = ...
                     trial_data(interval_sample(1):interval_sample(2),c_band, c_channel, idx_trial);
             end
-            y((idx_trial-1)*period+1:idx_trial*period) = repmat(trial_typ(idx_trial), period, 1);
+            y((idx_trial-1)*samples+1:idx_trial*samples) = repmat(trial_typ(idx_trial), samples, 1);
 
-            info.startTrial(idx_trial) = (idx_trial-1)*period +1;
+            info.startTrial(idx_trial) = (idx_trial-1)*samples +1;
         end
         info.sampleRate = sampleRate;
         info.filterOrder = filterOrder;
         info.nTest = ntrial_test;
         info.typ = trial_typ;
+        info.interval_sample = interval_sample;
         save_path = [pathname(1:end-4) 'two_classifier/dataset/sustained/sustained_data' num2str(c_nf) '.mat'];
         save(save_path, 'X', 'y', 'info')
+        if c_nf == 3
+            disp('here')
+        end
     end
 end

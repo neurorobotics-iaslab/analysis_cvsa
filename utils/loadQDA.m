@@ -7,6 +7,8 @@ function qda = loadQDA(path_file)
     qda.subject     = c_qda.QdaCfg.params.subject;
     qda.samplerate  = c_qda.QdaCfg.params.sampleRate;
     qda.filterOrder = c_qda.QdaCfg.params.filterOrder;
+    qda.interval_samples = c_qda.QdaCfg.params.interval_samples;
+    qda.auc_validationset = c_qda.QdaCfg.params.auc_validation;
 
     priors = nan(1, qda.nclasses);
     classes = nan(1, qda.nclasses);

@@ -62,16 +62,17 @@ for idx_file=1:nfiles
         c_header = headers{idx_band};
         c_header.sampleRate = header.SampleRate;
         c_header.channels_labels = header.Label;
-        c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
-        c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
-        c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
-        c_header.startNewFile = cat(1, c_header.startNewFile, size(signals{idx_band}, 1) + 1);
-
+        if isempty(find(header.EVENT.TYP == 2, 1)) % no eye calibration
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
+        else
+            k = find(header.EVENT.TYP == 1, 1);
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP(k:end));
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR(k:end));
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS(k:end) + size(signals{idx_band}, 1));
+        end
         signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
-        c_header.ths = cat(1, c_header.ths, repmat({[1.0 1.0]},size(signal_processed, 1), 1));
-        c_header.ths_rejection = cat(1, c_header.ths_rejection, repmat({ths_rejection}, size(signal_processed, 1), 1));
-        c_header.bufferSize_integrator = cat(1, c_header.bufferSize_integrator, repmat(bufferSize_integrator, size(signal_processed, 1), 1));
-        c_header.alpha = cat(1, c_header.alpha, repmat(alpha, size(signal_processed, 1), 1));
         headers{idx_band} = c_header;
     end
 end
@@ -95,7 +96,7 @@ for idx_band=nbands:nbands
     nplotCF  = floor(size(data{idx_band}.cf,  1) / (sampleRate * step_time_toplot));
     nplot = nplotFIX + nplotCUE + nplotCF;
 
-    figure();
+    fig1 = figure('Units','normalized','OuterPosition',[0 0 1 1]);
     
     % plot the fixation
     for idx_nplot = 1:nplotFIX
@@ -156,6 +157,8 @@ for idx_band=nbands:nbands
     all_title = ['subject: ' subject ' | br-bl | band: ' bands_str{idx_band} ' | all files concatenated'];
     sgtitle(all_title)
 end
+path_figure = ['/home/paolo/cvsa_ws/img_results/27_features/' subject '/calibFiles_acc/topoplot.svg'];
+print(fig1, path_figure, '-dsvg');
 
 
 % %% diff features plot in mean (br - bl)
