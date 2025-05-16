@@ -1,5 +1,9 @@
 function s_out = proc_512hz(signal, sampleRate, band, filtOrder, avg)
 disp(['   [INFO] band: ' num2str(band(1)) '-' num2str(band(2))])
+
+% laplacian
+
+
 % filter alpha band
 disp('      [proc] applying filtering')
 [b, a] = butter(filtOrder, band(2)*(2/sampleRate),'low');
@@ -22,4 +26,5 @@ end
 % disp apply log
 disp('      [proc] applying log');
 s_out = log(s_out);
+
 end
