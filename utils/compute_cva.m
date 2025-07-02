@@ -6,6 +6,7 @@
 %       OUTPUT:
 %           - c: computed cva (1 x channels)
 function c = compute_cva(signal, typ)
+addpath('/home/paolo/Local/cnbi-smrtrain/toolboxes/cva')
 nchannels = size(signal, 2);
 ntrial = length(typ);
 nsamples = size(signal, 1);

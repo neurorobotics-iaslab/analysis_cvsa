@@ -1,0 +1,311 @@
+%% eeg_lab processing
+clc; clearvars;
+addpath(genpath('/home/paolo/Local/Matlab/EEG_preprocessing_toolbox'));
+
+%% start
+subject = 'c7';
+day = '20250217';
+
+DATA_PATH = ['/home/paolo/cvsa_ws/record/' subject '/' day '/calibration/gdf'];
+files = dir([DATA_PATH '/*.gdf']);
+
+load('/home/paolo/chanlocs39.mat');
+
+
+
+settings.eeg.fs = 512; % [Hz]
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%____________________________LOOK AT ME_______________________________ %
+% settings.eeg.notch_cutoff = [50 100 150,200];
+settings.eeg.notch_cutoff = [];
+settings.eeg.notch_bw = 35;
+settings.eeg.cutoff_h = 4;
+settings.eeg.cutoff_l= 20;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%____________________________LOOK AT ME_______________________________ %
+% settings.eeg.cutoff_h = 1;
+% settings.eeg.cutoff_l= 200;     
+settings.eeg.filter_order = 2; 
+settings.eeg.ftype = 'cheby';
+settings.eeg.drop_chans = [];
+
+settings.eeg.asr.th = 20; % [std]
+settings.eeg.asr.block_size = 10;
+settings.eeg.asr.window_length = 2; % [sec]
+settings.eeg.asr.window_overlap = 0.5; % [%]
+settings.eeg.asr.max_bad_channels = 0.1; %0.2
+settings.eeg.asr.auto_calib = true;
+settings.eeg.asr.iterative = true;
+settings.eeg.asr.iter_th = 0.05; % [%]
+settings.eeg.asr.max_iter = 20; % [%]
+settings.step_epoch = [-0 0.75];
+settings.eeg.ica.method = 'ica'; 
+
+merged_outfile = [DATA_PATH, '/processed_merged.mat'];
+asr_outfile = [DATA_PATH, '/processed_asr.mat'];
+ica_outfile = [DATA_PATH, '/processed_', settings.eeg.ica.method ,'.mat'];
+ica_clean_outfile = [DATA_PATH, '/processed_', settings.eeg.ica.method ,'_clean.mat'];
+
+filenames = find(cellfun(@(x) contains(x,'.'),{files.name}'));
+
+%%
+% Load Data and store it in a EEGLAB Struct
+all_eegs = {};
+for i=1:length(filenames)
+    filename = files(filenames(i)).name;
+    disp(['Loading ', filename, '...']);
+    [s,h] = sload([DATA_PATH,'/',filename]);
+    s = s(:,1:39);
+
+    EEG = make_EEGLab_struct(s',chanlocs',settings);
+    EEG.settings = settings;
+    EEG.event_gdf = h.EVENT;
+    
+    all_eegs{i} = EEG;
+end
+
+%% MERGE
+disp('Preprocessing and Merging files..')
+
+eeg_len = sum(arrayfun(@(x) size(x{1}.data,2),all_eegs));
+eeg_nch = size(all_eegs{1}.data,1);
+settings = all_eegs{1}.settings;
+chlocs = all_eegs{1}.chanlocs;
+eeg = zeros(eeg_nch,eeg_len);
+
+all_events.TYP = [];
+all_events.POS = [];
+all_events.DUR = [];
+last_eeg_idx = 1;
+for i=1:length(all_eegs)
+    el = preprocess(all_eegs{i});
+    eeg(:,last_eeg_idx:last_eeg_idx+size(el.data,2)-1) = el.data;
+    all_events.TYP = [all_events.TYP; el.event_gdf.TYP];
+    all_events.POS = [all_events.POS; (el.event_gdf.POS + last_eeg_idx-1)];
+    all_events.DUR = [all_events.DUR; el.event_gdf.DUR];
+    last_eeg_idx = last_eeg_idx + size(el.data,2);
+    disp(' ');
+end
+
+EEG = make_EEGLab_struct(eeg,el.chanlocs,settings);
+EEG.settings = settings;
+
+EEG.event_gdf = all_events;
+
+epoch = 1;
+for i = 1:length(all_events.POS)
+    events(i).latency = all_events.POS(i);       % Set latency
+    events(i).duration = all_events.DUR(i);     % Set duration
+    events(i).type = all_events.TYP(i);% Set type
+    events(i).epoch = 1;
+end
+EEG.event_eeglab = events;
+
+triggers.type  = arrayfun(@(x) nameEvents(x),EEG.event_gdf.TYP,'UniformOutput',false);
+for i=1:length(triggers.type)
+    if strcmp(triggers.type{i}, 'cf')
+        if strcmp(triggers.type{i-1}, 'cue_br')
+            triggers.type{i} = 'cf_br';
+        else
+            triggers.type{i} = 'cf_bl';
+        end
+    end
+
+end
+triggers.num = EEG.event_gdf.TYP;
+triggers.duration = EEG.event_gdf.DUR;
+triggers.time  = EEG.event_gdf.POS;
+EEG.triggers = triggers;
+EEG.event = EEG.event_eeglab;
+
+disp(['Saving stage to ',merged_outfile]);
+save(merged_outfile, 'EEG', '-v7.3');
+
+%% Compute ASR
+disp('Computing ASR..')
+EEG = compute_asr(EEG, settings);
+
+disp(['Saving stage to ',asr_outfile]);
+save(asr_outfile, 'EEG', '-v7.3');
+
+%% ICA
+% load(asr_outfile);
+EEG1 = EEG;
+drk = getrank(EEG1.data);
+
+if strcmp(settings.eeg.ica.method , 'ica')
+    [EEG1.icaweights,EEG1.icasphere]=runica(EEG1.data(:,:),'sphering','on','lrate',1e-4,'maxsteps',100);
+    EEG.icaweights = EEG1.icaweights;
+    EEG.icasphere = EEG1.icasphere;
+    EEG.icawinv=inv(EEG1.icaweights*EEG1.icasphere);
+elseif strcmp(settings.eeg.ica.method , 'amica')
+    [W,S,mods] = runamica15(double(EEG1.data(:,:)),...
+                        'outdir',	'amicaout',...
+                    	'num_chans',	EEG1.nbchan',...
+                        'pcakeep', drk, ...
+                        'max_threads',	4,...
+                        'pdftype',	2 ...
+                        );
+    EEG.icaweights = W;
+    EEG.icasphere = S(1:size(W,1),:);
+    EEG.icawinv = mods.A(:,:,1);
+    EEG.mods = mods;    
+end
+
+EEG = eeg_checkset(EEG, 'ica');
+
+disp(['Saving stage to ',ica_outfile]);
+save(ica_outfile, 'EEG', '-v7.3');
+
+%% IC selection - part I
+
+% close all;clc;
+load(ica_outfile);
+
+epoch = settings.step_epoch;
+epoch = [-1.5 5];
+labels = {'cf_bl', 'cf_br'};
+data_epoch = extractepochs(EEG.data',EEG.triggers,labels,epoch,EEG.srate);
+
+EEG1 = EEG;
+EEG1.data = permute(data_epoch, [2 1 3]);
+EEG1.trials = size(data_epoch,3);
+EEG1.xmin = epoch(1);
+EEG1.xmax = epoch(2)-1/EEG1.srate;
+EEG1.pnts = size(EEG1.data,2);
+
+EEG1.icaact = [];
+EEG1.icaact = geticaact(EEG1);
+EEG1 = iclabel(EEG1);
+pop_viewprops(EEG1, 0);
+
+%% IC selection - part II
+prompt = 'Enter the components to remove:\n';
+rm_comps = (str2num(input(prompt, "s")))';
+
+EEG = pop_subcomp(EEG, rm_comps);
+EEG.etc.removed_comps = rm_comps;
+
+disp(['Saving stage to ',ica_clean_outfile]);
+save(ica_clean_outfile, 'EEG', '-v7.3');
+
+%% epoching
+EEG1 = pop_epoch(EEG);
+EEG1 = pop_rmbase(EEG1);
+
+%% show erp
+% pop_erpimage(EEG1, 1)
+pop_plottopo(EEG1)
+
+%% show erd
+channels_all = {'FP1', 'FP2', 'F3', 'FZ', 'F4', 'FC1', 'FC2', 'C3', 'CZ', 'C4', 'CP1', 'CP2', 'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'EOG', ...
+        'F1', 'F2', 'FC3', 'FCZ', 'FC4', 'C1', 'C2', 'CP3', 'CP4', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
+channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
+[~, idx_channels_select] = ismember(channels_select, channels_all);
+
+EEG_cue = pop_selectevent(EEG, 'type', {'cue_bl', 'cue_br'}, 'deleteevents', 'off', 'deleteepochs', 'on');
+EEG_cf = pop_selectevent(EEG, 'type', {'cf'}, 'deleteevents', 'off', 'deleteepochs', 'on');
+cue_indices = find(ismember({EEG.event.type}, {'cue_bl', 'cue_br'})); % Get cue trial indices
+cf_indices  = find(ismember({EEG.event.type}, {'cf'})); % Get CF trial indices
+
+cf1_indices = []; % Store CF trials following cue1
+cf2_indices = []; % Store CF trials following cue2
+
+for i = 1:length(cue_indices)
+    cue_idx = cue_indices(i);
+    next_cf_idx = cf_indices(find(cf_indices > cue_idx, 1)); % Find the next CF trial
+
+    if contains(EEG.event(cue_idx).type, 'cue_bl')
+        cf1_indices = [cf1_indices, next_cf_idx]; % Assign CF to cue1 group
+    elseif contains(EEG.event(cue_idx).type, 'cue_br')
+        cf2_indices = [cf2_indices, next_cf_idx]; % Assign CF to cue2 group
+    end
+end
+
+% Extract Cue1 trials
+EEG_cue1 = pop_selectevent(EEG, 'type', 'cue_bl', 'deleteepochs', 'on');
+% Extract Cue2 trials
+EEG_cue2 = pop_selectevent(EEG, 'type', 'cue_br', 'deleteepochs', 'on');
+
+
+% Extract CF1 trials (CFs that followed Cue1)
+EEG_cf1 = pop_selectevent(EEG, 'epoch', cf1_indices, 'deleteepochs', 'on');
+% Extract CF2 trials (CFs that followed Cue2)
+EEG_cf2 = pop_selectevent(EEG, 'epoch', cf2_indices, 'deleteepochs', 'on');
+
+
+for i = idx_channels_select
+    chan = i;
+    % ERSP for Cue1
+    [ersp_cue1, ~, times, freqs, ~] = newtimef(EEG_cue1.data(chan, :, :), EEG_cue1.pnts, ...
+        [EEG_cue1.xmin EEG_cue1.xmax] * 1000, EEG_cue1.srate, [3 0.3], 'winsize', EEG_cue1.pnts / 8, ...
+        'baseline', [-500 0], 'alpha', 0.05, 'freqs', [4 20], 'plotersp', 'off');
+
+    % ERSP for Cue2
+    [ersp_cue2, ~, ~, ~, ~] = newtimef(EEG_cue2.data(chan, :, :), EEG_cue2.pnts, ...
+        [EEG_cue2.xmin EEG_cue2.xmax] * 1000, EEG_cue2.srate, [3 0.3], 'winsize', EEG_cue2.pnts / 8, ...
+        'baseline', [-500 0], 'alpha', 0.05, 'freqs', [4 20], 'plotersp', 'off');
+
+    % ERSP for CF1 (after Cue1)
+    [ersp_cf1, ~, ~, ~, ~] = newtimef(EEG_cf1.data(chan, :, :), EEG_cf1.pnts, ...
+        [EEG_cf1.xmin EEG_cf1.xmax] * 1000, EEG_cf1.srate, [3 0.3], 'winsize', EEG_cf1.pnts / 8, ...
+        'baseline', [-500 0], 'alpha', 0.05, 'freqs', [4 20], 'plotersp', 'off');
+
+    % ERSP for CF2 (after Cue2)
+    [ersp_cf2, ~, ~, ~, ~] = newtimef(EEG_cf2.data(chan, :, :), EEG_cf2.pnts, ...
+        [EEG_cf2.xmin EEG_cf2.xmax] * 1000, EEG_cf2.srate, [3 0.3], 'winsize', EEG_cf2.pnts / 8, ...
+        'baseline', [-500 0], 'alpha', 0.05, 'freqs', [4 20], 'plotersp', 'off');
+
+    % Compute ERD Differences
+    erd_diff_cue1_cf1 = ersp_cue1 - ersp_cf1; % Cue1 vs CF1
+    erd_diff_cue2_cf2 = ersp_cue2 - ersp_cf2; % Cue2 vs CF2
+    erd_diff_cf1_cf2 = ersp_cf1 - ersp_cf2; % CF1 vs CF2
+
+    % Plot ERD Differences
+    subplot(1, 3, 1);
+    imagesc(times, freqs, erd_diff_cue1_cf1);
+    set(gca, 'YDir', 'normal');
+    xlabel('Time (ms)');
+    ylabel('Frequency (Hz)');
+    title(['ERD (Cue1 - CF1) | Channel ', num2str(chan)]);
+    colorbar;
+    caxis([-50 50]);
+
+    subplot(1, 3, 2);
+    imagesc(times, freqs, erd_diff_cue2_cf2);
+    set(gca, 'YDir', 'normal');
+    xlabel('Time (ms)');
+    ylabel('Frequency (Hz)');
+    title(['ERD (Cue2 - CF2) | Channel ', num2str(chan)]);
+    colorbar;
+    caxis([-50 50]);
+
+    subplot(1, 3, 3);
+    imagesc(times, freqs, erd_diff_cf1_cf2);
+    set(gca, 'YDir', 'normal');
+    xlabel('Time (ms)');
+    ylabel('Frequency (Hz)');
+    title(['ERD (CF1 - CF2) | Channel ', num2str(chan)]);
+    colorbar;
+    caxis([-50 50]);
+% 
+%     figure()
+%     ch = i;
+%     [ersp, itc, times, freqs, ~] = newtimef(EEG1.data(ch, :, :), EEG1.pnts, ...
+%         [EEG1.xmin EEG1.xmax] * 1000, EEG1.srate, [3 0.3], 'baseline', [-1000 0], ...
+%         'alpha', 0.05, 'freqs', [4 20], 'plotersp', 'on');
+%     sgtitle(['channel: ' channels_all{i}])
+end
+
+%% funciton
+function [name] = nameEvents(type)
+    if type == 1, name = 'trial_start'; 
+    elseif type == 786, name = 'fixation'; 
+    elseif type == 781, name = 'cf';
+    elseif type == 730, name = 'cue_bl';
+    elseif type == 731, name = 'cue_br';
+    elseif type == 897, name = 'hit';
+    elseif type == 898, name = 'miss';
+    elseif type == 899, name = 'timeout';
+    end
+end
