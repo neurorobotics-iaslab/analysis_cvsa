@@ -1,5 +1,6 @@
-%% one class classifier using phase values and ROI in the channels
+%% file to show the phase
 clear all; % close all;
+
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
 
 %% Initialization
@@ -30,17 +31,6 @@ filterOrder = 4;
 avg = 1;
 eog_threshold = 500;
 load('/home/paolo/lap_39.mat')
-% roi = {{'F3', 'F1', 'Fz', 'F2', 'F4'}; {'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'CP3', 'CP1', 'CPz', 'CP2', 'CP4'}; 
-%     {'P5', 'P3', 'P1', 'PO7', 'PO5', 'PO3', 'O1'}; {'P6', 'P4', 'P2', 'PO8', 'PO6', 'PO4', 'O2'}};
-% roi_label = {{'F channels'}, {'FC, C and CP channels'}, {'P, PO and O channels right'}, {'P, PO and O channels right'}};
-% roi = {{'F3', 'F1', 'Fz', 'F2', 'F4'}; {'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'CP3', 'CP1', 'CPz', 'CP2', 'CP4'}; 
-%     {'P1', 'PO3', 'O1', 'P2', 'PO4', 'O2', 'Oz', 'POz', 'Pz'}};
-% roi_label = {{'F channels'}, {'FC, C and CP channels'}, {'P, PO and O channels'}};
-roi = {{'F3', 'F1', 'Fz', 'F2', 'F4'}; {'FC3', 'FC1', 'FCz', 'FC2', 'FC4'}; {'C3', 'C1', 'Cz', 'C2', 'C4'}; {'CP3', 'CP1', 'CPz', 'CP2', 'CP4'};
-    {'P5', 'P3', 'P1', 'Pz', 'P2', 'P4', 'P6'}; {'PO7', 'PO5', 'PO3', 'POz', 'PO4', 'PO6', 'PO8'}; {'O1', 'Oz', 'O2'}};
-roi_label = {{'F channels'}, {'FC channels'}, {'C channels'}, {'CP channels'}, {'P channels'}, {'PO channels'}, {'O channels'}};
-roi_indices = cell(size(roi));
-nroi = length(roi);
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
@@ -56,17 +46,15 @@ for idx_file= 1: nFiles
     disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', filenames{idx_file}]);
     [c_signal,header] = sload(fullpath_file_shift);
     c_signal = c_signal(:,1:nchannels);
-%     c_signal = c_signal * lap;
     channels_label = header.Label;
-    for i = 1:nroi
-        roi_indices{i} = find(ismember(channels_label, roi{i}));
-    end
 
     c_trial_with_eog = eog_detection(c_signal, header, eog_threshold, {'FP1', 'FP2', 'EOG'});
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 
     for idx_band = 1:nbands
         band = bands{idx_band};
+
+%         c_signal = c_signal * lap;
 
         % filter alpha band
         disp('      [proc] applying filtering')
@@ -75,12 +63,7 @@ for idx_file= 1: nFiles
         [b, a] = butter(filterOrder, band(1)*(2/header.SampleRate),'high');
         s_filt = filter(b,a,s_low);
 
-        signal_processed = s_filt; % filtered signal --> all channels
-        signal_roi_processed = nan(size(s_filt, 1), nroi); % for roi
-        for i = 1:nroi
-            signal_roi_processed(:,i) = mean(signal_processed(:, roi_indices{i}), 2);
-        end
-
+        signal_processed = s_filt; % filtered signal
 
         c_header = headers{idx_band};
         c_header.sampleRate = header.SampleRate;
@@ -96,11 +79,11 @@ for idx_file= 1: nFiles
             c_header.POS = cat(1, c_header.POS, header.EVENT.POS(k:end) + size(signals{idx_band}, 1));
         end
 
-        signals{idx_band} = cat(1, signals{idx_band}, signal_roi_processed(:,:)); % for all channels
+        signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
         headers{idx_band} = c_header;
     end
 end
-nchannels = size(signals{1}, 2);
+
 
 %% Labelling data 
 events = headers{1};
@@ -188,64 +171,44 @@ phase_data = angle(hilbert_data); % samples x band x channels x trial
 amplitude_data = abs(hilbert_data);
 power_data = amplitude_data .^ 2;
 
-%% compute the ITPC Inter-Trial Phase Coherence
-itpc_1 = nan(min_trial_data, nbands, nchannels);
-itpc_2 = nan(min_trial_data, nbands, nchannels);
+%% compute the (itpc) Inter-Trial Phase Coherence
 itpc = nan(min_trial_data, nbands, nchannels);
 
 for b = 1:nbands
     for ch = 1:nchannels
         for sample = 1:min_trial_data
-            c_phase_1 = squeeze(phase_data(sample, b, ch,trial_typ == classes(1))); % signal at each trial
-            itpc_1(sample, b, ch) = abs(mean(exp(1i * c_phase_1)));
-
-            c_phase_2 = squeeze(phase_data(sample, b, ch,trial_typ == classes(2))); % signal at each trial
-            itpc_2(sample, b, ch) = abs(mean(exp(1i * c_phase_2))); % mean over trial of that signal value
-
-            c_phase = squeeze(phase_data(sample,b,ch,:));
+            c_phase = squeeze(phase_data(sample, b, ch,:)); % singal at each trial
             itpc(sample, b, ch) = abs(mean(exp(1i * c_phase)));
         end
     end
 end
 
-%% show ITPC value
+%% divide the data for the two classes and see the ITPC value for selected channels
+channels_select = {'P3', 'O1', 'P5', 'P1', 'PO5', 'PO3', 'PO7'};
+[~, channelsSelected] = ismember(channels_select, channels_label);
+nchannelsSelected = size(channelsSelected, 2);
 figure();
 idx_plot = 1;
-cl = -inf; handles = [];
+handles = []; cl = -inf;
 
 for idx_band = 1:nbands
-    subplot(nbands,3,idx_plot)
-    hold on
-    for idx_roi = 1:nroi
-        plot(itpc(:,idx_band, idx_roi))
-    end
-    xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
-    xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
-    hold off
-    legend(cellfun(@(c) c{1}, roi_label, 'UniformOutput', false))
-    xticks(sampleRate:sampleRate:size(itpc_2, 1))
-    xticklabels(string((sampleRate:sampleRate:size(itpc_2, 1)) / sampleRate));
-    title(['band: ' bands_str{idx_band} ' | without trial separation'])
-    idx_plot = idx_plot + 1;
-    ylim([0 1])
-
-    subplot(nbands,3,idx_plot)
-    imagesc(squeeze(itpc(:,idx_band, :))')
+    subplot(nbands, 2, idx_plot)
+    imagesc(squeeze(itpc(:,idx_band,channelsSelected))')
     hold on
     xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
     xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
     hold off
-    yticks(1:nroi)
-    yticklabels(cellfun(@(c) c{1}, roi_label, 'UniformOutput', false))
-    xticks(sampleRate:sampleRate:size(itpc_2, 1))
-    xticklabels(string((sampleRate:sampleRate:size(itpc_2, 1)) / sampleRate));
-    title(['band: ' bands_str{idx_band} ' | without trial separation'])
-    idx_plot = idx_plot + 1;
+    yticks(1:size(channelsSelected,2))
+    yticklabels(channels_select)
+    xticks(sampleRate:sampleRate:size(itpc, 1))
+    xticklabels(string((sampleRate:sampleRate:size(itpc, 1)) / sampleRate));
     handles = [handles, gca];
-    
-    subplot(nbands, 3, idx_plot)
+    title(['band: ' bands_str{idx_band}])
+    idx_plot = idx_plot + 1;
+
+    subplot(nbands, 2, idx_plot)
     percentual = 0.6;
-    c_itpc = squeeze(itpc(:,idx_band,:));
+    c_itpc = squeeze(itpc(:,idx_band,channelsSelected));
     c_max = max(c_itpc(min_durCUE+min_durFIX-1:end,:), [], 'all');
     c_mask = c_itpc > c_max * percentual;
     c_itpc = c_itpc .* c_mask;
@@ -253,16 +216,21 @@ for idx_band = 1:nbands
     hold on
     xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
     xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
+    mean_line = mean(squeeze(itpc(:,idx_band,channelsSelected)),2);
+    mean_line_norm = rescale(mean_line, nchannelsSelected*0.4, nchannelsSelected*0.6);
+    plot(mean_line_norm, 'k', 'LineWidth', 1.5)
+    y_center = mean(mean_line_norm);
+    yline(y_center, '--w');
     hold off
-    yticks(1:nroi)
-    yticklabels(cellfun(@(c) c{1}, roi_label, 'UniformOutput', false))
-    xticks(sampleRate:sampleRate:size(itpc_2, 1))
-    xticklabels(string((sampleRate:sampleRate:size(itpc_2, 1)) / sampleRate));
+    yticks(1:nchannelsSelected)
+    yticklabels(channels_select)
+    xticks(sampleRate:sampleRate:size(itpc, 1))
+    xticklabels(string((sampleRate:sampleRate:size(itpc, 1)) / sampleRate));
     title(['band: ' bands_str{idx_band} ' | without trial separation | ' num2str(percentual) ' on the max in the cf'])
     idx_plot = idx_plot + 1;
     handles = [handles, gca];
-   
+
     cl = max(cl, c_max);
 end
-set(handles, 'clim', [0 cl]);
+set(handles, 'clim', [0 cl])
 sgtitle('Inter-Trial Phase Coherence (ITPC)')
