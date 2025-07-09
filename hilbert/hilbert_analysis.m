@@ -1,5 +1,5 @@
 %% file to show the phase
-% clear all; close all;
+clear all; % close all;
 
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
 
@@ -211,7 +211,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(phase_1, 1))
     xticklabels(string((sampleRate:sampleRate:size(phase_1, 1)) / sampleRate));
-    title(['class: ' num2str(classes(1))])
     handle = [handle, gca];
     c_max = max(c_max, max(abs(phase_1), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(1))])
@@ -227,75 +226,16 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(phase_2, 1))
     xticklabels(string((sampleRate:sampleRate:size(phase_2, 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(abs(phase_2), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(2))])
 
-    set(handle, 'CLim', [-c_max, c_max]);
+    set(handle, 'CLim', [0, c_max]);
     handle = [];
     c_max = -inf;
     idx_plot = idx_plot + 1;
 end
 sgtitle('mean phase')
-
-
-%% alpha-band amplitude lateralization
-% define left and right channels
-% ch_left = {'P3', 'O1', 'P5', 'P1', 'PO5', 'PO3', 'PO7'};
-% ch_right = {'P4','O2', 'P2', 'P6', 'PO4', 'PO6', 'PO8'};
-ch_left = {'O1', 'PO5', 'PO3', 'PO7'};
-ch_right = {'O2', 'PO4', 'PO6', 'PO8'};
-[~, channelsSelected_left] = ismember(ch_left, channels_label);
-nchannelsSelected_left = size(channelsSelected_left, 2);
-[~, channelsSelected_right] = ismember(ch_right, channels_label);
-nchannelsSelected_right = size(channelsSelected_right, 2);
-figure()
-idx_plot = 1;
-
-for idx_band = 1:nbands
-    amp_left = squeeze(mean(amplitude_data(:,idx_band,channelsSelected_left,:), 3)); % samples x trials
-    amp_right = squeeze(mean(amplitude_data(:,idx_band,channelsSelected_right,:), 3)); % samples x trials
-
-    baseline_win = 1:min(fixDUR); % e.g. first 200 ms pre-cue
-    baseline_left = mean(amp_left(baseline_win, :), 1);
-    baseline_right = mean(amp_right(baseline_win, :), 1);
-
-    amp_left = amp_left ./ baseline_left;
-    amp_right = amp_right ./ baseline_right;
-
-    ALI_left = (amp_right(:,trial_typ == classes(1)) - amp_left(:,trial_typ == classes(1)) ) ./ ( amp_right(:,trial_typ == classes(1)) + amp_left(:,trial_typ == classes(1)) );
-    ALI_left_mean = mean(ALI_left, 2);
-    ALI_right = (amp_left(:,trial_typ == classes(2)) - amp_right(:,trial_typ == classes(2)) ) ./ ( amp_right(:,trial_typ == classes(2)) + amp_left(:,trial_typ == classes(2)) );
-    ALI_right_mean = mean(ALI_right, 2);
-
-    time_vector = (0:min_trial_data-1) / sampleRate;  % seconds, adjust if you have event-related timing
-
-    subplot(nbands, 2, idx_plot)
-    hold on;
-    grid on;
-    plot(time_vector, ALI_left_mean, 'b', 'LineWidth', 2);
-    plot(time_vector, ALI_right_mean, 'r', 'LineWidth', 2);
-    xlabel('Time (s)');
-    legend({'Attend Left', 'Attend Right'});
-    title(['band: ' bands_str{idx_band}]);
-    hold off;
-    idx_plot = idx_plot + 1;
-
-    subplot(nbands, 2, idx_plot)
-    hold on;
-    grid on;
-    plot(time_vector, ALI_left_mean - ALI_right_mean, 'b', 'LineWidth', 2);
-    xlabel('Time (s)');
-    title(['diff | band: ' bands_str{idx_band}]);
-    hold off;
-    idx_plot = idx_plot + 1;
-end
-ch_right_str = strjoin(ch_right, ', ');
-ch_left_str = strjoin(ch_left, ', ');
-
-sgtitle(['Alpha Lateralization Index | channels right: ' ch_right_str ' | channels left: ' ch_left_str]);
-
 
 %% divide the data for the two classes and see the ITPC value
 figure();
@@ -313,7 +253,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(itpc_1, 1))
     xticklabels(string((sampleRate:sampleRate:size(itpc_1, 1)) / sampleRate));
-    title(['class: ' num2str(classes(1))])
     handle = [handle, gca];
     c_max = max(c_max, max(itpc_1, [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(1))])
@@ -329,7 +268,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(itcp_2, 1))
     xticklabels(string((sampleRate:sampleRate:size(itcp_2, 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(itcp_2, [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(2))])
@@ -348,7 +286,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(itcp_2, 1))
     xticklabels(string((sampleRate:sampleRate:size(itcp_2, 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(abs(squeeze(itpc_1(:,idx_band, channelsSelected))' - squeeze(itcp_2(:,idx_band, channelsSelected))'), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | diff: '  num2str(classes(1)) '-' num2str(classes(2))])
@@ -376,7 +313,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), 1))
     xticklabels(string((sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), 1)) / sampleRate));
-    title(['class: ' num2str(classes(1))])
     handle = [handle, gca];
     c_max = max(c_max, max(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class:' num2str(classes(1))])
@@ -392,7 +328,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), 1))
     xticklabels(string((sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class:' num2str(classes(2))])
@@ -420,7 +355,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(squeeze(mean(amplitude_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), 1))
     xticklabels(string((sampleRate:sampleRate:size(squeeze(mean(amplitude_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), 1)) / sampleRate));
-    title(['class: ' num2str(classes(1))])
     handle = [handle, gca];
     c_max = max(c_max, max(squeeze(mean(amplitude_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(1))])
@@ -436,10 +370,8 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(squeeze(mean(amplitude_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), 1))
     xticklabels(string((sampleRate:sampleRate:size(squeeze(mean(amplitude_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(squeeze(mean(amplitude_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), [], 'all'));
-
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(2))])
 
     set(handle, 'CLim', [0, c_max]);

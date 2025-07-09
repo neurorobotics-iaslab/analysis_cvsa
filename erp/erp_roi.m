@@ -1,5 +1,5 @@
 %% check for the ERP
-% clear all; % close all;
+clear all; % close all;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
 
 %% Initialization
@@ -42,6 +42,7 @@ for idx_file= 1: nFiles
         roi_indices{i} = find(ismember(channels_label, roi{i}));
     end
 
+%     c_signal = c_signal * lap;
     c_trial_with_eog = eog_detection(c_signal, header, eog_threshold, {'FP1', 'FP2', 'EOG'});
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 

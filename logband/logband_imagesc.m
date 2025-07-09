@@ -33,6 +33,7 @@ nclasses = length(classes);
 filterOrder = 4;
 avg = 1;
 eog_threshold = 500;
+load('/home/paolo/lap_39.mat')
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');

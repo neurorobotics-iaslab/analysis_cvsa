@@ -6,30 +6,12 @@ addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 addpath(genpath('/home/paolo/Local/Matlab/MVGC1'))
 
 %% Initialization
-a = 4:2:18;
-b = a+2;
-c = [a; b];
-bands = cell(1, size(a, 2));
-for i=1:length(a)
-    bands{i} = [a(i), b(i)];
-end
-% bands = {[8 14]};
-bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
-nbands = length(bands);
-region{1} = {'F3', 'F1', 'FC3', 'FC1'};
-region{2} = {'F2', 'F4', 'FC2', 'FC4'};
-region{3} = {'PO7', 'PO5', 'PO3', 'O1'};
-region{4} = {'PO4', 'PO6', 'PO8', 'O2'};
-nregion = size(region, 2);
-channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
-signals = cell(1, nbands);
-headers = cell(1, nbands);
-for idx_band = 1:nbands
-    headers{idx_band}.TYP = [];
-    headers{idx_band}.DUR = [];
-    headers{idx_band}.POS = [];
-    signals{idx_band} = [];
-end
+band = [1 40];
+signals = [];
+headers.TYP = [];
+headers.DUR = [];
+headers.POS = [];
+
 classes = [730 731];
 cf_event = 781;
 fix_event = 786;
@@ -58,43 +40,32 @@ for idx_file= 1: nFiles
     c_trial_with_eog = eog_detection(c_signal, header, eog_threshold, {'FP1', 'FP2', 'EOG'});
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 
-     for idx_band = 1:nbands
-        band = bands{idx_band};
 
-        disp(['      [proc] applying filtering' bands_str{idx_band}])
-        [b, a] = butter(filterOrder, band(2)*(2/header.SampleRate),'low');
-        s_low = filter(b,a,c_signal);
-        [b, a] = butter(filterOrder, band(1)*(2/header.SampleRate),'high');
-        signal_processed = filter(b,a,s_low);
-        
-        c_header = headers{idx_band};
-        c_header.sampleRate = header.SampleRate;
-        c_header.channels_labels = header.Label;
-        if isempty(find(header.EVENT.TYP == 2, 1)) % no eye calibration
-            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
-            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
-            c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{idx_band}, 1));
-        else
-            k = find(header.EVENT.TYP == 1, 1);
-            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP(k:end));
-            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR(k:end));
-            c_header.POS = cat(1, c_header.POS, header.EVENT.POS(k:end) + size(signals{idx_band}, 1));
-        end
+    disp('      [proc] applying filtering')
+    [b, a] = butter(filterOrder, band(2)*(2/header.SampleRate),'low');
+    s_low = filter(b,a,c_signal);
+    [b, a] = butter(filterOrder, band(1)*(2/header.SampleRate),'high');
+    signal_processed = filter(b,a,s_low);
 
-        signals{idx_band} = cat(1, signals{idx_band}, signal_processed(:,:));
-        headers{idx_band} = c_header;
+    headers.sampleRate = header.SampleRate;
+    headers.channels_labels = header.Label;
+    if isempty(find(header.EVENT.TYP == 2, 1)) % no eye calibration
+        headers.TYP = cat(1, headers.TYP, header.EVENT.TYP);
+        headers.DUR = cat(1, headers.DUR, header.EVENT.DUR);
+        headers.POS = cat(1, headers.POS, header.EVENT.POS + size(signals, 1));
+    else
+        k = find(header.EVENT.TYP == 1, 1);
+        headers.TYP = cat(1, headers.TYP, header.EVENT.TYP(k:end));
+        headers.DUR = cat(1, headers.DUR, header.EVENT.DUR(k:end));
+        headers.POS = cat(1, headers.POS, header.EVENT.POS(k:end) + size(signals, 1));
     end
+
+    signals = cat(1, signals, signal_processed(:,:));
 end
 
 
-%% Labelling data 
-[~, channelsSelected] = ismember(channels_select, channels_label);
-nchannelsSelected = size(channelsSelected, 2);
-region_channel = cell(1, nregion);
-for i_region = 1:nregion
-    [~, region_channel{i_region}] = ismember(region{i_region}, channels_label);
-end
-events = headers{1};
+%% Labelling data
+events = headers;
 sampleRate = events.sampleRate;
 cuePOS = events.POS(ismember(events.TYP, classes));
 cueDUR = events.DUR(ismember(events.TYP, classes));
@@ -112,6 +83,7 @@ ntrial = length(cuePOS);
 %% Labeling data for the dataset
 min_durCF = min(cfDUR);
 min_durCUE = min(cueDUR);
+min_durFIX = min(fixDUR);
 
 trial_start = nan(ntrial, 1);
 trial_end = nan(ntrial, 1);
@@ -123,20 +95,20 @@ for idx_trial = 1:ntrial
 end
 
 min_trial_data = min(trial_end - trial_start+1);
-trial_data = nan(min_trial_data, nbands, nchannels, ntrial);
-for idx_band = 1:nbands
-    c_signal = signals{idx_band};
-    for trial = 1:ntrial
-        c_start = trial_start(trial);
-        c_end = trial_start(trial) + min_trial_data - 1;
-        trial_data(:,idx_band,:,trial) = c_signal(c_start:c_end,:);
-    end
+trial_data = nan(min_trial_data, nchannels, ntrial);
+
+c_signal = signals;
+for trial = 1:ntrial
+    c_start = trial_start(trial);
+    c_end = trial_start(trial) + min_trial_data - 1;
+    trial_data(:,:,trial) = c_signal(c_start:c_end,:);
 end
+
 
 %% refactoring the data
 % now the data are placed alternatevely, so odd trial id is for 730, even for 731
 balanced_trial_idx = balanced_data_afterEOG(trial_with_eog, trial_typ, classes);
-balanced_trial_data = trial_data(:,:,:,logical(balanced_trial_idx));
+balanced_trial_data = trial_data(:,:,logical(balanced_trial_idx));
 trial_typ = trial_typ(logical(balanced_trial_idx));
 ntrial = sum(balanced_trial_idx);
 idx_classes_trial = nan(ntrial/2, nclasses);
@@ -149,81 +121,118 @@ trial_typ = nan(size(trial_typ));
 i = 1;
 for idx_trial_class = 1:2:ntrial
     for idx_class = 1:nclasses
-        tmp(:,:,:,idx_trial_class + idx_class - 1) = balanced_trial_data(:,:,:,idx_classes_trial(i, idx_class));
+        tmp(:,:,idx_trial_class + idx_class - 1) = balanced_trial_data(:,:,idx_classes_trial(i, idx_class));
         trial_typ(idx_trial_class + idx_class - 1) = classes(idx_class);
     end
     i = i + 1;
 end
 trial_data = tmp;
 
+%%
+channels_select = {'FC1', 'FC2', 'F1', 'F2', 'O1', 'O2', 'PO8', 'PO7', 'PO6', 'PO5', 'PO4', 'PO3'};
+[~, channelsSelected] = ismember(channels_select, channels_label);
+nchannelsSelected = size(channelsSelected, 2);
+trial_data_mvgc = permute(trial_data, [2 1 3]);
+trial_data_mvgc = trial_data_mvgc(channelsSelected,:,:);
 
-%% mean signal for region
-signal_region = cell(nbands, nregion);
-
-for idx_band = 1:nbands
-    for idx_region = 1:nregion
-        signal_region{idx_band, idx_region} = squeeze(mean(trial_data(1024+256:end,idx_band, region_channel{idx_region},trial_typ == classes(1)), 3));
-    end
-end
-
-data = nan(2, size(signal_region{1,1}, 1), ntrial/2);
-data(1,:,:) = signal_region{4,1}; 
-data(2,:,:) =  signal_region{4,3}; 
-
-% data: [n_channels x n_timepoints x n_trials]
-% for i = 1:size(data, 3)
-%     data(:, :, i) = zscore(detrend(data(:, :, i)')');
-% end
-
-max_order = 8;
-nvars = size(data, 1);      % number of regions (e.g. 2)
-nobs  = size(data, 2);      % number of time points
-ntrials = size(data, 3);    % number of trials
-
-aic_vals = nan(max_order, 1);
-
-for p = 1:max_order
-    try
-        [A, SIG] = tsdata_to_var(data, p, 'OLS');
-        if isbad(A)
-            continue;
-        end
-        % Compute AIC manually
-        aic_vals(p) = log(det(SIG)) + (2 * nvars^2 * p) / (nobs * ntrials);
-    catch
-        continue;
-    end
-end
-
-% Select order with minimum AIC
-[~, morder] = min(aic_vals);
+% Use one trial to estimate optimal model order
+max_order = 15;
+[AIC,BIC,moAIC,moBIC] = tsdata_to_infocrit(squeeze(trial_data_mvgc(:,:,1)), max_order, 'LWR');
+morder = moAIC;  % Or use moBIC
 fprintf('Selected model order: %d\n', morder);
 
+% 3. Compute GC for baseline and task periods
+regmode = 'OLS';
+alpha   = 0.05;
 
-%%
-% Fit VAR
-[A, SIG] = tsdata_to_var(data, morder, 'OLS');
-assert(~isbad(A), 'VAR model estimation failed');
+% Baseline period
+data_base = trial_data_mvgc(:,min_durFIX:min_durFIX + min_durCUE,:);
+data_base = data_base(:,1:2:end,:);
+[A_base, SIG_base] = tsdata_to_var(data_base, morder, regmode);
+assert(~isbad(A_base), 'VAR estimation failed (baseline)');
+F_base = var_to_autocov(A_base, SIG_base, morder);
+assert(~isbad(F_base), 'Autocovariance failed (baseline)');
+G_base = zeros(nchannelsSelected, nchannelsSelected);
+for i = 1:nchannelsSelected
+    for j = 1:nchannelsSelected
+        if i == j
+            G_base(i,j) = NaN;  
+        else
+            G_base(i,j) = autocov_to_mvgc(F_base, i, j);  % GC j→i
+        end
+    end
+end
+fprintf('Baseline GC computed.\n');
 
-% Stability check (use var_to_autocov, not isstable!)
-[G, info] = var_to_autocov(A, SIG);
-assert(~info.error, 'VAR model is not stable!');
+% Task period
+data_task = trial_data_mvgc(:,min_durFIX + min_durCUE+1:min_trial_data,:);
+[A_task, SIG_task] = tsdata_to_var(data_task, morder, regmode);
+assert(~isbad(A_task), 'VAR estimation failed (task)');
+F_task = var_to_autocov(A_task, SIG_task, morder);
+assert(~isbad(F_task), 'Autocovariance failed (task)');
+G_task = zeros(nchannelsSelected, nchannelsSelected);
+for i = 1:nchannelsSelected
+    for j = 1:nchannelsSelected
+        if i == j
+            G_task(i,j) = NaN;  
+        else
+            G_task(i,j) = autocov_to_mvgc(F_task, i, j);  % GC j→i
+        end
+    end
+end
+fprintf('Task GC computed.\n')
 
-% Compute pairwise-conditional Granger causality
-F = autocov_to_pwcgc(G);
+%% plot the matrix
+figure;
+subplot(1,2,1);
+imagesc(G_base); colorbar;
+title('Baseline Granger Causality'); xlabel('From'); ylabel('To');
 
-fprintf('GC 1→2: %.4f | GC 2→1: %.4f\n', F(1,2), F(2,1));
+subplot(1,2,2);
+imagesc(G_task); colorbar;
+title('Task Granger Causality'); xlabel('From'); ylabel('To');
 
-%%
-alpha = 0.05;  % significance level
-sig = mvgc_pval(F, morder, size(data, 2), size(data, 3), 1, 1, 0, 'F');
+G_diff = G_task - G_base;
 
-F_thresh = F;
-F_thresh(F < sig) = 0;
+figure;
+imagesc(G_diff); colorbar;
+title('Task - Baseline GC Difference');
+xlabel('From'); ylabel('To');
 
-fprintf('Significant GC values:\n');
-disp(F_thresh);
+%% time analysis
+win_len = 100;   % number of timepoints in window
+step = 50;
+nwin = floor((min_trial_data - win_len)/step) + 1;
 
+G_time = zeros(nchannelsSelected, nchannelsSelected, nwin);
 
+for w = 1:nwin
+    t1 = (w-1)*step + 1;
+    t2 = t1 + win_len - 1;
+    segment = trial_data_mvgc(:,t1:t2,:);
+    
+    [A_win, SIG_win] = tsdata_to_var(segment, morder, regmode);
+    if isbad(A_win), continue; end
+    
+    F_win = var_to_autocov(A_win, SIG_win);
+    if isbad(F_win), continue; end
+    
+    G_win = zeros(nchannelsSelected, nchannelsSelected);
+    for i = 1:nchannelsSelected
+        for j = 1:nchannelsSelected
+            if i == j
+                G_win(i,j) = NaN;
+            else
+                G_win(i,j) = autocov_to_mvgc(F_task, i, j);  % GC j→i
+            end
+        end
+    end
+    G_time(:,:,w) = G_win;
+end
 
-
+%% Plot GC over time between two channels
+from_ch = 1; to_ch = 3;
+figure;
+plot(squeeze(G_time(to_ch, from_ch, :)));
+xlabel('Time window'); ylabel('GC');
+title(sprintf('GC from %d → %d over time', from_ch, to_ch));

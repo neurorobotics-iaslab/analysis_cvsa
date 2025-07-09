@@ -127,33 +127,33 @@ for trial=1:n_trial
     end
 end
 
-% %% Visualization
-% figure();
-% t = linspace(0, min_trial_data*info.wshift, min_trial_data);
-% selclassLb = {'Bl', 'Br'};
-% freqs = info.freqs;
-% chandles = [];
-% cl = -inf;
-% for cId = 1:n_classes
-%     climits = nan(2, length(channelsSelected));
-%     for chId = 1:length(channelsSelected)
-%         subplot(2, length(channelsSelected), (cId - 1)*length(channelsSelected) + chId);
-%         cdata = mean(ERD(:, :, channelsSelected(chId), trial_typ == classes(cId)), 4);
-%         imagesc(t, freqs, cdata');
-%         set(gca,'YDir','normal');
-%         climits(:, chId) = get(gca, 'CLim');
-%         cl = max(cl, max(abs(cdata), [], 'all'));
-%         chandles = cat(1, chandles, gca);
-%         colormap(hot);
-%         title([channels_label{channelsSelected(chId)} ' | ' selclassLb{cId}]);
-%         xlabel('Time [s]');
-%         ylabel('Frequency [Hz]');
-%         line([1 1],get(gca,'YLim'),'Color',[0 0 0])
-%         drawnow
-%     end
-% end
-% colorbar;
-% set(chandles, 'clim', [-cl cl])
+%% Visualization
+figure();
+t = linspace(0, min_trial_data*info.wshift, min_trial_data);
+selclassLb = {'Bl', 'Br'};
+freqs = info.freqs;
+chandles = [];
+cl = -inf;
+for cId = 1:n_classes
+    climits = nan(2, length(channelsSelected));
+    for chId = 1:length(channelsSelected)
+        subplot(2, length(channelsSelected), (cId - 1)*length(channelsSelected) + chId);
+        cdata = mean(ERD(:, :, channelsSelected(chId), trial_typ == classes(cId)), 4);
+        imagesc(t, freqs, cdata');
+        set(gca,'YDir','normal');
+        climits(:, chId) = get(gca, 'CLim');
+        cl = max(cl, max(abs(cdata), [], 'all'));
+        chandles = cat(1, chandles, gca);
+        colormap(hot);
+        title([channels_label{channelsSelected(chId)} ' | ' selclassLb{cId}]);
+        xlabel('Time [s]');
+        ylabel('Frequency [Hz]');
+        line([1 1],get(gca,'YLim'),'Color',[0 0 0])
+        drawnow
+    end
+end
+colorbar;
+set(chandles, 'clim', [-cl cl])
 
 %% Fisher score
 % fisher score is channels x frequency

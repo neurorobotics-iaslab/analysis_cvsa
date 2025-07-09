@@ -1,6 +1,7 @@
-%% check for the ERP
+%% check the CSP as features
 clear all; % close all;
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
+addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
 
 %% Initialization
 a = 4:2:18;
@@ -10,8 +11,8 @@ bands = cell(1, size(a, 2) + 1);
 for i=1:length(a)
     bands{i} = [a(i), b(i)];
 end
-bands{i + 1} = [8 14];
-bands = {[2 10]};
+bands{i+1} = [8 14];
+bands = {[8 14]};
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 signals = cell(1, nbands);
@@ -30,7 +31,6 @@ nclasses = length(classes);
 filterOrder = 4;
 avg = 1;
 eog_threshold = 500;
-load('/home/paolo/lap_39.mat')
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
@@ -51,23 +51,16 @@ for idx_file= 1: nFiles
     c_trial_with_eog = eog_detection(c_signal, header, eog_threshold, {'FP1', 'FP2', 'EOG'});
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 
-    for idx_band = 1:nbands
+     for idx_band = 1:nbands
         band = bands{idx_band};
-
-        % filter alpha band
         disp('      [proc] applying filtering')
         [b, a] = butter(filterOrder, band(2)*(2/header.SampleRate),'low');
         s_low = filter(b,a,c_signal);
         [b, a] = butter(filterOrder, band(1)*(2/header.SampleRate),'high');
         s_filt = filter(b,a,s_low);
+        signal_processed = s_filt;
 
-%         disp('      [proc] applying laplacian');
-%         s_lap = s_filt * lap;
-%         s_lap = s_filt - mean(s_filt, 2);
-        s_lap = s_filt;
-
-        signal_processed = s_lap; % filtered signal --> all channels
-
+        
         c_header = headers{idx_band};
         c_header.sampleRate = header.SampleRate;
         c_header.channels_labels = header.Label;
@@ -86,6 +79,7 @@ for idx_file= 1: nFiles
         headers{idx_band} = c_header;
     end
 end
+
 
 %% Labelling data 
 events = headers{1};
@@ -112,7 +106,7 @@ trial_start = nan(ntrial, 1);
 trial_end = nan(ntrial, 1);
 trial_typ = nan(ntrial, 1);
 for idx_trial = 1:ntrial
-    trial_start(idx_trial) = fixPOS(idx_trial);
+    trial_start(idx_trial) = cfPOS(idx_trial);
     trial_typ(idx_trial) = cueTYP(idx_trial);
     trial_end(idx_trial) = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
 end
@@ -151,40 +145,127 @@ for idx_trial_class = 1:2:ntrial
 end
 trial_data = tmp;
 
-% trial_data(:,:,:,3) = [];
-
-%% see the errp
-channels_select = {'FC1', 'FC2', 'F1', 'F2'};
+channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
 [~, channelsSelected] = ismember(channels_select, channels_label);
 nchannelsSelected = size(channelsSelected, 2);
-for idx_band = 1:nbands
-    for ch = 1:nchannelsSelected
-        c_data = squeeze(trial_data(:, idx_band, channelsSelected(ch), :));
+trial_data = trial_data(:,:,channelsSelected,:);
 
-        figure();
-        subplot(1,2,1)
-        plot(c_data, 'Color', 'k');
-        hold on;
-        xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
-        xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
-        xline(min_durFIX + sampleRate*0.7, '--r', 'stop', 'LabelOrientation', 'horizontal');
-        plot(mean(c_data, 2), 'Color', 'red');
-        hold off
-        xticks(sampleRate:sampleRate:size(c_data, 1))
-        xticklabels(string((sampleRate:sampleRate:size(c_data, 1)) / sampleRate));
-        title('mean channel across trials')
+%% divide all into windows ---> work for only one band
+win_size = 100; %ms
+overlap = 50;
+overlap = ceil(overlap * sampleRate / 1000);
+win_size = ceil(win_size * sampleRate /1000);
+nwin = floor((min_trial_data - win_size)/overlap) + 1;
 
-        subplot(1,2,2)
-        imagesc(c_data')
-        colormap("jet")
-        xticks(sampleRate:sampleRate:size(c_data, 1))
-        xticklabels(string((sampleRate:sampleRate:size(c_data, 1)) / sampleRate));
-        title('channel signal for all trials')
-        ylabel('trial')
-        xlabel('time')
+trial_data_1 = trial_data(:,:,:,trial_typ == classes(1));
+trial_data_2 = trial_data(:,:,:,trial_typ == classes(2));
 
-        sgtitle(['channel: ' channels_select{ch}])
-    end 
+percentual_train = 0.7;
+trial_data_1_train = trial_data_1(:,:,:,1:size(trial_data_1, 4)*percentual_train);
+trial_data_1_test = trial_data_1(:,:,:,size(trial_data_1, 4)*percentual_train + 1:end);
+trial_data_2_train = trial_data_2(:,:,:,1:size(trial_data_1, 4)*percentual_train);
+trial_data_2_test = trial_data_2(:,:,:,size(trial_data_1, 4)*percentual_train + 1:end);
+
+C1 = zeros(size(trial_data_1_train, 3), size(trial_data_1_train, 3));  % For class 1
+C2 = zeros(size(trial_data_1_train, 3), size(trial_data_1_train, 3));  % For class 2
+for idx_b = 1:nbands
+    for t = 1:size(trial_data_1_train, 4)
+        for idx_w = 1:nwin
+            start_w = ceil((idx_w-1)*overlap + 1);
+            end_w = ceil(start_w + win_size - 1);
+
+            c_signal_1 = squeeze(trial_data_1_train(start_w:end_w,idx_b,:,t));
+            c_signal_2 = squeeze(trial_data_2_train(start_w:end_w,idx_b,:,t));
+
+            c_signal_1 = c_signal_1 - mean(c_signal_1, 1);
+            c_signal_2 = c_signal_2 - mean(c_signal_2, 1);
+
+            C1 = C1 + (c_signal_1' * c_signal_1) / trace(c_signal_1' * c_signal_1);
+            C2 = C2 + (c_signal_2' * c_signal_2) / trace(c_signal_2' * c_signal_2);
+        end
+    end
+end
+C1 = C1 / (nwin * size(trial_data_1_train, 4));
+C2 = C2 / (nwin * size(trial_data_2_train, 4));
+
+C = C1 + C2;
+[W, D] = eig(C1, C);
+% Sort eigenvalues (descending)
+[~, ind] = sort(diag(D), 'descend');
+W = W(:, ind);
+
+% Select first & last 2 filters
+W_sel = [W(:, 1:3), W(:, end-2:end)];
+
+%% features extraction
+X_feat = [];
+Y_feat = [];
+
+for idx_b = 1:nbands
+    for t = 1:size(trial_data_1_train, 4)
+        for idx_w = 1:nwin
+            start_w = ceil((idx_w-1)*overlap + 1);
+            end_w = ceil(start_w + win_size - 1);
+
+            c_signal_1 = squeeze(trial_data_1_train(start_w:end_w,idx_b,:,t));
+            c_signal_2 = squeeze(trial_data_2_train(start_w:end_w,idx_b,:,t));
+
+            c_signal_1 = c_signal_1 - mean(c_signal_1, 1);
+            c_signal_2 = c_signal_2 - mean(c_signal_2, 1);
+
+            Z_1 = W_sel' * c_signal_1';
+            Z_2 = W_sel' * c_signal_2'; 
+
+            feat_1 = log(var(Z_1, 0, 2) / sum(var(Z_1, 0, 2))); 
+            feat_2 = log(var(Z_2, 0, 2) / sum(var(Z_2, 0, 2))); 
+
+            X_feat = [X_feat; feat_1'];
+            Y_feat = [Y_feat; classes(1)];
+
+            X_feat = [X_feat; feat_2'];
+            Y_feat = [Y_feat; classes(2)];
+        end
+    end
 end
 
 
+%% tried a QDA
+Mdl = fitcdiscr(X_feat, Y_feat, 'DiscrimType', 'quadratic'); % QDA
+cvMdl = crossval(Mdl, 'KFold', 5);
+acc = 1 - kfoldLoss(cvMdl);
+fprintf('Cross-validated accuracy: %.2f%%\n', acc*100);
+
+%% test QDA
+X_feat_test = [];
+Y_feat_test = [];
+
+for idx_b = 1:nbands
+    for t = 1:size(trial_data_1_test, 4)
+        for idx_w = 1:nwin
+            start_w = ceil((idx_w-1)*overlap + 1);
+            end_w = ceil(start_w + win_size - 1);
+
+            c_signal_1 = squeeze(trial_data_1_test(start_w:end_w,idx_b,:,t));
+            c_signal_2 = squeeze(trial_data_2_test(start_w:end_w,idx_b,:,t));
+
+            c_signal_1 = c_signal_1 - mean(c_signal_1, 1);
+            c_signal_2 = c_signal_2 - mean(c_signal_2, 1);
+
+            Z_1 = W_sel' * c_signal_1';
+            Z_2 = W_sel' * c_signal_2'; 
+
+            feat_1 = log(var(Z_1, 0, 2) / sum(var(Z_1, 0, 2))); 
+            feat_2 = log(var(Z_2, 0, 2) / sum(var(Z_2, 0, 2))); 
+
+            X_feat_test = [X_feat_test; feat_1'];
+            Y_feat_test = [Y_feat_test; classes(1)];
+
+            X_feat_test = [X_feat_test; feat_2'];
+            Y_feat_test = [Y_feat_test; classes(2)];
+        end
+    end
+end
+
+pred = predict(Mdl, X_feat_test);
+acc = sum(pred == Y_feat_test) / size(pred, 1);
+fprintf('Cross-validated accuracy: %.2f%%\n', acc*100);

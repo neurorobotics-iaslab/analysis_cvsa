@@ -62,9 +62,10 @@ for idx_file= 1: nFiles
     c_trial_with_eog = eog_detection(c_signal, header, eog_threshold, {'FP1', 'FP2', 'EOG'});
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 
-%     % laplacian
-%     disp('      [proc] applying laplacian')
+    % laplacian
+    disp('      [proc] applying laplacian')
 %     c_signal = c_signal * lap;
+% c_signal = c_signal - mean(c_signal, 2);
 
     for idx_band = 1:nbands
         band = bands{idx_band};
@@ -272,7 +273,7 @@ for idx_w = 1:nwin
     logBand_win(:,:,idx_w, 2) = mean_c2;
 end
 diff_logBand_win = abs(logBand_win(:,:,:,1) - logBand_win(:,:,:,2)); % diff bl - br
-diff_logBand_sample = mean(trial_data4logBand(:,:,:,trial_typ == classes(1)), 4) - mean(trial_data4logBand(:,:,:,trial_typ == classes(2)), 4);
+diff_logBand_sample = abs(mean(trial_data4logBand(:,:,:,trial_typ == classes(1)), 4) - mean(trial_data4logBand(:,:,:,trial_typ == classes(2)), 4));
 
 % mean itpc
 itpc_win = nan(nwin, nbands, nchannels);

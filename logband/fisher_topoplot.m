@@ -1,5 +1,5 @@
 %% show the fisher score and the topoplot of a log band signal
-clear all; close all;
+clear all; % close all;
 
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
 addpath('/home/paolo/Local/cnbi-smrtrain/toolboxes/cva')
@@ -33,6 +33,7 @@ nclasses = length(classes);
 filterOrder = 4;
 avg = 1;
 eog_threshold = 500;
+load('/home/paolo/lap_39.mat')
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
@@ -55,6 +56,8 @@ for idx_file= 1: nFiles
 
      for idx_band = 1:nbands
         band = bands{idx_band};
+
+        c_signal = c_signal * lap;
 
         signal_processed = proc_512hz(c_signal, header.SampleRate, band, filterOrder, avg);
         
@@ -105,7 +108,7 @@ trial_start = nan(ntrial, 1);
 trial_end = nan(ntrial, 1);
 trial_typ = nan(ntrial, 1);
 for idx_trial = 1:ntrial
-    trial_start(idx_trial) = cfPOS(idx_trial);
+    trial_start(idx_trial) = fixPOS(idx_trial);
     trial_typ(idx_trial) = cueTYP(idx_trial);
     trial_end(idx_trial) = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
 end
@@ -152,11 +155,11 @@ sigma = nan(nclasses, nchannels, nbands);
 
 for idx_band = 1:nbands
     for idx_ch=1:nchannels
-        c_data = trial_data(:,idx_band, idx_ch, trial_typ == classes(1));
+        c_data = trial_data(min_durFIX + min_durCUE:end,idx_band, idx_ch, trial_typ == classes(1));
         mu(1, idx_ch, idx_band) = mean(squeeze(c_data), 'all');
         sigma(1, idx_ch, idx_band) = std(squeeze(c_data(:)));
 
-        c_data = trial_data(:,idx_band, idx_ch, trial_typ == classes(2));
+        c_data = trial_data(min_durFIX + min_durCUE:end,idx_band, idx_ch, trial_typ == classes(2));
         mu(2, idx_ch, idx_band) = mean(squeeze(c_data), 'all');
         sigma(2, idx_ch, idx_band) = std(squeeze(c_data(:)));
     end
@@ -179,12 +182,13 @@ end
 
 % with cva
 cva = nan(nbands, nchannels);
+reshaped_dur = min_trial_data - (min_durFIX + min_durCUE - 1);
 for idx_band= 1:nbands
-    reshaped_signal = nan(min_trial_data * ntrial, nchannels);
+    reshaped_signal = nan(reshaped_dur * ntrial, nchannels);
     ck = [];
     for idx_trial = 1:ntrial
-        reshaped_signal((idx_trial - 1)*min_trial_data + 1 : idx_trial*min_trial_data, :) = trial_data(:,idx_band,:,idx_trial);
-        ck = cat(1, ck, repmat(trial_typ(idx_trial), [min_trial_data,1]));
+        reshaped_signal((idx_trial - 1)*reshaped_dur + 1 : idx_trial*reshaped_dur, :) = trial_data(min_durFIX + min_durCUE:end,idx_band,:,idx_trial);
+        ck = cat(1, ck, repmat(trial_typ(idx_trial), [reshaped_dur,1]));
     end
 
     cva(idx_band, :) = cva_tun_opt(reshaped_signal, ck);
@@ -195,14 +199,14 @@ chanlocs_path = '/home/paolo/chanlocs39.mat';
 load(chanlocs_path);
 diff = nan(nbands, nchannels);
 for idx_band = 1:nbands
-    c_data_1 = mean(mean(squeeze(trial_data(:,idx_band,:,trial_typ == classes(1))), 3), 1); % mean on trials and then on samples
-    c_data_2 = mean(mean(squeeze(trial_data(:,idx_band,:,trial_typ == classes(2))), 3), 1);
+    c_data_1 = mean(mean(squeeze(trial_data(min_durFIX + min_durCUE:end,idx_band,:,trial_typ == classes(1))), 3), 1); % mean on trials and then on samples
+    c_data_2 = mean(mean(squeeze(trial_data(min_durFIX + min_durCUE:end,idx_band,:,trial_typ == classes(2))), 3), 1);
  
     diff(idx_band,:) = c_data_1 - c_data_2;
 end
 
 
-%% show fisher, cva and log band diff
+%% show fisher, cva and log band diff for all the channels
 figure();
 subplot(1,2,1)
 imagesc(fisher');
@@ -219,8 +223,8 @@ yticklabels(channels_label(1:nchannels));
 xticks(1:nbands);
 xticklabels(bands_str);
 title('CVA')
-
 sgtitle('Only cf');
+
 
 figure();
 rows_plot = 2;
@@ -238,3 +242,92 @@ end
 set(handles, 'clim', [-cl, cl]);
 sgtitle('Diff log band (bl - br) | only cf');
 
+
+figure();
+idx_plot = 1; ncols = 2; handles = []; cl = -inf;
+for idx_band = 1:nbands
+    data_1 = squeeze(mean(trial_data(:,idx_band,:,trial_typ == classes(1)), 4));
+    data_2 = squeeze(mean(trial_data(:,idx_band,:,trial_typ == classes(2)), 4));
+    c_diff = abs(data_1 - data_2);
+
+    subplot(ceil(nbands/ncols), 2, idx_plot)
+    imagesc(c_diff')
+    hold on
+    xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
+    xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
+    hold off
+    yticks(1:nchannels)
+    yticklabels(channels_label(1:end-1))
+    xticks(sampleRate:sampleRate:size(c_diff, 1))
+    xticklabels(string((sampleRate:sampleRate:size(c_diff, 1)) / sampleRate));
+    idx_plot = idx_plot  + 1;
+    handles = [handles; gca];
+    cl = max(cl, max(abs(c_diff), [], 'all'));
+    title(['band: ' bands_str{idx_band}]);
+end
+set(handles, 'clim', [0, cl])
+sgtitle('Diff (bl - br) in time')
+
+
+%% show fisher, cva and log band diff for the P, PO and O channels
+figure();
+subplot(1,2,1)
+imagesc(fisher(:,channelsSelected)');
+yticks(1:nchannelsSelected);
+yticklabels(channels_select);
+xticks(1:nbands);
+xticklabels(bands_str);
+title('Fisher score');
+
+subplot(1,2,2)
+imagesc(cva(:,channelsSelected)')
+yticks(1:nchannelsSelected);
+yticklabels(channels_select);
+xticks(1:nbands);
+xticklabels(bands_str);
+title('CVA')
+sgtitle('Only cf');
+
+
+figure();
+rows_plot = 2;
+handles = []; cl = -inf;
+for idx_band = 1:nbands
+    chanlocs_data = zeros(1, nchannels);
+    chanlocs_data(channelsSelected) = diff(idx_band,channelsSelected);
+    subplot(rows_plot, ceil(nbands/rows_plot), idx_band)
+    topoplot(squeeze(chanlocs_data), chanlocs, 'headrad', 'rim', 'maplimits', [-max(abs(chanlocs_data)) max(abs(chanlocs_data))]);
+    cl = max(cl, max(abs(chanlocs_data)));
+    handles = [handles gca];
+    axis image;
+    colorbar;
+    title(['band: ' bands_str{idx_band}])
+end
+set(handles, 'clim', [-cl, cl]);
+sgtitle('Diff log band (bl - br) | only cf');
+
+
+figure();
+idx_plot = 1; ncols = 2; handles = []; cl = -inf;
+for idx_band = 1:nbands
+    data_1 = squeeze(mean(squeeze(trial_data(:,idx_band,channelsSelected,trial_typ == classes(1))), 3));
+    data_2 = squeeze(mean(squeeze(trial_data(:,idx_band,channelsSelected,trial_typ == classes(2))), 3));
+    c_diff = abs(data_1 - data_2);
+
+    subplot(ceil(nbands/ncols), 2, idx_plot)
+    imagesc(c_diff')
+    hold on
+    xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
+    xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
+    hold off
+    yticks(1:nchannels)
+    yticklabels(channels_select)
+    xticks(sampleRate:sampleRate:size(c_diff, 1))
+    xticklabels(string((sampleRate:sampleRate:size(c_diff, 1)) / sampleRate));
+    idx_plot = idx_plot  + 1;
+    handles = [handles; gca];
+    cl = max(cl, max(abs(c_diff), [], 'all'));
+    title(['band: ' bands_str{idx_band}]);
+end
+set(handles, 'clim', [0, cl])
+sgtitle('Diff (bl - br) in time')

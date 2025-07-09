@@ -192,8 +192,8 @@ phase_1 = nan(min_trial_data, nbands, nchannels);
 phase_2 = nan(min_trial_data, nbands, nchannels);
 
 for b =1:nbands
-    phase_1(:,b,:) = squeeze(mean(exp(1i * phase_data(:,b,:,trial_typ == classes(1))), 4));
-    phase_2(:,b,:) = squeeze(mean(exp(1i * phase_data(:,b,:,trial_typ == classes(2))), 4));
+    phase_1(:,b,:) = squeeze(abs(mean(exp(1i * phase_data(:,b,:,trial_typ == classes(1))), 4)));
+    phase_2(:,b,:) = squeeze(abs(mean(exp(1i * phase_data(:,b,:,trial_typ == classes(2))), 4)));
 end
 
 figure();
@@ -211,7 +211,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(phase_1, 1))
     xticklabels(string((sampleRate:sampleRate:size(phase_1, 1)) / sampleRate));
-    title(['class: ' num2str(classes(1))])
     handle = [handle, gca];
     c_max = max(c_max, max(abs(phase_1), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(1))])
@@ -227,7 +226,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(phase_2, 1))
     xticklabels(string((sampleRate:sampleRate:size(phase_2, 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(abs(phase_2), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(2))])
@@ -313,7 +311,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(itpc_1, 1))
     xticklabels(string((sampleRate:sampleRate:size(itpc_1, 1)) / sampleRate));
-    title(['class: ' num2str(classes(1))])
     handle = [handle, gca];
     c_max = max(c_max, max(itpc_1, [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(1))])
@@ -329,7 +326,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(itcp_2, 1))
     xticklabels(string((sampleRate:sampleRate:size(itcp_2, 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(itcp_2, [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class: ' num2str(classes(2))])
@@ -348,7 +344,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(itcp_2, 1))
     xticklabels(string((sampleRate:sampleRate:size(itcp_2, 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(abs(squeeze(itpc_1(:,idx_band, channelsSelected))' - squeeze(itcp_2(:,idx_band, channelsSelected))'), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | diff: '  num2str(classes(1)) '-' num2str(classes(2))])
@@ -376,7 +371,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), 1))
     xticklabels(string((sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), 1)) / sampleRate));
-    title(['class: ' num2str(classes(1))])
     handle = [handle, gca];
     c_max = max(c_max, max(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(1)), 4)), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class:' num2str(classes(1))])
@@ -392,7 +386,6 @@ for idx_band = 1:nbands
     yticklabels(channels_select)
     xticks(sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), 1))
     xticklabels(string((sampleRate:sampleRate:size(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), 1)) / sampleRate));
-    title(['class: ' num2str(classes(2))])
     handle = [handle, gca];
     c_max = max(c_max, max(squeeze(mean(power_data(:,idx_band,channelsSelected, trial_typ == classes(2)), 4)), [], 'all'));
     title(['band: ' bands_str{idx_band} ' | class:' num2str(classes(2))])

@@ -1,6 +1,6 @@
 %% ERD/ERS ---> with baseline correction
 % the file given the gdf compute the erd and ers for different bands and classes
-% clear all; close all;
+clear all; % close all;
 
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
 
