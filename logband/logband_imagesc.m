@@ -1,6 +1,6 @@
 %% Compute the log band and  show it over time in imagesc
 % the file given the gdf compute the erd and ers for different bands and classes
-% clear all; close all;
+clear all; % close all;
 
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
@@ -153,7 +153,7 @@ correction = nan(nsamples, nbands, nchannelsSelected, ntrial);
 figure();
 idx_plot = 1;
 handle = []; c_max = -inf;
-baseline_correction = true;
+baseline_correction = false;
 
 for idx_band = 1:nbands
     c_baseline = mean(mean(baseline(:,idx_band, channelsSelected,:), 1), 4);
@@ -167,7 +167,7 @@ for idx_band = 1:nbands
     avg_correction_2 = mean(correction(:,idx_band,:,trial_typ == classes(2)), 4);
     avg_correction   = mean(squeeze(correction(:,idx_band,:,:)), 3);
 
-    subplot(nbands,nclasses + 2,idx_plot)
+    subplot(nbands,nclasses + 1,idx_plot)
     imagesc(avg_correction_1(:,:)')
     hold on
     xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
@@ -182,7 +182,7 @@ for idx_band = 1:nbands
     title(['band: ' bands_str{idx_band} '  | class: ' num2str(classes(1))])
     idx_plot = idx_plot + 1;
 
-    subplot(nbands,nclasses + 2,idx_plot)
+    subplot(nbands,nclasses + 1,idx_plot)
     imagesc(avg_correction_2(:,:)')
     hold on
     xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
@@ -199,8 +199,8 @@ for idx_band = 1:nbands
     handle = []; c_max = -inf;
     title(['band: ' bands_str{idx_band} '  | class: ' num2str(classes(2))])
 
-    subplot(nbands,nclasses + 2,idx_plot)
-    imagesc(avg_correction_1(:,:)' - avg_correction_2(:,:)')
+    subplot(nbands,nclasses + 1,idx_plot)
+    imagesc(abs(avg_correction_1(:,:)' - avg_correction_2(:,:)'))
     hold on
     xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
     xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
@@ -213,24 +213,7 @@ for idx_band = 1:nbands
     handle = [handle, gca];
     c_max = max(c_max, max(abs(avg_correction_1(:,:)' - avg_correction_2(:,:)'), [], 'all'));
     idx_plot = idx_plot + 1;
-    set(handle, 'CLim', [-c_max, c_max]);
-    handle = []; c_max = -inf;
-
-    subplot(nbands,nclasses + 2,idx_plot)
-    imagesc(avg_correction(:,:)')
-    hold on
-    xline(min_durFIX, '--r', 'Cue', 'LabelOrientation', 'horizontal');
-    xline(min_durFIX + min_durCUE, '--r', 'Cf', 'LabelOrientation', 'horizontal');
-    hold off
-    yticks(1:size(channelsSelected,2))
-    yticklabels(channels_select)
-    xticks(sampleRate:sampleRate:size(avg_correction_2, 1))
-    xticklabels(string((sampleRate:sampleRate:size(avg_correction_2, 1)) / sampleRate));
-    title(['Overall | band: ' bands_str{idx_band}])
-    handle = [handle, gca];
-    c_max = max(c_max, max(abs(avg_correction_1(:,:)' - avg_correction_2(:,:)'), [], 'all'));
-    idx_plot = idx_plot + 1;
-    set(handle, 'CLim', [-c_max, c_max]);
+    set(handle, 'CLim', [0, c_max]);
     handle = []; c_max = -inf;
 end
 

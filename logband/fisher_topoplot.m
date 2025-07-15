@@ -33,7 +33,7 @@ nclasses = length(classes);
 filterOrder = 4;
 avg = 1;
 eog_threshold = 500;
-load('/home/paolo/lap_39.mat')
+% load('/home/paolo/lap_39.mat')
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
@@ -57,7 +57,7 @@ for idx_file= 1: nFiles
      for idx_band = 1:nbands
         band = bands{idx_band};
 
-        c_signal = c_signal * lap;
+%         c_signal = c_signal * lap;
 
         signal_processed = proc_512hz(c_signal, header.SampleRate, band, filterOrder, avg);
         

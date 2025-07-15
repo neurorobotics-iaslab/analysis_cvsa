@@ -57,9 +57,9 @@ for idx_file= 1: nFiles
         % filter alpha band
         disp('      [proc] applying filtering')
         [b, a] = butter(filterOrder, band(2)*(2/header.SampleRate),'low');
-        s_low = filter(b,a,c_signal);
+        s_low = filtfilt(b,a,c_signal);
         [b, a] = butter(filterOrder, band(1)*(2/header.SampleRate),'high');
-        s_filt = filter(b,a,s_low);
+        s_filt = filtfilt(b,a,s_low);
 
 %         disp('      [proc] applying laplacian');
 %         s_lap = s_filt * lap;
@@ -154,7 +154,7 @@ trial_data = tmp;
 % trial_data(:,:,:,3) = [];
 
 %% see the errp
-channels_select = {'FC1', 'FC2', 'F1', 'F2'};
+channels_select = {'PO4', 'PO6', 'PO8', 'O1', 'O2'};
 [~, channelsSelected] = ismember(channels_select, channels_label);
 nchannelsSelected = size(channelsSelected, 2);
 for idx_band = 1:nbands

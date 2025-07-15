@@ -63,7 +63,7 @@ for idx_file= 1: nFiles
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 
     % laplacian
-    disp('      [proc] applying laplacian')
+%     disp('      [proc] applying laplacian')
 %     c_signal = c_signal * lap;
 % c_signal = c_signal - mean(c_signal, 2);
 
@@ -259,7 +259,7 @@ for idx_w = 1:nwin
 
     for idx_ch=1:nchannels
         for idx_band=1:nbands
-            mean_c1(idx_ch, idx_band) = squeeze(mean(mean(trial_data4logBand(start_w:end_w,idx_band,idx_ch,trial_typ == classes(1)), 4), 1));
+            mean_c1(idx_ch, idx_band) = squeeze(mean(mean(trial_data4logBand(start_w:end_w,idx_band,idx_ch,trial_typ == classes(1)), 4), 1)); % mean trial then signal
             mean_c2(idx_ch, idx_band) = squeeze(mean(mean(trial_data4logBand(start_w:end_w,idx_band,idx_ch,trial_typ == classes(2)), 4), 1));
             std_c1(idx_ch, idx_band) = squeeze(mean(std(trial_data4logBand(start_w:end_w,idx_band,idx_ch,trial_typ == classes(1)), 0, 4), 1));
             std_c2(idx_ch, idx_band) = squeeze(mean(std(trial_data4logBand(start_w:end_w,idx_band,idx_ch,trial_typ == classes(2)), 0, 4), 1));
@@ -277,10 +277,12 @@ diff_logBand_sample = abs(mean(trial_data4logBand(:,:,:,trial_typ == classes(1))
 
 % mean itpc
 itpc_win = nan(nwin, nbands, nchannels);
+itpc_win_cl = nan(nwin, nbands, nchannels, nclasses);
 itpc_sample = nan(min_trial_data, nbands, nchannels);
 
 for b = 1:nbands
     for ch = 1:nchannels
+        % fro window
         for idx_w = 1:nwin
             start_w = ceil((idx_w-1)*overlap + 1);
             end_w = ceil(start_w + win_size - 1);
@@ -290,14 +292,26 @@ for b = 1:nbands
 
             tmp_phase = squeeze(phase_data(start_w:end_w,b, ch, :));
             tmp_itpc = zeros(1, size(tmp_phase, 1));
+            tmp_itpc_cl = zeros(2, size(tmp_phase, 1));
 
             for sample = 1:size(tmp_phase, 1)
                 c_phase = squeeze(tmp_phase(sample, :)); % singal at each trial
                 tmp_itpc(sample) = abs(mean(exp(1i * c_phase)));
+
+                % for the single classes
+                for idx_class = 1:nclasses
+                    c_phase = squeeze(tmp_phase(sample, trial_typ == classes(idx_class)));
+                    tmp_itpc_cl(idx_class,sample) = abs(mean(exp(1i*c_phase)));
+                end
             end
             itpc_win(idx_w,b,ch) = mean(tmp_itpc);
+
+            for idx_class = 1:nclasses
+                itpc_win_cl(idx_w,b,ch, idx_class) = mean(tmp_itpc_cl(idx_class, :));
+            end
         end
 
+        % for each sample
         for sample = 1:min_trial_data
             c_phase = squeeze(phase_data(sample, b, ch,:)); % singal at each trial
             itpc_sample(sample, b, ch) = abs(mean(exp(1i * c_phase)));
@@ -386,6 +400,7 @@ for idx_f = 1:nfigure
         xticks(1:10:nwin); xticklabels(xticks_labels(1:10:end));
         title(['itpc | band :' bands_str{idx_b}])
         idx_plot = idx_plot + 1;
+        set(gca, 'clim', [0, 0.3])
 %         cl_itpc = max(cl_itpc, max(abs(squeeze(itpc_win(cf_startWIN+ceil(win_size/overlap) + 1:end,idx_b,channelsSelected))), [], 'all'));
 %         handles_itpc = [handles_itpc; gca];
 
@@ -405,7 +420,7 @@ for idx_f = 1:nfigure
         idx_b = idx_b + 1;
     end
 
-    sgtitle([subject ' ' day ' | windowing reasoning | figure #' num2str(idx_f)]);
+    sgtitle([subject ' ' day ' | windowing | figure #' num2str(idx_f)]);
 end
 % set(handles_itpc, 'clim', [0, cl_itpc])
 % set(handles_logBand, 'clim', [0, cl_logBand])
@@ -430,6 +445,7 @@ for idx_f = 1:nfigure
         xticklabels(string((sampleRate:sampleRate:size(itpc_sample, 1)) / sampleRate));
         title(['itpc | band :' bands_str{idx_band}])
         idx_plot = idx_plot + 1;
+        set(gca, 'clim', [0 0.3])
 %         cl_itpc = max(cl_itpc, max(abs(squeeze(itpc_sample(cf_startWIN+ceil(win_size/overlap) + 1:end,idx_b,channelsSelected))), [], 'all'));
 %         handles_itpc = [handles_itpc; gca];
 
@@ -475,8 +491,47 @@ for idx_f = 1:nfigure
     xlim([1, min_trial_data]);
     title(['ERP | band: ' num2str(erp_band(1)) '-' num2str(erp_band(2))])
 
-    sgtitle([subject ' ' day ' | time reasoning | figure #' num2str(idx_f)]);
+    sgtitle([subject ' ' day ' | time | figure #' num2str(idx_f)]);
 end
 % set(handles_itpc, 'clim', [0, cl_itpc])
 % set(handles_logBand, 'clim', [0, cl_logBand])
 
+
+%% plot the itpc window for classes and in general
+nfigure = 3;
+idx_b = 1;
+cue_startWIN = round((min_durFIX - win_size)/overlap) + 1;
+cf_startWIN  = round((min_durCUE + min_durFIX - win_size)/overlap) + 1;
+xticks_labels = arrayfun(@(x) sprintf('%.2f', x), windows_center, 'UniformOutput', false);  
+for idx_f = 1:nfigure
+    figure();
+    idx_plot = 1;
+    for i = 1:nbands/nfigure
+        for idx_class = 1:nclasses
+            subplot(nbands/nfigure,4, idx_plot)
+            imagesc(squeeze(itpc_win_cl(:,idx_b,channelsSelected, idx_class))');
+            hold on;
+            xline(cue_startWIN, '--r', 'Cue', 'LabelOrientation', 'horizontal');
+            xline(cf_startWIN, '--r', 'Cf', 'LabelOrientation', 'horizontal');
+            hold off;
+            yticks(1:nchannelsSelected); yticklabels(channels_label(channelsSelected));
+            xticks(1:10:nwin); xticklabels(xticks_labels(1:10:end));
+            title(['itpc | class: ' num2str(classes(idx_class))  ' | band :' bands_str{idx_b}])
+            idx_plot = idx_plot + 1;
+            set(gca, 'clim', [0 0.4])
+
+            subplot(nbands/nfigure,4, idx_plot)
+            imagesc(squeeze(logBand_win(channelsSelected,idx_b,:,idx_class)));
+            hold on;
+            xline(cue_startWIN, '--r', 'Cue', 'LabelOrientation', 'horizontal');
+            xline(cf_startWIN, '--r', 'Cf', 'LabelOrientation', 'horizontal');
+            hold off;
+            yticks(1:nchannelsSelected); yticklabels(channels_label(channelsSelected));
+            xticks(1:10:nwin); xticklabels(xticks_labels(1:10:end));
+            title(['log band | class: ' num2str(classes(idx_class)) ' | band: ' bands_str{idx_b}])
+            idx_plot = idx_plot + 1;
+        end
+        idx_b = idx_b + 1;
+    end
+    sgtitle([subject ' ' day ' | windowing for single classes | figure #' num2str(idx_f)]);
+end
