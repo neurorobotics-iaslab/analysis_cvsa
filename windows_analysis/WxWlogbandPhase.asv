@@ -63,9 +63,9 @@ for idx_file= 1: nFiles
     trial_with_eog = [trial_with_eog; c_trial_with_eog];
 
     % laplacian
-    disp('      [proc] applying laplacian')
+%     disp('      [proc] applying laplacian')
 %     c_signal = c_signal * lap;
-c_signal = c_signal - mean(c_signal, 2);
+% c_signal = c_signal - mean(c_signal, 2);
 
     for idx_band = 1:nbands
         band = bands{idx_band};
@@ -492,6 +492,7 @@ for idx_f = 1:nfigure
     title(['ERP | band: ' num2str(erp_band(1)) '-' num2str(erp_band(2))])
 
     sgtitle([subject ' ' day ' | time | figure #' num2str(idx_f)]);
+%     sgtitle( 's1 | time');
 end
 % set(handles_itpc, 'clim', [0, cl_itpc])
 % set(handles_logBand, 'clim', [0, cl_logBand])
@@ -534,4 +535,5 @@ for idx_f = 1:nfigure
         idx_b = idx_b + 1;
     end
     sgtitle([subject ' ' day ' | windowing for single classes | figure #' num2str(idx_f)]);
+% sgtitle('s1 | windowing for single classes');
 end

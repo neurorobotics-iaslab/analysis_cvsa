@@ -1,0 +1,514 @@
+%% file to compute for each trial the gini value in a window of 100 ms
+clear all; % close all;
+
+addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/EOG')
+addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
+
+%% Initialization
+bands = [{[14 22]} {[8 14]} {[22 30]}];
+bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
+nbands = length(bands);
+signals = cell(1, nbands);
+headers = cell(1, nbands);
+for idx_band = 1:nbands
+    headers{idx_band}.TYP = [];
+    headers{idx_band}.DUR = [];
+    headers{idx_band}.POS = [];
+    signals{idx_band} = [];
+end
+classes = [730 731];
+cf_event = 781;
+fix_event = 786;
+nchannels = 39;
+nclasses = length(classes);
+filterOrder = 4;
+avg = 0.5;
+eog_threshold = 500;
+
+%% Load file
+[filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
+if ischar(filenames)
+    filenames = {filenames};
+end
+subject = filenames{1}(1:2);
+day = filenames{1}(4:11);
+
+%% concatenate the files
+nFiles = length(filenames);
+trial_with_eog = [];
+for idx_file= 1: nFiles
+    fullpath_file_shift = fullfile(pathname, filenames{idx_file});
+    disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', filenames{idx_file}]);
+    [c_signal,header] = sload(fullpath_file_shift);
+    c_signal = c_signal(:,1:nchannels);
+    channels_label = header.Label;
+
+    c_trial_with_eog = eog_detection(c_signal, header, eog_threshold, {'FP1', 'FP2', 'EOG'});
+    trial_with_eog = [trial_with_eog; c_trial_with_eog];
+
+    for idx_band = 1:nbands
+        band = bands{idx_band};
+        sampleRate = header.SampleRate;
+
+        % for power band using hilbert transformation
+        disp('   [proc] power band');
+        disp('      [proc] applying filtering')
+        [b, a] = butter(filterOrder, band(2)*(2/sampleRate),'low');
+        s_low = filter(b,a,c_signal);
+        [b, a] = butter(filterOrder, band(1)*(2/sampleRate),'high');
+        s_filt = filter(b,a,s_low);
+        disp('      [proc] applying power with hilbert')
+%         s_rect = power(s_filt, 2);
+        analytic = hilbert(s_filt);
+        s_rect = abs(analytic).^2;
+        disp(['      [proc] applying average window | win size: ' num2str(avg) 's'])
+        s_out = zeros(size(c_signal));
+        nchannels = size(c_signal, 2);
+        for idx_ch=1:nchannels
+            s_out(:, idx_ch) = (filter(ones(1,avg*sampleRate)/avg/sampleRate, 1, s_rect(:, idx_ch)));
+        end
+
+        signal_processed = s_out;
+
+        c_header = headers{1, idx_band};
+        c_header.sampleRate = header.SampleRate;
+        c_header.channels_labels = header.Label;
+        if isempty(find(header.EVENT.TYP == 2, 1)) % no eye calibration
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP);
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR);
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS + size(signals{1, idx_band}, 1));
+        else
+            k = find(header.EVENT.TYP == 1, 1);
+            c_header.TYP = cat(1, c_header.TYP, header.EVENT.TYP(k:end));
+            c_header.DUR = cat(1, c_header.DUR, header.EVENT.DUR(k:end));
+            c_header.POS = cat(1, c_header.POS, header.EVENT.POS(k:end) + size(signals{1, idx_band}, 1));
+        end
+        signals{1, idx_band} = cat(1, signals{1, idx_band}, signal_processed(:,:));
+        headers{1, idx_band} = c_header;
+    end
+end
+
+
+%% Labelling data 
+events = headers{1,1};
+sampleRate = events.sampleRate;
+cuePOS = events.POS(ismember(events.TYP, classes));
+cueDUR = events.DUR(ismember(events.TYP, classes));
+cueTYP = events.TYP(ismember(events.TYP, classes));
+
+fixPOS = events.POS(events.TYP == 786);
+fixDUR = events.DUR(events.TYP == 786);
+
+cfPOS = events.POS(events.TYP == 781);
+cfDUR = events.DUR(events.TYP == 781);
+
+minDurCue = min(cueDUR);
+minDurFix = min(fixDUR);
+ntrial = length(cuePOS);
+
+%% Labeling data for the dataset
+min_durFIX = min(fixDUR);
+min_durCF = min(cfDUR);
+min_durCUE = min(cueDUR);
+
+trial_start = nan(ntrial, 1);
+trial_end = nan(ntrial, 1);
+trial_typ = nan(ntrial, 1);
+for idx_trial = 1:ntrial
+    trial_start(idx_trial) = fixPOS(idx_trial);
+    trial_typ(idx_trial) = cueTYP(idx_trial);
+    trial_end(idx_trial) = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
+end
+
+min_trial_data = min(trial_end - trial_start+1);
+trial_data = nan(min_trial_data, nbands, nchannels, ntrial);
+for idx_band = 1:nbands
+    c_signal = signals{idx_band};
+    for trial = 1:ntrial
+        c_start = trial_start(trial);
+        c_end = trial_start(trial) + min_trial_data - 1;
+        trial_data(:,idx_band,:,trial) = c_signal(c_start:c_end,:);
+    end
+end
+
+%% refactoring the data
+% now the data are placed alternatevely, so odd trial id is for 730, even for 731
+balanced_trial_idx = balanced_data_afterEOG(trial_with_eog, trial_typ, classes);
+balanced_trial_data = trial_data(:,:,:,logical(balanced_trial_idx));
+trial_typ = trial_typ(logical(balanced_trial_idx));
+ntrial = sum(balanced_trial_idx);
+idx_classes_trial = nan(ntrial/2, nclasses);
+for idx_class = 1:nclasses
+    idx_classes_trial(:,idx_class) = find(trial_typ == classes(idx_class));
+end
+
+tmp = nan(size(balanced_trial_data));
+trial_typ = nan(size(trial_typ));
+i = 1;
+for idx_trial_class = 1:2:ntrial
+    for idx_class = 1:nclasses
+        tmp(:,:,:,idx_trial_class + idx_class - 1) = balanced_trial_data(:,:,:,idx_classes_trial(i, idx_class));
+        trial_typ(idx_trial_class + idx_class - 1) = classes(idx_class);
+    end
+    i = i + 1;
+end
+trial_data = tmp; % samples x bands x channels x trials
+trial_data(:,:,19,:) = 0; % remove the power of the EOG channel, FP1 anf FP2
+
+%% compute sparsity
+% define regions
+occipital = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'}; [~, ch_occipital] = ismember(occipital, channels_label);
+central = {'CP3', 'CP1', 'C3', 'FC3', 'C1', 'FC1', 'CP4', 'C4', 'FC4', 'CP2', 'C2', 'FC2', 'FCZ', 'CZ'}; [~, ch_central] = ismember(central, channels_label);
+frontal = {'F3', 'F1', 'F2', 'F4', 'FP1', 'FP2', 'FZ'}; [~, ch_frontal] = ismember(frontal, channels_label);
+nchannelsSelected = size(ch_occipital, 2);
+
+sparsity = nan(min_trial_data, nbands, ntrial, 2); % sample x band x trial x sparsity
+
+for t = 1:ntrial
+    c_data = squeeze(trial_data(:,:,:,t)); % samples x band x channels
+
+    for sample = 1:min_trial_data
+        c_sample = squeeze(c_data(sample,:,:)); % bands x channels
+
+        for idx_band = 1:nbands
+            tmp = squeeze(c_sample(idx_band,:)); % 1 x channels
+%             tmp = (tmp - min(tmp)); tmp = tmp / max(tmp); % normalize
+
+            sparsity(sample, idx_band, t,:) = compute_sparsity(tmp);
+        end
+    end
+end
+
+%% show log band and index ---> all trial
+handles = cell(1, nbands); cl = -inf(1, nbands);
+for t = ntrial:ntrial
+    figure();
+    for idx_band = 1:nbands
+        subplot(2,nbands,idx_band)
+        imagesc(squeeze(trial_data(:,idx_band,:,t))')
+        hold on;
+        xline(minDurFix, '--r', 'Cue', 'LabelOrientation', 'horizontal');
+        xline(minDurCue+minDurFix, '--r', 'Cf', 'LabelOrientation', 'horizontal');
+        hold off;
+        xticks(sampleRate:sampleRate:min_trial_data)
+        xticklabels(string((sampleRate:sampleRate:min_trial_data) / sampleRate));
+        yticks(1:nchannels); yticklabels(channels_label)
+        handles{idx_band} = [handles{idx_band}, gca];
+        cl(idx_band) = max(cl(idx_band), ...
+            max(abs(squeeze(trial_data(:, idx_band, :, t))), [], 'all'));
+        title(['log band | ' bands_str{idx_band}])
+
+
+        subplot(2,nbands, idx_band + nbands)
+        plot(squeeze(sparsity(:,idx_band, t, 1)))
+        hold on;
+        plot(squeeze(sparsity(:,idx_band, t, 2)))
+        xline(minDurFix, '--r', 'Cue', 'LabelOrientation', 'horizontal');
+        xline(minDurCue+minDurFix, '--r', 'Cf', 'LabelOrientation', 'horizontal');
+        hold off;
+        legend([{'bp mean'},{'bp max'},{'events'}])
+        xticks(sampleRate:sampleRate:min_trial_data)
+        xlim([0 min_trial_data])
+        ylim([0, 1])
+        xticklabels(string((sampleRate:sampleRate:min_trial_data) / sampleRate));
+        title(['sparsity (hoyer) | ' bands_str{idx_band}])
+        
+    end
+    sgtitle(['task: ' num2str(trial_typ(t))])
+end
+for idx_band = 1:nbands
+    set(handles{idx_band}, 'clim', [0, cl(idx_band)])
+end
+
+%% train data for the kmean (using only ban 8-14)
+choosen_band = 2;
+percentual_train = 0.75; ntrial_train = ceil(percentual_train * ntrial);
+sparsity_cf = squeeze(sparsity(minDurFix+minDurCue+1:end, choosen_band,:,:));
+
+train_kmeans = nan(ntrial_train * size(sparsity_cf, 1), 2);
+for t = 1:ntrial_train
+    train_kmeans((t-1)*size(sparsity_cf, 1) + 1: t * size(sparsity_cf, 1),:) = sparsity_cf(:,t,:);
+end
+K = 3;
+[raw_labels, C] = kmeans(train_kmeans, K, 'Distance', 'sqeuclidean', 'Replicates', 10, 'Display', 'iter');
+
+cluster_labels_train = nan(size(sparsity_cf, 1), ntrial_train);
+for t = 1:ntrial_train
+    cluster_labels_train(:,t) = raw_labels((t-1)*size(sparsity_cf, 1) + 1: t * size(sparsity_cf, 1));
+end
+
+[~, sortIdx] = sort(mean(C'));  % Sort clusters from low to high power
+if K == 3
+    labels = ["Nothing", "Shift", "Sustained"];
+else
+    labels = ["Shift", "Sustained"];
+end
+mappedLabels = strings(size(mean(C')));
+mappedLabels(sortIdx) = labels; % in this way we associate the correct label to the class
+figure(); hold on;
+for i = 1:K
+    scatter(C(i,1), C(i,2), 'filled')
+end
+xlabel('mean'); ylabel('max');
+title('centroids')
+legend(mappedLabels)
+
+%% show log band, index and cluster --> only cf
+handles = []; cl = -inf;
+for t = 1:ntrial_train % ntrial_train
+    figure();
+    subplot(3,1,1)
+    imagesc(squeeze(trial_data(minDurFix+minDurCue+1:end,choosen_band,:,t))')
+    xticks(minDurFix+minDurCue+1:sampleRate:min_trial_data)
+    xticklabels(string((minDurFix+minDurCue+1:sampleRate:min_trial_data) / sampleRate));
+    yticks(1:nchannels); yticklabels(channels_label)
+    handles = [handles, gca];
+    cl = max(cl, ...
+        max(abs(squeeze(trial_data(:, choosen_band, :, t))), [], 'all'));
+    title(['log band | ' bands_str{choosen_band}])
+
+
+    subplot(3,1,2)
+    plot(squeeze(sparsity_cf(:, t, 1)))
+    legend('band power')
+    hold on
+    plot(squeeze(sparsity_cf(:, t, 2)))
+    hold off
+    xticks(minDurFix+minDurCue+1:sampleRate:min_trial_data)
+    xlim([0 size(sparsity_cf, 1)])
+    ylim([0, 1])
+    legend('bp mean', 'bp max')
+    xticklabels(string((minDurFix+minDurCue+1:sampleRate:min_trial_data) / sampleRate));
+    title(['sparsity (entropy) | ' bands_str{choosen_band}])
+
+    subplot(3,1,3)
+    plot(squeeze(cluster_labels_train(:, t)))
+    legend('cluster')
+    xticks(minDurFix+minDurCue+1:sampleRate:min_trial_data)
+    xlim([0 size(sparsity_cf, 1)])
+    xticklabels(string((minDurFix+minDurCue+1:sampleRate:min_trial_data) / sampleRate));
+    title(['cluster | ' bands_str{choosen_band}])
+    yticks(1:K);
+    yticklabels(mappedLabels)
+
+    sgtitle(['only CF | task: ' num2str(trial_typ(t)) ' | trial: ' num2str(t)])
+end
+% set(handles, 'clim', [0, cl])
+
+%% test data kmeans
+test_kmeans = nan((ntrial - ntrial_train) * size(sparsity_cf, 1), 2);
+for t = ntrial_train+1:ntrial
+    test_kmeans((t-ntrial_train-1)*size(sparsity_cf, 1) + 1: (t-ntrial_train) * size(sparsity_cf, 1),:) = sparsity_cf(:,t,:);
+end
+
+distances = pdist2(test_kmeans, C);  
+[~, raw_labels] = min(distances, [], 2);
+
+cluster_labels_test = nan(size(sparsity_cf, 1), ntrial - ntrial_train);
+for t = 1:ntrial-ntrial_train
+    cluster_labels_test(:,t) = raw_labels((t - 1)*size(sparsity_cf, 1) + 1: t * size(sparsity_cf, 1));
+end
+
+%% extract train-test qda
+sus_train_data = []; sus_train_labels = [];
+sus_test_data = []; sus_test_labels = [];
+
+shi_train_data = []; shi_train_labels = [];
+shi_test_data = []; shi_test_labels = [];
+
+not_train_data = []; not_train_labels = [];
+not_test_data = []; not_test_labels = [];
+
+for t = 1:ntrial
+    c_data = squeeze(trial_data(minDurCue+minDurFix+1:end,choosen_band,:,t)); % sample x channels
+
+    if t <= ntrial_train
+        for sample = 1:size(c_data,1)
+            if mappedLabels(cluster_labels_train(sample, t)) == "Shift"
+                shi_train_data = [shi_train_data; c_data(sample,:)];
+                shi_train_labels = [shi_train_labels; trial_typ(t)];
+            elseif mappedLabels(cluster_labels_train(sample, t)) == "Sustained"
+                sus_train_data = [sus_train_data; c_data(sample,:)];
+                sus_train_labels = [sus_train_labels; trial_typ(t)];
+            elseif mappedLabels(cluster_labels_train(sample, t)) == "Nothing"
+                not_train_data = [not_train_data; c_data(sample,:)];
+                not_train_labels = [not_train_labels; trial_typ(t)];
+            end
+        end
+    else
+        for sample = 1:size(c_data,1)
+            if mappedLabels(cluster_labels_test(sample, t-ntrial_train)) == "Shift"
+                shi_test_data = [shi_test_data; c_data(sample,:)];
+                shi_test_labels = [shi_test_labels; trial_typ(t)];
+            elseif mappedLabels(cluster_labels_test(sample, t-ntrial_train)) == "Sustained"
+                sus_test_data = [sus_test_data; c_data(sample,:)];
+                sus_test_labels = [sus_test_labels; trial_typ(t)];
+            elseif mappedLabels(cluster_labels_test(sample, t-ntrial_train)) == "Nothing"
+                not_test_data = [not_test_data; c_data(sample,:)];
+                not_test_labels = [not_test_labels; trial_typ(t)];
+            end
+        end
+    end    
+end
+
+%% fisher score on the train data
+fisher_shift = nan(1, nchannels-1);
+fisher_sus = nan(1, nchannels-1);
+fisher_noth = nan(1, nchannels-1);
+for idx_ch=1:nchannels-1
+    % shift
+    mu1 = mean(shi_train_data(shi_train_labels == classes(1),idx_ch));
+    sigma1 = std(shi_train_data(shi_train_labels == classes(1),idx_ch));
+    mu2 = mean(shi_train_data(shi_train_labels == classes(2),idx_ch));
+    sigma2 = std(shi_train_data(shi_train_labels == classes(2),idx_ch));
+    fisher_shift(idx_ch) = abs(mu1 - mu2);
+
+    % sus
+    mu1 = mean(sus_train_data(sus_train_labels == classes(1),idx_ch));
+    sigma1 = std(sus_train_data(sus_train_labels == classes(1),idx_ch));
+    mu2 = mean(sus_train_data(sus_train_labels == classes(2),idx_ch));
+    sigma2 = std(sus_train_data(sus_train_labels == classes(2),idx_ch));
+    fisher_sus(idx_ch) = abs(mu1 - mu2);
+
+    % noth
+    mu1 = mean(not_train_data(not_train_labels == classes(1),idx_ch));
+    sigma1 = std(not_train_data(not_train_labels == classes(1),idx_ch));
+    mu2 = mean(not_train_data(not_train_labels == classes(2),idx_ch));
+    sigma2 = std(not_train_data(not_train_labels == classes(2),idx_ch));
+    fisher_noth(idx_ch) = abs(mu1 - mu2);
+end
+
+tmp = [fisher_shift; fisher_sus; fisher_noth];
+figure();
+imagesc(tmp')
+yticks(1:nchannels); yticklabels(channels_label)
+xticks(1:3); xticklabels([{"shift"}, {"sustained"}, {"nothing"}])
+
+disp('a')
+
+%% train and test the qda
+sus_select_channels = {'PO8', 'PO6', 'P6', 'PO4', 'FCZ', 'O2'};
+shi_select_channels = {'FCZ','PO3','PO5'};
+not_select_channels = {};
+
+[~, not_idx] = ismember(not_select_channels, channels_label);
+
+
+% sustained
+if isempty(sus_select_channels)
+    % remove eog channel  --> all 0 values
+    sus_test_data(:,all(sus_test_data==0,1)) = [];
+    sus_train_data(:,all(sus_train_data==0,1)) = [];
+    sus_idx = 1:nchannels - 1;
+else
+    [~, sus_idx] = ismember(sus_select_channels, channels_label);
+end
+disp('--- SUSTAINED ---')
+qdaModel_sus = fitcdiscr(sus_train_data(:,sus_idx), sus_train_labels, 'DiscrimType', 'quadratic');
+CVModel = crossval(qdaModel_sus, 'KFold', 5);
+loss = kfoldLoss(CVModel);  % Average classification error
+fprintf("5-fold cross-validation loss: %.4f\n", loss);
+p = predict(qdaModel_sus, sus_train_data(:,sus_idx));
+confusionmat(sus_train_labels, p)
+disp(['Accuracy TRAIN: ' num2str(sum(p == sus_train_labels)/size(p,1))])
+p = predict(qdaModel_sus, sus_test_data(:,sus_idx));
+confusionmat(sus_test_labels, p)
+disp(['Accuracy TEST: ' num2str(sum(p == sus_test_labels)/size(p,1))])
+
+% shift
+if isempty(shi_select_channels)
+    % remove eog channel  --> all 0 values
+    shi_test_data(:,all(shi_test_data==0,1)) = [];
+    shi_train_data(:,all(shi_train_data==0,1)) = [];
+    shi_idx = 1:nchannels - 1;
+else
+    [~, shi_idx] = ismember(shi_select_channels, channels_label);
+end
+disp('--- SHIFT ---')
+qdaModel_shi = fitcdiscr(shi_train_data(:,shi_idx), shi_train_labels, 'DiscrimType', 'quadratic');
+CVModel = crossval(qdaModel_shi, 'KFold', 5);
+loss = kfoldLoss(CVModel);  % Average classification error
+fprintf("5-fold cross-validation loss: %.4f\n", loss);
+p = predict(qdaModel_shi, shi_train_data(:,shi_idx));
+confusionmat(shi_train_labels, p)
+disp(['Accuracy TRAIN: ' num2str(sum(p == shi_train_labels)/size(p,1))])
+p = predict(qdaModel_shi, shi_test_data(:,shi_idx));
+confusionmat(shi_test_labels, p)
+disp(['Accuracy TEST: ' num2str(sum(p == shi_test_labels)/size(p,1))])
+
+if K == 3
+    if isempty(not_select_channels)
+        % remove eog channel  --> all 0 values
+        not_test_data(:,all(not_test_data==0,1)) = [];
+        not_train_data(:,all(not_train_data==0,1)) = [];
+        not_idx = 1:nchannels - 1;
+    else
+        [~, not_idx] = ismember(not_select_channels, channels_label);
+    end
+    disp('--- NOTHING ---')
+    qdaModel_not = fitcdiscr(not_train_data(:,not_idx), not_train_labels, 'DiscrimType', 'quadratic');
+    CVModel = crossval(qdaModel_not, 'KFold', 5);
+    loss = kfoldLoss(CVModel);  % Average classification error
+    fprintf("5-fold cross-validation loss: %.4f\n", loss);
+    p = predict(qdaModel_not, not_train_data(:,not_idx));
+    confusionmat(not_train_labels, p)
+    disp(['Accuracy TRAIN: ' num2str(sum(p == not_train_labels)/size(p,1))])
+    p = predict(qdaModel_not, not_test_data(:,not_idx));
+    confusionmat(not_test_labels, p)
+    disp(['Accuracy TEST: ' num2str(sum(p == not_test_labels)/size(p,1))])
+end
+
+
+%% pseudo online
+
+
+%%
+prova = squeeze(trial_data(1945,2,:,1));
+m3 = compute_sparsity(prova)
+
+% sparsity and where
+function sparsity = compute_sparsity(signalVec)
+    % take the one which contribute at the 95% of the energy
+    sparsity = nan(2,1);
+    activeIdx = 1:length(signalVec);
+
+    % --- compute the sparsity over 5 different ROIs ---
+    frontal = [3 4 5 20 21]; c_l = [6 22 25 8 11 27]; c_r = [7 24 26 10 12 28]; o_l = [29 13 30 37 33 34 17]; o_r = [31 15 32 35 36 38 18];
+    mean_roi = [mean(signalVec(activeIdx(ismember(activeIdx,frontal)))), mean(signalVec(activeIdx(ismember(activeIdx,c_l)))), ...
+        mean(signalVec(activeIdx(ismember(activeIdx,c_r)))), mean(signalVec(activeIdx(ismember(activeIdx,o_l)))), ...
+        mean(signalVec(activeIdx(ismember(activeIdx,o_r))))];
+    mean_roi(isnan(mean_roi)) = 0;
+    n = length(mean_roi);
+    signalVec_entropy = mean_roi.^2;
+    total_entropy = sum(signalVec_entropy);
+    if total_entropy == 0
+        sparsity(1) = 0;
+    else
+        p = signalVec_entropy / total_entropy;
+        H = -sum(p .* log2(p + eps));  % entropy
+        Hmax = log2(n);
+        sparsity(1) = 1 - (H / Hmax);  % normalized: 0 to 1
+    end
+
+    max_roi = [max(signalVec(activeIdx(ismember(activeIdx,frontal)))), max(signalVec(activeIdx(ismember(activeIdx,c_l)))), ...
+        max(signalVec(activeIdx(ismember(activeIdx,c_r)))), max(signalVec(activeIdx(ismember(activeIdx,o_l)))), ...
+        max(signalVec(activeIdx(ismember(activeIdx,o_r))))];
+    signalVec_entropy = max_roi.^2;
+    total_entropy = sum(signalVec_entropy);
+    if total_entropy == 0
+        sparsity(2) = 0;
+    else
+        p = signalVec_entropy / total_entropy;
+        H = -sum(p .* log2(p + eps));  % entropy
+        Hmax = log2(n);
+        sparsity(2) = 1 - (H / Hmax);  % normalized: 0 to 1
+    end
+        
+%     l1 = norm(max_roi, 1);      % Norma L1
+%     l2 = norm(max_roi, 2);      % Norma L2
+%     if l2 == 0
+%         sparsity(2) = 0;  % caso limite: vettore nullo
+%     else
+%         sparsity(2) = (sqrt(n) - (l1 / l2)) / (sqrt(n) - 1);
+%     end
+end

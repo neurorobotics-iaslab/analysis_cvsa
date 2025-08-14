@@ -6,7 +6,7 @@ addpath('/home/paolo/Local/cnbi-smrtrain/toolboxes/cva')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/512hz/utils')
 
 %% Initialization
-a = 4:2:18;
+a = 8:2:18;
 b = a+2;
 c = [a; b];
 bands = cell(1, size(a, 2) + 1);
@@ -14,6 +14,8 @@ for i=1:length(a)
     bands{i} = [a(i), b(i)];
 end
 bands{i+1} = [8 14];
+bands{i+2} = [14 20];
+bands{i+3} = [20 30];
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};

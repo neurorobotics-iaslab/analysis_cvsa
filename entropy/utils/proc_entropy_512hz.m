@@ -17,15 +17,16 @@ disp('      [proc] applying power')
 s_rect = power(s_filt, 2);
 
 % average windows 1 sec
-% disp('      [proc] applying average window')
-% s_out = zeros(size(signal));
-% nchannels = size(signal, 2);
-% for idx_ch=1:nchannels
-%     s_out(:, idx_ch) = (filter(ones(1,avg*sampleRate)/avg/sampleRate, 1, s_rect(:, idx_ch)));
-% end
+disp('      [proc] applying average window')
+s_out = zeros(size(signal));
+nchannels = size(signal, 2);
+avg = 0.5;
+for idx_ch=1:nchannels
+    s_out(:, idx_ch) = (filter(ones(1,avg*sampleRate)/avg/sampleRate, 1, s_rect(:, idx_ch)));
+end
 
 % disp apply log
-disp('      [proc] applying log');
-s_out = log(s_rect);
+% disp('      [proc] applying log');
+% s_out = log(s_rect);
 
 end

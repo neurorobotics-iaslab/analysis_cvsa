@@ -140,41 +140,89 @@ for idx_trial_class = 1:2:ntrial
 end
 trial_data = tmp; % samples x bands x channels x trials --> only cf
 
-%% fisher score to understand the features to extract --------------------------> TODO
-
-%% prepare the dataset
-channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'}; % todo select chans and bands
+%% show the log band diff in time for each channels and band. Then show the fisher score
+channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'}; 
 [~, channelsSelected] = ismember(channels_select, channels_label);
 nchannelsSelected = size(channelsSelected, 2);
+
+fisher = nan(nbands, nchannelsSelected);
+for b = 1:nbands
+    c1 = squeeze(mean(mean(trial_data(:,b,channelsSelected,trial_typ == classes(1)), 4), 1));
+    c2 = squeeze(mean(mean(trial_data(:,b,channelsSelected,trial_typ == classes(2)), 4), 1));
+
+    std1 = squeeze(std(std(trial_data(:,b,channelsSelected,trial_typ==classes(1)), 0, 4), 0, 1));
+    std2 = squeeze(std(std(trial_data(:,b,channelsSelected,trial_typ==classes(2)), 0, 4), 0, 1));
+
+    fisher(b,:) = abs(c1 - c2) ./ sqrt(power(std1, 2) + power(std2, 2));
+end
+
+% plot fisher and diff log in mean
+figure(); handles = []; cl=-inf;
+for b = 1:nbands
+    tmp1 = squeeze(mean(trial_data(:,b,channelsSelected, trial_typ==classes(1)), 4));
+    tmp2 = squeeze(mean(trial_data(:,b,channelsSelected, trial_typ==classes(2)), 4));
+    diff = abs(tmp1 - tmp2);
+
+    subplot(ceil(nbands/2), 2, b)
+    imagesc(diff')
+    yticks(1:nchannelsSelected); yticklabels(channels_select);
+    title(['band: ' bands_str{b}])
+    handles = [handles; gca];
+    cl = max(cl, max(diff, [], 'all'));
+end
+set(handles, 'clim', [0, cl]);
+subplot(ceil(nbands/2), 2, nbands+1)
+imagesc(fisher')
+title('Fisher'); 
+xticks(1:nbands); xticklabels(bands_str);
+yticks(1:nchannelsSelected); yticklabels(channels_select);
+
+%% ask the user the channels and the bands
+select_band = {[8 10], [10 12], [12 14]}; 
+channels_select = {{'PO5', 'PO3', 'PO7'}, {'P5', 'PO5', 'PO3', 'PO7'}, {'P5'}};
+channels_select_flatten = [channels_select{:}];
+total_electrodes = sum(cellfun(@(x) numel(x), channels_select));
+
+idx_select_bands = find(cellfun(@(x) any(cellfun(@(y) isequal(x, y), select_band)), bands));
+trial_data_select = nan(min_trial_data, total_electrodes, ntrial);
+idx_ch = 1;
+for i = 1:size(channels_select, 2)
+    c_band = idx_select_bands(i);
+    tmp_channels = channels_select{i};
+    [~, c_channelsSelected] = ismember(tmp_channels, channels_label);
+
+    c_data = squeeze(trial_data(:,c_band,:,:));
+    trial_data_select(:,idx_ch:idx_ch+size(tmp_channels,2)-1,:) = c_data(:,c_channelsSelected,:);
+
+    idx_ch = idx_ch + size(tmp_channels, 2); % update the channel for the trial_data_select
+end
+
+%% prepare the dataset
 percentual = 0.7;
 max_idx_trial_train = ceil(ntrial * percentual);
-trial_data_train = trial_data(:,:,channelsSelected,1:max_idx_trial_train);
-trial_data_test = trial_data(:,:,channelsSelected, max_idx_trial_train+1:end);
-
-%% ----> TODO remove after the other todo completed
-trial_data_train = squeeze(trial_data_train(:,9,:,:));
+trial_data_train = trial_data_select(:,:,1:max_idx_trial_train);
+trial_data_test = trial_data_select(:,:, max_idx_trial_train+1:end);
 
 %% === HMM WITH SYMBOLS ===
 % windowing parameters
-winLength = round(0.1 * sampleRate);    % 200 ms window
-stepSize  = round(0.05 * sampleRate);   % 100 ms step
+winLength = round(0.1 * sampleRate);    % 100 ms window
+stepSize  = round(0.05 * sampleRate);   % 50 ms step
 
 % features extraction
 nWins = floor((min_trial_data - winLength) / stepSize);
-all_feats = nan(nWins * max_idx_trial_train, nchannelsSelected); % [total_windows x channels]
+all_feats = nan(nWins * max_idx_trial_train, total_electrodes); % [total_windows x channels]
 
-% for b = 1:nbands
-    for t = 1:max_idx_trial_train
-        data = squeeze(trial_data_train(:, :, t));  % [samples x chans]
-        feat = zeros(nWins, nchannelsSelected);
-        for w = 1:nWins
-            idx = (w-1)*stepSize + (1:winLength);
-            window = data(idx, :);
-            feat(w,:) = mean(window, 1);  % mean on samples
-        end
-        all_feats((t-1)*nWins+1:t*nWins, :) = feat;
+for t = 1:max_idx_trial_train
+    data = squeeze(trial_data_train(:, :, t));  % [samples x chans]
+    feat = zeros(nWins, total_electrodes);
+    for w = 1:nWins
+        idx = (w-1)*stepSize + (1:winLength);
+        window = data(idx, :);
+        feat(w,:) = mean(window, 1);  % mean on samples
     end
-% end
+
+    all_feats((t-1)*nWins+1:t*nWins, :) = feat;
+end
 
 % applying the zscore
 mu = mean(all_feats, 1);
@@ -188,11 +236,12 @@ for k = 1:maxK
     [~, ~, sumd] = kmeans(all_feats, k, 'Replicates', 5, 'Distance', 'sqeuclidean');
     distortions(k) = sum(sumd);
 end
+figure();
 plot(1:maxK, distortions); xlabel('k'); ylabel('Distortion'); title('Elbow method'); % look the graph to undersstan which is the best value for the numSymbols
 
 %% quantize features into symbols and train the HMM model
 numStates = 3;                           % HMM with 3 hidden states
-numSymbols = 10;                         % Quantization bins
+numSymbols = 3;                         % Quantization bins
 
 % computing the kmeans to have the symbols for each ssample
 [idxs_cluster, C] = kmeans(all_feats, numSymbols, 'Distance', 'sqeuclidean', 'Replicates', 5); % try cosine or sqeuclidean
@@ -210,6 +259,7 @@ EMIS = normalize(rand(numStates, numSymbols), 2);
 [posterior, logposterior] = hmmdecode(idxs_cluster', ESTTR, ESTEMIT);  % posterior is [numStates x T]
 
 % Visualize for a specific trial
+handles = []; cl = -inf;
 for idx_trial = 1:10
     idx_start = (idx_trial-1)*nWins+1;
     idx_end = idx_trial*nWins;
@@ -217,25 +267,25 @@ for idx_trial = 1:10
     figure();
     subplot(3+size(posterior, 1),1,1)
     imagesc(all_feats((idx_trial-1)*nWins+1:idx_trial*nWins, :)')
-    yticks(1:nchannelsSelected); yticklabels(channels_select)
-    title('Log band')
+    yticks(1:size(channels_select_flatten,2)); yticklabels(channels_select_flatten)
+    title('Log band'); handles = [handles; gca]; cl = max(cl, abs(all_feats((idx_trial-1)*nWins+1:idx_trial*nWins, :)));
 
     subplot(3+size(posterior, 1),1,2)
     plot(pred_train((idx_trial-1)*nWins+1:idx_trial*nWins)); title('Decoded HMM States');
-    ylim([0 numStates]); yticks(0:numStates)
+    ylim([0.5 numStates+0.5]); yticks(0:numStates); xlim([0 nWins])
 
     subplot(3+size(posterior, 1),1,3)
     plot(idxs_cluster((idx_trial-1)*nWins+1:idx_trial*nWins))
-    title('Decoded kmean States');
-    ylim([0 numSymbols])
+    title('Decoded kmean States');xlim([0 nWins])
+    ylim([0.5 numSymbols+0.5])
 
     for i = 1:size(posterior, 1)
-        subplot(2+size(posterior, 1),1,3+i)
+        subplot(3+size(posterior, 1),1,3+i)
         plot(posterior(i, idx_start:idx_end));
         title(['Posterior ' num2str(i)]);
-        ylim([0 1])
+        ylim([-0.1 1.1]); xlim([0 nWins])
     end
     sgtitle(['trial: ' num2str(idx_trial) ' | class: ' num2str(trial_typ(idx_trial))]);
 end
-
+set(handles, 'clim', [0 cl]);
 

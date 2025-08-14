@@ -492,6 +492,7 @@ for idx_f = 1:nfigure
     title(['ERP | band: ' num2str(erp_band(1)) '-' num2str(erp_band(2))])
 
     sgtitle([subject ' ' day ' | time | figure #' num2str(idx_f)]);
+%     sgtitle( 's1 | time');
 end
 % set(handles_itpc, 'clim', [0, cl_itpc])
 % set(handles_logBand, 'clim', [0, cl_logBand])
@@ -534,4 +535,5 @@ for idx_f = 1:nfigure
         idx_b = idx_b + 1;
     end
     sgtitle([subject ' ' day ' | windowing for single classes | figure #' num2str(idx_f)]);
+% sgtitle('s1 | windowing for single classes');
 end
