@@ -20,7 +20,7 @@ s_rect = power(s_filt, 2);
 disp('      [proc] applying average window')
 s_out = zeros(size(signal));
 nchannels = size(signal, 2);
-avg = 0.5;
+avg = 1;
 for idx_ch=1:nchannels
     s_out(:, idx_ch) = (filter(ones(1,avg*sampleRate)/avg/sampleRate, 1, s_rect(:, idx_ch)));
 end

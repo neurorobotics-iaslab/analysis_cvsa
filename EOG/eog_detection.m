@@ -26,31 +26,72 @@ s_filt = filter(b,a,s_low);
 % take the signal of the electrodes and compute the horizontal and vertical motion
 channels_label = header.Label;
 idx_eog = find(ismember(channels_label, eog_channel));
-heog = s_filt(:, idx_eog(1)) - s_filt(:, idx_eog(2));
-if size(eog_channel, 2) == 2
-    % we have only FP1 and FP2
-    veog = (s_filt(:, idx_eog(1)) + s_filt(:, idx_eog(2))) / 2;
-else
-    veog = ((s_filt(:, idx_eog(1)) + s_filt(:, idx_eog(2))) / 2) - s_filt(:, idx_eog(3));
-end
-
-
-% check for each trial during the cf
-ntrial = sum(header.EVENT.TYP == 1);
-trial_with_eog = zeros(ntrial, 1);
-pos = header.EVENT.POS(header.EVENT.TYP == 781); 
-dur = header.EVENT.DUR(header.EVENT.TYP == 781); 
-for idx_trial = 1:ntrial
-    c_start = pos(idx_trial);
-    c_end = c_start + dur(idx_trial) - 1;
-    c_veog = abs(veog(c_start:c_end,:));
-    c_heog = abs(heog(c_start:c_end,:));
-
-    if any(c_heog > threshold)
-        trial_with_eog(idx_trial) = 1;
-    elseif any(c_veog > threshold)
-        trial_with_eog(idx_trial) = 1;
+if(~isempty(idx_eog))
+    heog = s_filt(:, idx_eog(1)) - s_filt(:, idx_eog(2));
+    if size(eog_channel, 2) == 2
+        % we have only FP1 and FP2
+        veog = (s_filt(:, idx_eog(1)) + s_filt(:, idx_eog(2))) / 2;
+    else
+        veog = ((s_filt(:, idx_eog(1)) + s_filt(:, idx_eog(2))) / 2) - s_filt(:, idx_eog(3));
     end
+
+
+    % check for each trial during the cf
+    ntrial = sum(header.EVENT.TYP == 1);
+    trial_with_eog = zeros(ntrial, 1);
+    pos = header.EVENT.POS(header.EVENT.TYP == 781);
+    dur = header.EVENT.DUR(header.EVENT.TYP == 781);
+    for idx_trial = 1:ntrial
+        c_start = pos(idx_trial);
+        c_end = c_start + dur(idx_trial) - 1;
+        c_veog = abs(veog(c_start:c_end,:));
+        c_heog = abs(heog(c_start:c_end,:));
+
+        if any(c_heog > threshold)
+            trial_with_eog(idx_trial) = 1;
+            figure();
+            subplot(2,1,1)
+            plot(s_filt(c_start:c_end, idx_eog));
+            xticks(0:512:(c_end-c_start))
+            xticklabels(string((1024+512:512:c_end-c_start+ 1024+512) / 512));
+            legend(eog_channel);
+            title('EEG signal')
+
+            subplot(212);
+            plot(c_heog)
+            hold on;
+            plot(c_veog)
+            xticks(0:512:(c_end-c_start))
+            xticklabels(string((1024+512:512:c_end-c_start + 1024+512) / 512));
+            legend('veog', 'heog')
+            title('Values')
+            sgtitle(['trial: ' num2str(idx_trial)])
+        elseif any(c_veog > threshold)
+            trial_with_eog(idx_trial) = 1;
+            figure();
+            subplot(2,1,1)
+            plot(s_filt(c_start:c_end, idx_eog));
+            xticks(0:512:(c_end-c_start))
+            xticklabels(string((1024+512:512:c_end-c_start+ 1024+512) / 512));
+            legend(eog_channel);
+            title('EEG signal')
+
+            subplot(212);
+            plot(c_heog)
+            hold on;
+            plot(c_veog)
+            xticks(0:512:(c_end-c_start))
+            xticklabels(string((1024+512:512:c_end-c_start+ 1024+512) / 512));
+            legend('veog', 'heog')
+            title('Values')
+            sgtitle(['trial: ' num2str(idx_trial)])
+        end
+    end
+else
+%     ntrial = sum(header.EVENT.TYP == 1); % for cvsa
+    ntrial = sum(header.EVENT.TYP == 786); % for old MI
+    trial_with_eog = zeros(ntrial, 1);
 end
+
 
 end

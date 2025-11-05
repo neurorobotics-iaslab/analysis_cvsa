@@ -5,14 +5,15 @@ addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/utils')
 addpath('/home/paolo/cvsa_ws/src/analysis_cvsa/entropy/utils')
 
 %% Initialization
-a = 4:2:18;
-b = a+2;
-c = [a; b];
-bands = cell(1, size(a, 2) + 1);
-for i=1:length(a)
-    bands{i} = [a(i), b(i)];
-end
-bands{i+1} = [8 14];
+% a = 4:2:18;
+% b = a+2;
+% c = [a; b];
+% bands = cell(1, size(a, 2) + 1);
+% for i=1:length(a)
+%     bands{i} = [a(i), b(i)];
+% end
+% bands{i+1} = [8 14];
+bands = {[8 14]};
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 channels_select = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'};
@@ -189,6 +190,21 @@ for idx_band = 1:nbands
 end
 sgtitle('shannon entropy | mean over trial')
 
+%% plotting single trial
+for t = 1:ntrial
+    for idx_band = 1:nbands
+        figure();
+        imagesc(squeeze(entropy_matrix(:,:,t, idx_band))')
+        hold on
+        xline(floor((min(fixDUR) - window_size ) / step_size + 1), '--r', 'Cue', 'LabelOrientation', 'horizontal');
+        xline(floor((min(fixDUR) - window_size  + min_durCUE) / step_size + 1), '--r', 'Cf', 'LabelOrientation', 'horizontal');
+        hold off
+        yticks(1:nchannels)
+        yticklabels(channels_label(1:nchannels))
+        xlabel('window')
+        title(['band: ' bands_str{idx_band} ' | class: ' num2str(trial_typ(t))])
+    end
+end
 
 
 %% funtinos
