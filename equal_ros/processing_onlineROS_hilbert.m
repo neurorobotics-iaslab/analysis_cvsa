@@ -33,7 +33,7 @@ for i=1:nchunks
     if any(isnan(buffer))
         continue;
     end
-
+    
     % apply low and high pass filters
     [tmp_data, zi_low] = filter(b_low,a_low,buffer,zi_low);
     [tmp_data,zi_high] = filter(b_high,a_high,tmp_data,zi_high);
