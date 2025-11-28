@@ -75,38 +75,33 @@ for i=1:nchunks
     % add
     frame = signal((i-1)*chunkSize+1:i*chunkSize,:);
 
-    % --- muscle artefact part buffer ---
+    % --- muscle artefact part ---
     [frame_muscle,zi_high] = filter(b_high,a_high,frame,zi_high);
 
     buffer_muscle(1:end-chunkSize,:) = buffer_muscle(chunkSize+1:end,:);
     buffer_muscle(end-chunkSize+1:end, :) = frame_muscle;
 
-    % --- eog artefact part buffer ---
-    % compte eog with horizontal and vertical movement
-    [data_eog,z_low_eog] = filter(b_low_eog,a_low_eog,frame,z_low_eog);
-    [frame_eog,z_high_eog] = filter(b_high_eog,a_high_eog,data_eog,z_high_eog);
-
-    buffer_eog(1:end-chunkSize,:) = buffer_eog(chunkSize+1:end,:);
-    buffer_eog(end-chunkSize+1:end, :) = frame_eog;
-
     % check
-    if any(isnan(buffer_muscle)) | any(isnan(buffer_eog))
+    if any(isnan(buffer_muscle))
         continue;
     end
     
-    % buffer pick
-    data_non_eog = buffer_muscle(:,non_eog);
+    data_non_eog = buffer(:,non_eog);
     if any(abs(data_non_eog(:)) > muscle.threshold)
         artifact(i) = 1;
     end
 
-    % vertical and horizontal movements
-    heog = buffer_eog(:, eog_idx(1)) - buffer_eog(:, eog_idx(2));
+    % --- eog artefact part ---
+    % compte eog with horizontal and vertical movement
+    [data_eog,z_low_eog] = filter(b_low_eog,a_low_eog,buffer,z_low_eog);
+    [data_eog,z_high_eog] = filter(b_high_eog,a_high_eog,data_eog,z_high_eog);
+
+    heog = data_eog(:, eog_idx(1)) - data_eog(:, eog_idx(2));
     if size(eog_idx, 2) == 2
         % we have only FP1 and FP2
-        veog = (buffer_eog(:, eog_idx(1)) + buffer_eog(:, eog_idx(2))) / 2;
+        veog = (data_eog(:, eog_idx(1)) + data_eog(:, eog_idx(2))) / 2;
     else
-        veog = ((buffer_eog(:, eog_idx(1)) + buffer_eog(:, eog_idx(2))) / 2) - buffer_eog(:, eog_idx(3));
+        veog = ((data_eog(:, eog_idx(1)) + data_eog(:, eog_idx(2))) / 2) - data_eog(:, eog_idx(3));
     end
     if any(abs(heog(:)) > eog.h_threshold)
         artifact(i) = 1;

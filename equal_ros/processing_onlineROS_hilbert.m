@@ -26,20 +26,21 @@ signal_processed = nan(nchunks, nchannels);
 for i=1:nchunks
     % add
     frame = signal((i-1)*chunkSize+1:i*chunkSize,:);
+    
+    % apply low and high pass filters
+    [tmp_data, zi_low] = filter(b_low,a_low,frame,zi_low);
+    [tmp_data,zi_high] = filter(b_high,a_high,tmp_data,zi_high);
+
     buffer(1:end-chunkSize,:) = buffer(chunkSize+1:end,:);
-    buffer(end-chunkSize+1:end, :) = frame;
+    buffer(end-chunkSize+1:end, :) = tmp_data;
 
     % check
     if any(isnan(buffer))
         continue;
     end
 
-    % apply low and high pass filters
-    [tmp_data, zi_low] = filter(b_low,a_low,buffer,zi_low);
-    [tmp_data,zi_high] = filter(b_high,a_high,tmp_data,zi_high);
-
     % apply power with hilbert
-    analytic = hilbert(tmp_data);
+    analytic = hilbert(buffer);
     tmp_data = abs(analytic).^2;
 
     % apply average
