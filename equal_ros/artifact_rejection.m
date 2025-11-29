@@ -1,11 +1,11 @@
-function artifact = artifact_rejection(signal, header, nchannels, bufferSize, chunkSize, eog, muscle)
+function artifact = artifact_rejection(signal, header, nchannels, bufferSize, chunkSize, eog, picks)
 % ARTIFACT_REJECTION Detects EOG and Muscle (EMG) artifacts in an EEG signal.
 %
 %   This function simulates an online "chunk-wise" processing using a
 %   sliding buffer. For each data window (buffer), it performs two 
 %   parallel checks:
 %
-%   1.  Muscle (EMG) Check: Applies a high-pass filter to the non-EOG 
+%   1.  Picks (picks) Check: Applies a high-pass filter to the non-EOG 
 %       channels and checks if the amplitude exceeds a threshold 
 %       ('muscle.threshold').
 %
@@ -50,7 +50,7 @@ disp('      [INFO] start artifact rejection: EOG an EMG' );
 
 % initial variables
 nchunks = floor(size(signal, 1)/chunkSize);
-buffer_muscle = nan(bufferSize, nchannels);
+buffer_peak = nan(bufferSize, nchannels);
 buffer_eog = nan(bufferSize, nchannels);
 sampleRate = header.SampleRate;
 [~, eog_idx] = ismember(eog.label, header.Label);
@@ -60,7 +60,7 @@ non_eog = setdiff(1:nchannels, eog_idx);
 signal = signal(:,1:nchannels);
 
 % prepare the filters for both artefact removal
-[b_high, a_high] = butter(muscle.filterOrder, muscle.freq*(2/sampleRate),'high');
+[b_high, a_high] = butter(picks.filterOrder, picks.freq*(2/sampleRate),'high');
 zi_high = [];
 
 eog_band = eog.band;
@@ -76,10 +76,10 @@ for i=1:nchunks
     frame = signal((i-1)*chunkSize+1:i*chunkSize,:);
 
     % --- muscle artefact part buffer ---
-    [frame_muscle,zi_high] = filter(b_high,a_high,frame,zi_high);
+    [frame_peak,zi_high] = filter(b_high,a_high,frame,zi_high);
 
-    buffer_muscle(1:end-chunkSize,:) = buffer_muscle(chunkSize+1:end,:);
-    buffer_muscle(end-chunkSize+1:end, :) = frame_muscle;
+    buffer_peak(1:end-chunkSize,:) = buffer_peak(chunkSize+1:end,:);
+    buffer_peak(end-chunkSize+1:end, :) = frame_peak;
 
     % --- eog artefact part buffer ---
     % compte eog with horizontal and vertical movement
@@ -90,13 +90,13 @@ for i=1:nchunks
     buffer_eog(end-chunkSize+1:end, :) = frame_eog;
 
     % check
-    if any(isnan(buffer_muscle)) | any(isnan(buffer_eog))
+    if any(isnan(buffer_peak)) | any(isnan(buffer_eog))
         continue;
     end
     
     % buffer pick
-    data_non_eog = buffer_muscle(:,non_eog);
-    if any(abs(data_non_eog(:)) > muscle.threshold)
+    data_non_eog = buffer_peak(:,non_eog);
+    if any(abs(data_non_eog(:)) > picks.threshold)
         artifact(i) = 1;
     end
 
