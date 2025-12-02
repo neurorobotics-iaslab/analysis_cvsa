@@ -1,8 +1,8 @@
-function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l, o_r, c_l, c_r, excl_chs)
+function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l, o_r, c_l, c_r, excl_chs, nsparsity)
 % signal: signal 1 x channels, according to the notion of my 39 channels
     
-    sparsity = nan(3,1);
-    label_sparsity = [{'LI'},{'GI'},{'GB'}];
+    sparsity = nan(nsparsity,1);
+    label_sparsity = [{'LI'},{'GI'}];
 
     % --- LI --- Lateralization index
     if all(type == 'cvsa')
@@ -42,7 +42,4 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
     end
     sparsity(2) = gi;
 
-    % --- GB ---
-    % return the global power mean, 
-    sparsity(3) = global_mean;
 end

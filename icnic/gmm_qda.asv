@@ -494,8 +494,8 @@ yticks(1:noccipital); yticklabels(occipital)
 xticks(1:4); xticklabels(x_labels)
 
 %% train and test the qda
-IC_select_channels = {'PO4', 'O2', 'PO8', 'PO6', 'O1', 'PO3', 'PO7', 'PO5'}; %%%%% ----> features selection
-cl_select_channels = {'PO4', 'O2', 'PO8', 'PO6', 'O1', 'PO3', 'PO7', 'PO5'};
+IC_select_channels = {'PO4', 'O2', 'PO8', 'PO6'}; %%%%% ----> features selection
+cl_select_channels = {'PO4', 'O2', 'PO8', 'PO6', };
 
 
 % features selection
