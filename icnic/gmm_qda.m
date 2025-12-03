@@ -18,13 +18,10 @@ for idx_band = 1:nbands
     artifacts{idx_band} = [];
 end
 classes = [730 731];      
-cf_event = 781;
-fix_event = 786;
 nchannels = 39;
 nclasses = length(classes);
 filterOrder = 4;
 avg = 1;% 0.75;
-eog_threshold = 500;
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');

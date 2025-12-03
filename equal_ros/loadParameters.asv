@@ -1,0 +1,6 @@
+function [artifact] = loadParameters(path_file)
+    param = ReadYaml(path_file);
+
+    artifact = param.ArtifactCfg.params;
+    ring
+end
