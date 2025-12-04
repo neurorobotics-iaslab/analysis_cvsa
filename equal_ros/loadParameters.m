@@ -30,6 +30,7 @@ function [ringBuffer, artifact, processing, gmm, qda, integrator] = loadParamete
     integrator.ic_threshold = param.integrator.ic_threshold;
     integrator.init_val = param.integrator.init_val;
     integrator.ic_class_label = param.integrator.ic_class_label;
+    integrator.feedbackThs = cell2mat(param.trainingCVSA_node.thresholds);
     if all(integrator.type == 'Buffer')
         integrator.bufferSize = param.integrator.buffer_size;
     elseif all(integrator.type == 'Exponential')

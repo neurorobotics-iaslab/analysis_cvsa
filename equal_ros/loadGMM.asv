@@ -1,4 +1,4 @@
-function [gmm, params] = loadGMM(path)
+function [gmm, mu_data, sigma_data] = loadGMM(path)
 try
     modelData = ReadYaml(path);
     params = modelData.GmmModelCfg.params;
@@ -8,10 +8,9 @@ catch ME
     disp(ME.message);
     return;
 end
+mu_data = cellfun(@(x) x(1), params.mu); 
+sigma_data = cellfun(@(x) x(1), params.sigma);
 nfeatures = model_params.nfeatures;
-params.type = model_params.type;
-params.nfeatures = model_params.nfeatures;
-params.classes = model_params.classes;
 
 % model params
 K = model_params.K;
@@ -28,4 +27,5 @@ for k = 1:K
     covariances(:, :, k) = matrix_k;
 end
 gmm = gmdistribution(means, covariances, weights);
+params =
 end
