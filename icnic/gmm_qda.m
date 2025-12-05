@@ -42,8 +42,6 @@ for idx_file= 1: nFiles
     channels_label = header.Label;
     sampleRate = header.SampleRate;
 
-
-    disp('   [proc] power band');
     for idx_band = 1:nbands
         band = bands{idx_band};
 
@@ -188,8 +186,8 @@ for idx_trial = 1:ntrial
 end
 
 %% show features
-% sparsity_data = squeeze(sparsity(minDurFix+minDurCue+1:end, 1,:,:));
 sparsity_data = squeeze(sparsity(minDurFix+minDurCue+1:end, 1,:,:));
+% sparsity_data = squeeze(sparsity(1:minDurFix, 1,:,:));
 
 data_3D = sparsity_data(:, 1:ntrial, :);
 data_2D = reshape(data_3D, size(data_3D, 1) * size(data_3D,2), size(data_3D,3));
@@ -332,6 +330,33 @@ fprintf('Mappatura: Cluster GMM %d -> "ic", Cluster GMM %d -> "nic"\n', idx_ic, 
 % plot the C
 disp('centroids: ')
 disp(gmm_model.mu)
+
+%% --- VISUALIZZAZIONE GMM ---
+figure('Color', 'w'); % Crea una figura con sfondo bianco
+hold on;
+scatter(train_data_2D_noArtif(:,1), train_data_2D_noArtif(:,2), 15, ...
+        'MarkerFaceColor', [0.2 0.5 0.9], ...
+        'MarkerEdgeColor', 'none', ...
+        'MarkerFaceAlpha', 0.4);
+
+x_min = min(train_data_2D_noArtif(:,1)) - 1; x_max = max(train_data_2D_noArtif(:,1)) + 1;
+y_min = min(train_data_2D_noArtif(:,2)) - 1; y_max = max(train_data_2D_noArtif(:,2)) + 1;
+step = 0.05; 
+[x1Grid, x2Grid] = meshgrid(x_min:step:x_max, y_min:step:y_max);
+XGrid = [x1Grid(:), x2Grid(:)];
+
+prob_GMM = pdf(gmm_model, XGrid);
+prob_GMM = reshape(prob_GMM, size(x1Grid));
+[C, h] = contour(x1Grid, x2Grid, prob_GMM, 10, 'LineWidth', 2, 'LineColor', [0.8 0.2 0.2]);
+plot(gmm_model.mu(:,1), gmm_model.mu(:,2), 'k+', 'MarkerSize', 15, 'LineWidth', 3);
+
+xlabel('Lateralization Index (Z-score)', 'FontSize', 12, 'FontWeight', 'bold');
+ylabel('Gini Index (Z-score)', 'FontSize', 12, 'FontWeight', 'bold');
+title('GMM Fit: Cluster IC vs NIC', 'FontSize', 14);
+legend({'Dati Reali', 'Ellissi GMM', 'Centroidi'}, 'Location', 'best');
+grid on;
+axis tight;
+hold off;
 
 %% ----------------- PLOT TRIALS -----------------
 for c = 1:10

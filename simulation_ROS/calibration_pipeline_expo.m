@@ -190,4 +190,3 @@ for idx_file = 1:nFiles
     disp('   accuracy')
     [accuracy, number] = computeAccuracy(integratorCfg, artifact, gmm_prob, qda_prob, events, event_start, cell2mat(gmmCfg.params.classes), qdaCfg.model.classes);
 end
-

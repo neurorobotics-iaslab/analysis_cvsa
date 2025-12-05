@@ -17,12 +17,12 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
         disp('ERROR')
     end
     LI = (P_right_window - P_left_window) ./ (P_right_window + P_left_window + eps);
-    sparsity(1) = abs(LI);
+    sparsity(1) = sqrt(abs(LI));
 
     % --- Gini Index  ---  -> IC means focus on a specific zone
     non_zeros_chs = setdiff(1:size(c_signal,2), excl_chs);
     global_mean = mean(c_signal(non_zeros_chs)); % car filter
-    current_signal_normalized = c_signal - global_mean; % remove the global energy
+    current_signal_normalized = c_signal;% - global_mean; % remove the global energy
 
     mean_roi_raw = [mean(current_signal_normalized(c_l)), ...
         mean(current_signal_normalized(c_r)), mean(current_signal_normalized(o_l)), ...
