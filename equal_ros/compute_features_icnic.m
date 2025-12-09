@@ -1,4 +1,4 @@
-function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l, o_r, c_l, c_r, excl_chs, nsparsity)
+function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l, o_r, c_l, c_r, nsparsity)
 % signal: signal 1 x channels, according to the notion of my 39 channels
     
     sparsity = nan(nsparsity,1);
@@ -20,9 +20,7 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
     sparsity(1) = sqrt(abs(LI));
 
     % --- Gini Index  ---  -> IC means focus on a specific zone
-    non_zeros_chs = setdiff(1:size(c_signal,2), excl_chs);
-    global_mean = mean(c_signal(non_zeros_chs)); % car filter
-    current_signal_normalized = c_signal;% - global_mean; % remove the global energy
+    current_signal_normalized = c_signal;
 
     mean_roi_raw = [mean(current_signal_normalized(c_l)), ...
         mean(current_signal_normalized(c_r)), mean(current_signal_normalized(o_l)), ...

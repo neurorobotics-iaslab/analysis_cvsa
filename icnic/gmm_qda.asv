@@ -42,10 +42,6 @@ for idx_file= 1: nFiles
     channels_label = header.Label;
     sampleRate = header.SampleRate;
 
-
-    excl_ch = {'FP1', 'FP2', 'EOG'};
-    [~, excl_chs] = ismember(excl_ch, channels_label);
-
     for idx_band = 1:nbands
         band = bands{idx_band};
 
@@ -55,12 +51,12 @@ for idx_file= 1: nFiles
         eog.filterOrder = 4;
         eog.band = [1 7];
         eog.label = {'FP1', 'FP2', 'EOG'};
-        eog.h_threshold = 60;
-        eog.v_threshold = 60;
+        eog.h_threshold = 80;
+        eog.v_threshold = 80;
         muscle.filterOrder = 4;
         muscle.freq = 1; % remove antneuro problems
         muscle.threshold = 100;
-        [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
+        [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize);
         artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
 
         if all(subject == 'h8')
@@ -163,11 +159,13 @@ o_l_ch = {'O1', 'PO5', 'PO3', 'PO7'};
 o_r_ch = {'O2', 'PO4', 'PO6', 'PO8'};
 c_l_ch = {'C3', 'CP1', 'C1', 'CP3'};
 c_r_ch = {'C4', 'CP2', 'C2', 'CP4'};
+excl_ch = {'FP1', 'FP2', 'EOG'};
 
 [~, o_l] = ismember(o_l_ch, channels_label);
 [~, o_r] = ismember(o_r_ch, channels_label);
 [~, c_l] = ismember(c_l_ch, channels_label);
 [~, c_r] = ismember(c_r_ch, channels_label);
+[~, excl_chs] = ismember(excl_ch, channels_label);
 
 for idx_trial = 1:ntrial
     c_data = squeeze(trial_data(:,:,:,idx_trial)); % samples x band x channels
@@ -178,7 +176,7 @@ for idx_trial = 1:ntrial
         for idx_band = 1:nbands
             tmp = squeeze(c_sample(idx_band,:)); % 1 x channels
 
-            [feat_vals, label_sparsity] = compute_features_icnic(tmp, 'cvsa', o_l, o_r, c_l, c_r, nsparsity);
+            [feat_vals, label_sparsity] = compute_features_icnic(tmp, 'cvsa', o_l, o_r, c_l, c_r, excl_chs, nsparsity);
             
             % Salva tutte e 3 le feature
             sparsity(sample, idx_band, idx_trial, 1:nsparsity) = feat_vals;

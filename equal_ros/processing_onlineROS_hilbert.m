@@ -10,7 +10,7 @@
 %   OUTPUT:
 %       - signal_processed: signal processed
 %       - header: modification in the POS and DUR of the gdf header
-function [signal_processed, header] = processing_onlineROS_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize)
+function [signal_processed, header] = processing_onlineROS_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, eog_channels)
 disp(['   [proc] start processing like ros for band ' num2str(band(1)) '-' num2str(band(2))]);
 
 nchunks = floor(size(signal, 1)/chunkSize);
@@ -26,7 +26,7 @@ signal_processed = nan(nchunks, nchannels);
 for i=1:nchunks
     % add
     frame = signal((i-1)*chunkSize+1:i*chunkSize,:);
-    frame_no_eog = frame; frame_no_eog(:,19) = [];
+    frame_no_eog = frame; frame_no_eog(:,eog_channels) = [];
     frame = frame - mean(frame_no_eog, 2);
     
     % apply low and high pass filters
