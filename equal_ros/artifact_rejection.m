@@ -74,7 +74,7 @@ artifact = zeros(nchunks, 1);
 for i=1:nchunks
     % add
     frame = signal((i-1)*chunkSize+1:i*chunkSize,:);
-    frame_no_eog = frame; frame_no_eog(:,19) = [];
+    frame_no_eog = frame(:,non_eog); 
     frame = frame - mean(frame_no_eog, 2);
 
     % --- muscle artefact part buffer ---

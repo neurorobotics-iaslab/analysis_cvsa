@@ -55,7 +55,7 @@ for idx_file = 1:nFiles
     disp('   processing EEG data') 
     filterOrder = processingCfg.filterOrder;
     band = processingCfg.bands; % i knwo we are using one band
-    [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize);
+    [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, cell2mat(artifactCfg.EOG_ch));
 
     %% ----------------- labels for the data -----------------
     disp('   extracting labels trials') 
@@ -92,8 +92,8 @@ for idx_file = 1:nFiles
     % features extraction and classification
     sparsity = nan(size(signal_processed, 1), nfeatures);
     for idx_sample = 1:size(signal_processed,1)
-        c_signal = signal_processed(idx_sample,:);
-        [sparsity(idx_sample,:), ~] = compute_features_icnic(c_signal, type, o_l, o_r, c_l, c_r, excl_chs, nfeatures);
+        tmp_c_signal = signal_processed(idx_sample,:);
+        [sparsity(idx_sample,:), ~] = compute_features_icnic(tmp_c_signal, type, o_l, o_r, c_l, c_r, nfeatures);
     end
 
     data_standardized = (sparsity - mu_data) ./ sigma_data;
@@ -110,6 +110,9 @@ for idx_file = 1:nFiles
 
     %% ----------------- plot prob integrated -----------------
     ic_index = find(cell2mat(gmmCfg.params.classes) == integratorCfg.ic_class_label);
+    do_plot = false;
+    r_square_data_all = []; r_square_label_all = [];
+    r_square_data_gmm = []; r_square_label_gmm = [];
     for idx_trial = 1:ntrial
         start_trial = fixPOS(idx_trial);
         end_trial = cfPOS(idx_trial) + cfDUR(idx_trial);
@@ -121,73 +124,88 @@ for idx_file = 1:nFiles
         c_mask = mask(start_trial:end_trial);
         c_integrated = integrated_prob(start_trial:end_trial,:);
 
+        % for metrics r^2
+        r_square_data_all = [r_square_data_all; c_power];
+        r_square_label_all = [r_square_label_all; repmat(trial_typ(idx_trial), trial_dur, 1)];
+        tmp_c_power = c_power(c_gmm_prob(:,ic_index) > integratorCfg.ic_threshold,:);
+        r_square_data_gmm = [r_square_data_gmm; tmp_c_power];
+        r_square_label_gmm = [r_square_label_gmm; repmat(trial_typ(idx_trial), sum(c_gmm_prob(:,ic_index) > integratorCfg.ic_threshold), 1)];
 
-        figure();
-        subplot(411)
-        imagesc(c_power')
-        hold on;
-        xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
-        xline(fixDUR(idx_trial), 'LineStyle','-');
-        hold off;
-        yticks(1:nchannels); yticklabels(channels_label)
-        title('Log band power')
+        if do_plot
+            figure();
+            subplot(411)
+            imagesc(c_power')
+            hold on;
+            xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
+            xline(fixDUR(idx_trial), 'LineStyle','-');
+            hold off;
+            yticks(1:nchannels); yticklabels(channels_label)
+            title('Log band power')
 
-        subplot(412)
-        plot(c_gmm_prob(:,ic_index))
-        hold on;
-        plot(c_artifact);
-        yline(integratorCfg.ic_threshold, 'LineStyle','--');
-        xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
-        xline(fixDUR(idx_trial), 'LineStyle','-');
-        hold off;
-        legend('gmm prob', 'artifact', 'threshold ic');
-        xlim([1 trial_dur])
-        title('artifacts and gmm probabilities')
+            subplot(412)
+            plot(c_gmm_prob(:,ic_index))
+            hold on;
+            plot(c_artifact);
+            yline(integratorCfg.ic_threshold, 'LineStyle','--');
+            xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
+            xline(fixDUR(idx_trial), 'LineStyle','-');
+            hold off;
+            legend('gmm prob', 'artifact', 'threshold ic');
+            xlim([1 trial_dur])
+            title('artifacts and gmm probabilities')
 
 
-        subplot(413)
-        tmp_prob = c_qda_prob;
-        tmp_prob(c_mask == 0,1) = nan;
-        plot(c_qda_prob(:,1))
-        hold on
-        scatter(1:size(c_qda_prob, 1), c_qda_prob(:,1), 15, 'black', 'filled')
-        scatter(1:size(c_qda_prob, 1), tmp_prob(:,1), 15, 'green', 'filled')
-        yline(0.5, 'LineStyle','--');
-        xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
-        xline(fixDUR(idx_trial), 'LineStyle','-');
-        hold off
-        ylim([0 1])
-        xlim([1 trial_dur])
-        legend('qda prob','qda not used', 'qda prob used')
-        title('classifier probability')
+            subplot(413)
+            tmp_prob = c_qda_prob;
+            tmp_prob(c_mask == 0,1) = nan;
+            plot(c_qda_prob(:,1))
+            hold on
+            scatter(1:size(c_qda_prob, 1), c_qda_prob(:,1), 15, 'black', 'filled')
+            scatter(1:size(c_qda_prob, 1), tmp_prob(:,1), 15, 'green', 'filled')
+            yline(0.5, 'LineStyle','--');
+            xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
+            xline(fixDUR(idx_trial), 'LineStyle','-');
+            hold off
+            ylim([0 1])
+            xlim([1 trial_dur])
+            legend('qda prob','qda not used', 'qda prob used')
+            title('classifier probability')
 
-        subplot(414)
-        plot(c_integrated(:,1))
-        hold on
-        yline(integratorCfg.feedbackThs(1), 'LineStyle','--');
-        yline(1-integratorCfg.feedbackThs(2), 'LineStyle','--');
-        xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
-        xline(fixDUR(idx_trial), 'LineStyle','-');
-        hold off
-        legend('integrated prob')
-        ylim([0 1])
-        xlim([1 trial_dur])
-        title('integrated signal')
+            subplot(414)
+            plot(c_integrated(:,1))
+            hold on
+            yline(integratorCfg.feedbackThs(1), 'LineStyle','--');
+            yline(1-integratorCfg.feedbackThs(2), 'LineStyle','--');
+            xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
+            xline(fixDUR(idx_trial), 'LineStyle','-');
+            hold off
+            legend('integrated prob')
+            ylim([0 1])
+            xlim([1 trial_dur])
+            title('integrated signal')
 
-        if boom(idx_trial) == 897
-            strboom =  'HIT';
-        elseif boom(idx_trial) == 898
-            strboom = 'MISS';
-        elseif boom(idx_trial) == 899
-            strboom = 'TIMEOUT';
-        else
-            disp('ERROR')
+            if boom(idx_trial) == 897
+                strboom =  'HIT';
+            elseif boom(idx_trial) == 898
+                strboom = 'MISS';
+            elseif boom(idx_trial) == 899
+                strboom = 'TIMEOUT';
+            else
+                disp('ERROR')
+            end
+            sgtitle(['trial ' num2str(idx_trial) ' | class aked ' num2str(cueTYP(idx_trial)) ' | ' strboom])
         end
-        sgtitle(['trial ' num2str(idx_trial) ' | class aked ' num2str(cueTYP(idx_trial)) ' | ' strboom])
     end
 
     %% print accuracy
-    disp('   accuracy')
-    [accuracy, number] = computeAccuracy(integratorCfg, artifact, gmm_prob, qda_prob, events, event_start, cell2mat(gmmCfg.params.classes), qdaCfg.model.classes);
+    disp('   metrics')
+    sampleRate_ros = 16;
+    [accuracy, number, time] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, events, event_start, cell2mat(gmmCfg.params.classes), qdaCfg.model.classes);
+    disp(['      accuracy trial hit: ' num2str(accuracy.trial.hit*100) '%'])
+    disp(['      time mean hit: ' num2str(time.hit/(number.trial.hit*sampleRate_ros)) 's'])
+    disp(['      time mean miss: ' num2str(time.miss/(number.trial.miss*sampleRate_ros)) 's'])
+    [r2_values] = calc_r2_from_data(r_square_data_gmm, r_square_label_gmm, 'Plot', true, 'ChanLabels', channels_label, 'title_data', 'QDA data');
+    [r2_values] = calc_r2_from_data(r_square_data_all, r_square_label_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', 'all data');
+
 end
 
