@@ -24,6 +24,7 @@ zi_high = [];
 signal_processed = nan(nchunks, nchannels);
 
 for i=1:nchunks
+
     % add
     frame = signal((i-1)*chunkSize+1:i*chunkSize,:);
     frame_no_eog = frame; frame_no_eog(:,eog_channels) = [];
