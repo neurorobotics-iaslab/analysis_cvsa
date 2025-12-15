@@ -55,7 +55,7 @@ for idx_file = 1:nFiles
     disp('   processing EEG data') 
     filterOrder = processingCfg.filterOrder;
     band = processingCfg.bands; % i knwo we are using one band
-    [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, cell2mat(artifactCfg.EOG_ch));
+    [signal_processed, header_processed] = processing_onlineROS_CSD_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize);
 
     %% ----------------- labels for the data -----------------
     disp('   extracting labels trials') 
@@ -110,7 +110,7 @@ for idx_file = 1:nFiles
 
     %% ----------------- plot prob integrated -----------------
     ic_index = find(cell2mat(gmmCfg.params.classes) == integratorCfg.ic_class_label);
-    do_plot = false;
+    do_plot = true;
     r_square_data_all = []; r_square_label_all = [];
     r_square_data_gmm = []; r_square_label_gmm = [];
     for idx_trial = 1:ntrial
@@ -126,10 +126,10 @@ for idx_file = 1:nFiles
 
         % for metrics r^2
         r_square_data_all = [r_square_data_all; c_power];
-        r_square_label_all = [r_square_label_all; repmat(trial_typ(idx_trial), trial_dur, 1)];
+        r_square_label_all = [r_square_label_all; repmat(cueTYP(idx_trial), trial_dur, 1)];
         tmp_c_power = c_power(c_gmm_prob(:,ic_index) > integratorCfg.ic_threshold,:);
         r_square_data_gmm = [r_square_data_gmm; tmp_c_power];
-        r_square_label_gmm = [r_square_label_gmm; repmat(trial_typ(idx_trial), sum(c_gmm_prob(:,ic_index) > integratorCfg.ic_threshold), 1)];
+        r_square_label_gmm = [r_square_label_gmm; repmat(cueTYP(idx_trial), sum(c_gmm_prob(:,ic_index) > integratorCfg.ic_threshold), 1)];
 
         if do_plot
             figure();

@@ -10,8 +10,20 @@
 %   OUTPUT:
 %       - signal_processed: signal processed
 %       - header: modification in the POS and DUR of the gdf header
-function [signal_processed, header] = processing_onlineROS_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, eog_channels)
+function [signal_processed, header] = processing_onlineROS_CSD_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize)
 disp(['   [proc] start processing like ros for band ' num2str(band(1)) '-' num2str(band(2))]);
+
+persistent M_CSD valid_idx_eeg
+if isempty(M_CSD)
+    try
+        load('csd_transform_matrix.mat', 'M_CSD', 'valid_idx'); 
+        % Rinominato per chiarezza
+        valid_idx_eeg = valid_idx; 
+        disp('      Matrice CSD caricata correttamente.');
+    catch
+        error('      File csd_transform_matrix.mat non trovato! Esegui prima setup_csd.m');
+    end
+end
 
 nchunks = floor(size(signal, 1)/chunkSize);
 buffer = nan(bufferSize, nchannels);
@@ -25,13 +37,12 @@ signal_processed = nan(nchunks, nchannels);
 
 for i=1:nchunks
 
-    % add
     frame = signal((i-1)*chunkSize+1:i*chunkSize,:);
-    frame_no_eog = frame; 
-    if ~isempty(eog_channels)
-        frame_no_eog(:,eog_channels) = [];
-    end
-    frame = frame - mean(frame_no_eog, 2);
+    frame_eeg_raw = frame(:, valid_idx_eeg);
+    
+    % Application CSD
+    frame_eeg_csd = frame_eeg_raw * M_CSD;
+    frame(:, valid_idx_eeg) = frame_eeg_csd;
     
     % apply low and high pass filters
     [tmp_data, zi_low] = filter(b_low,a_low,frame,zi_low);
@@ -56,5 +67,5 @@ for i=1:nchunks
 end
 
 header.EVENT.DUR = round(header.EVENT.DUR/chunkSize);
-header.EVENT.POS = round(header.EVENT.POS/chunkSize); % not this part since signal_processed has nan: - (bufferSize/chunkSize) + 1;  
-% header.SampleRate = header.SampleRate/chunkSize;
+header.EVENT.POS = round(header.EVENT.POS/chunkSize); 
+end

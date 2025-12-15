@@ -60,12 +60,8 @@ for idx_file= 1: nFiles
         muscle.filterOrder = 4;
         muscle.freq = 1; % remove antneuro problems
         muscle.threshold = 100;
-        [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
+        [signal_processed, header_processed] = processing_onlineROS_CSD_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize);
         artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
-
-        if all(subject == 'h8')
-            signal_processed(:,23) = 0;
-        end
 
         c_header = headers{1, idx_band};
         c_header.sampleRate = header_processed.SampleRate/chunkSize;
@@ -153,12 +149,12 @@ trial_data(:,:,[1, 2, 19],:) = 0; % remove the power of the EOG channel, FP1 anf
 %% compute sparsity
 % define regions
 nsparsity = 2;
-n_stability = 8;
 sparsity = nan(min_trial_data, nbands, ntrial, nsparsity); % sample x band x trial x sparsity
 % o_l_ch = {'P3', 'O1', 'P5', 'P1', 'PO5', 'PO3', 'PO7'};
 % o_r_ch = {'P4', 'O2', 'P2', 'P6', 'PO4', 'PO6', 'PO8'};
 % c_l_ch = {'FC1', 'C3', 'CP1', 'FC3', 'C1', 'CP3'};
 % c_r_ch = {'FC2', 'C4', 'CP2', 'FC4', 'C2', 'CP4'};
+
 o_l_ch = {'O1', 'PO5', 'PO3', 'PO7'};
 o_r_ch = {'O2', 'PO4', 'PO6', 'PO8'};
 c_l_ch = {'C3', 'CP1', 'C1', 'CP3'};
@@ -207,7 +203,7 @@ sgtitle('Features comparison 2D');
 
 figure
 for i = 1:nsparsity
-    subplot(3,1,i)
+    subplot(2,1,i)
     histogram(data_2D(:, i));
     title(label_sparsity{i});
 end
@@ -296,6 +292,9 @@ for k = K_range
         % RegularizationValue = 1e-5 evita che le gaussiane collassino su un punto
         gmm_temp = fitgmdist(train_data_2D_noArtif, k, ...
                             'Options', options, ...
+                            'CovarianceType', 'Full', ...
+                            'SharedCovariance', false, ...
+                            'RegularizationValue', 1e-5, ...
                             'Replicates', 25); 
         bics = [bics; gmm_temp.BIC];
         if gmm_temp.BIC < min_bic

@@ -40,4 +40,11 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
     end
     sparsity(2) = gi;
 
+    % -- magnitudo
+    if strcmp(type, 'cvsa')
+        max_power = max(mean(current_signal_normalized(c_l)), P_OR); 
+    else
+        max_power = max(mean(current_signal_normalized(c_l)), P_CR);
+    end
+    features(2) = log(max_power + eps);
 end

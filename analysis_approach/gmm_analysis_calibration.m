@@ -71,7 +71,7 @@ for idx_file= 1: nFiles
         muscle.filterOrder = 4;
         muscle.freq = 1; % remove antneuro problems
         muscle.threshold = 100;
-        [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
+        [signal_processed, header_processed] = processing_onlineROS_CSD_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize);
         artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
 
         c_header = headers{1, idx_band};
@@ -186,7 +186,7 @@ for c = 1:ntrial
         for idx_band = 1:nbands
             tmp = squeeze(c_sample(idx_band,:)); % 1 x channels
 
-            [sparsity(sample, idx_band, c,:), ~] = compute_features_icnic(tmp, type, o_l, o_r, c_l, c_r, nsparsity);
+            [sparsity(sample, idx_band, c,:), label_plot] = compute_features_icnic(tmp, type, o_l, o_r, c_l, c_r, nsparsity);
         end
     end
 end
@@ -221,13 +221,17 @@ for k = K_range
         % RegularizationValue = 1e-5 evita che le gaussiane collassino su un punto
         gm_temp = fitgmdist(data_2D_noArtif, k, ...
                             'Options', options, ...
+                            'CovarianceType', 'Full', ...
+                            'SharedCovariance', false, ...
+                            'RegularizationValue', 1e-5, ...
                             'Replicates', 150); 
         
         if gm_temp.BIC < min_bic
             min_bic = gm_temp.BIC;
             best_gmm = gm_temp;
         end
-    catch
+    catch ME
+        fprintf(2, 'Errore durante il fit con k=%d:\n%s\n', k, ME.message);
         continue;
     end
 end
@@ -280,8 +284,8 @@ prob_GMM = reshape(prob_GMM, size(x1Grid));
 [C, ~] = contour(x1Grid, x2Grid, prob_GMM, 10, 'LineWidth', 2, 'LineColor', [0.8 0.2 0.2]);
 plot(gmm_model.mu(:,1), gmm_model.mu(:,2), 'k+', 'MarkerSize', 15, 'LineWidth', 3);
 
-xlabel('Lateralization Index (Z-score)', 'FontSize', 12, 'FontWeight', 'bold');
-ylabel('Gini Index (Z-score)', 'FontSize', 12, 'FontWeight', 'bold');
+xlabel(label_plot{1}, 'FontSize', 12, 'FontWeight', 'bold');
+ylabel(label_plot{2}, 'FontSize', 12, 'FontWeight', 'bold');
 title('GMM Fit: Cluster IC vs NIC', 'FontSize', 14);
 legend({'Dati Reali', 'Ellissi GMM', 'Centroidi'}, 'Location', 'best');
 grid on;
