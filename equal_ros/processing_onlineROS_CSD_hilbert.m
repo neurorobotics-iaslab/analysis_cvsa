@@ -16,7 +16,7 @@ disp(['   [proc] start processing like ros for band ' num2str(band(1)) '-' num2s
 persistent M_CSD valid_idx_eeg
 if isempty(M_CSD)
     try
-        load('csd_transform_matrix.mat', 'M_CSD', 'valid_idx'); 
+        load('/home/paolo/cvsa/ic_cvsa_ws/src/rosneuro_filters_csd/cfg/csd.mat', 'M_CSD', 'valid_idx'); 
         % Rinominato per chiarezza
         valid_idx_eeg = valid_idx; 
         disp('      Matrice CSD caricata correttamente.');
@@ -24,6 +24,7 @@ if isempty(M_CSD)
         error('      File csd_transform_matrix.mat non trovato! Esegui prima setup_csd.m');
     end
 end
+
 
 nchunks = floor(size(signal, 1)/chunkSize);
 buffer = nan(bufferSize, nchannels);
@@ -41,7 +42,7 @@ for i=1:nchunks
     frame_eeg_raw = frame(:, valid_idx_eeg);
     
     % Application CSD
-    frame_eeg_csd = frame_eeg_raw * M_CSD;
+    frame_eeg_csd = frame_eeg_raw * M_CSD'; 
     frame(:, valid_idx_eeg) = frame_eeg_csd;
     
     % apply low and high pass filters

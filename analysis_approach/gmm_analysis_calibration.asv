@@ -31,7 +31,7 @@ for idx_file = 1:nFiles
 end
 
 %% start processing data
-bands = [{[9 12]}];
+bands = [{[8 14]}];
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 signals = cell(1, nbands);

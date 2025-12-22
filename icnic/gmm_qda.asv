@@ -8,6 +8,7 @@ bands = [{[8 14]}];
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 signals = cell(1, nbands);
+fc = cell(1, nbands);
 artifacts = cell(1, nbands);
 headers = cell(1, nbands);
 for idx_band = 1:nbands
@@ -15,6 +16,7 @@ for idx_band = 1:nbands
     headers{idx_band}.DUR = [];
     headers{idx_band}.POS = [];
     signals{idx_band} = [];
+    fc{idx_band} = [];
     artifacts{idx_band} = [];
 end
 classes = [730 731];      
@@ -42,8 +44,8 @@ for idx_file= 1: nFiles
     channels_label = header.Label;
     sampleRate = header.SampleRate;
 
-    [~, roi_idx_L] = ismember(upper({'O1', 'PO7', 'PO3'}), upper(channels_label));
-    [~, roi_idx_R] = ismember(upper({'O2', 'PO8', 'PO4'}), upper(channels_label));
+    roi_idx_L = find(strcmpi(channels_label, {'O1', 'PO7', 'PO3'}));
+    roi_idx_R = find(strcmpi(channels_label, {'O2', 'PO8', 'PO4'}));
 
     excl_ch = {'FP1', 'FP2', 'EOG'};
     [~, excl_chs] = ismember(excl_ch, channels_label);
@@ -64,6 +66,7 @@ for idx_file= 1: nFiles
         muscle.threshold = 100;
         [signal_processed, header_processed] = processing_onlineROS_CSD_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize);
         artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
+        fc_processed = processing_fc_CSD_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, roi_idx_L, roi_idx_R);
 
         c_header = headers{1, idx_band};
         c_header.sampleRate = header_processed.SampleRate/chunkSize;
@@ -79,6 +82,7 @@ for idx_file= 1: nFiles
             c_header.POS = cat(1, c_header.POS, header_processed.EVENT.POS(k:end) + size(signals{1, idx_band}, 1));
         end
         signals{1, idx_band} = cat(1, signals{1, idx_band}, signal_processed(:,:));
+        fc{1, idx_band} = cat(1, fc{1, idx_band}, fc_processed(:,:));
         artifacts{1, idx_band} = cat(1, artifacts{1, idx_band}, artifact(:,:));
         headers{1, idx_band} = c_header;
     end
@@ -115,14 +119,17 @@ end
 min_trial_data = min(trial_end - trial_start+1);
 trial_data = nan(min_trial_data, nbands, nchannels, ntrial); % data x bands x channels x trial
 artifacts_data = nan(min_trial_data, nbands, ntrial); % data x bands x trial
+fc_data = nan(min_trial_data, nbands, ntrial); % data x bands x trial
 for idx_band = 1:nbands
     c_signal = signals{idx_band};
     c_artifact = artifacts{idx_band};
+    c_fc = fc{idx_band};
     for trial = 1:ntrial
         c_start = trial_start(trial);
         c_end = trial_start(trial) + min_trial_data - 1;
         trial_data(:,idx_band,:,trial) = c_signal(c_start:c_end,:);
         artifacts_data(:,idx_band,trial) = c_artifact(c_start:c_end,:);
+        fc_data(:,idx_band,trial) = c_fc(c_start:c_end);
     end
 end
 
@@ -134,23 +141,26 @@ end
 
 tmp_data = nan(size(trial_data));
 tmp_art = nan(size(artifacts_data));
+tmp_fc = nan(size(fc_data));
 trial_typ = nan(size(trial_typ));
 i = 1;
 for idx_trial_class = 1:2:ntrial
     for idx_class = 1:nclasses
         tmp_data(:,:,:,idx_trial_class + idx_class - 1) = trial_data(:,:,:,idx_classes_trial(i, idx_class));
         tmp_art(:,:,idx_trial_class + idx_class - 1) = artifacts_data(:,:,idx_classes_trial(i, idx_class));
+        tmp_fc(:,:,idx_trial_class + idx_class - 1) = fc_data(:,:,idx_classes_trial(i, idx_class));
         trial_typ(idx_trial_class + idx_class - 1) = classes(idx_class);
     end
     i = i + 1;
 end
 trial_data = tmp_data; % samples x bands x channels x trials
-artifacts_data = tmp_art; % data x bands x trial
+artifacts_data = tmp_art;
+fc_data = tmp_fc;
 trial_data(:,:,[1, 2, 19],:) = 0; % remove the power of the EOG channel, FP1 anf FP2 --> also in sparsity
 
 %% compute sparsity
 % define regions
-nsparsity = 2;
+nsparsity = 3;
 sparsity = nan(min_trial_data, nbands, ntrial, nsparsity); % sample x band x trial x sparsity
 % o_l_ch = {'P3', 'O1', 'P5', 'P1', 'PO5', 'PO3', 'PO7'};
 % o_r_ch = {'P4', 'O2', 'P2', 'P6', 'PO4', 'PO6', 'PO8'};
@@ -176,18 +186,18 @@ for idx_trial = 1:ntrial
         for idx_band = 1:nbands
             tmp = squeeze(c_sample(idx_band,:)); % 1 x channels
 
-            [feat_vals, label_sparsity] = compute_features_icnic(tmp, 'cvsa', o_l, o_r, c_l, c_r, nsparsity);
+            [feat_vals, label_sparsity] = compute_features_icnic(tmp, 'cvsa', o_l, o_r, c_l, c_r, nsparsity-1);
             
             % Salva tutte e 3 le feature
-            sparsity(sample, idx_band, idx_trial, 1:nsparsity) = feat_vals;
+            sparsity(sample, idx_band, idx_trial, 1:nsparsity-1) = feat_vals;
+            sparsity(sample, id)
 
         end
     end
 end
 
 %% show features
-% sparsity_data = squeeze(sparsity(minDurFix+minDurCue+1:end, 1,:,:));
-sparsity_data = squeeze(sparsity(:, 1,:,:));
+sparsity_data = squeeze(sparsity(minDurFix+minDurCue+1:end, 1,:,:));
 % sparsity_data = squeeze(sparsity(1:minDurFix, 1,:,:));
 
 data_3D = sparsity_data(:, 1:ntrial, :);
@@ -206,7 +216,7 @@ sgtitle('Features comparison 2D');
 
 figure
 for i = 1:nsparsity
-    subplot(nsparsity,1,i)
+    subplot(2,1,i)
     histogram(data_2D(:, i));
     title(label_sparsity{i});
 end
@@ -267,8 +277,6 @@ bics = [];
 
 sparsity_cf = squeeze(sparsity(minDurFix+minDurCue+1:end, choosen_band,:,:));
 artifacts_cf = squeeze(artifacts_data(minDurFix+minDurCue+1:end, choosen_band,:));
-% sparsity_cf = squeeze(sparsity(:, choosen_band,:,:));
-% artifacts_cf = squeeze(artifacts_data(:, choosen_band,:));
 
 % z-score -> train and use the mu and var also for the test
 train_data_3D = sparsity_cf(:, 1:ntrial_train, :);
