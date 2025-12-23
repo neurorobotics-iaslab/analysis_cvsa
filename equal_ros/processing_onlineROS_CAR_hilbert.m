@@ -10,7 +10,7 @@
 %   OUTPUT:
 %       - signal_processed: signal processed
 %       - header: modification in the POS and DUR of the gdf header
-function [signal_processed, header] = processing_onlineROS_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, eog_channels)
+function [signal_processed, header] = processing_onlineROS_CAR_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, eog_channels)
 disp(['   [proc] start processing like ros for band ' num2str(band(1)) '-' num2str(band(2))]);
 
 nchunks = floor(size(signal, 1)/chunkSize);

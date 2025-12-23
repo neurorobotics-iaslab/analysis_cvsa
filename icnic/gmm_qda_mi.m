@@ -4,7 +4,7 @@ addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_cvsa/equal_ros')
 
 %% Initialization
 threshold_gmm_ic = 0.7;
-bands = [{[8 14]}];
+bands = [{[8 13]} {[18 24]}];
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 signals = cell(1, nbands);
@@ -17,11 +17,12 @@ for idx_band = 1:nbands
     signals{idx_band} = [];
     artifacts{idx_band} = [];
 end
-classes = [730 731];      
-nchannels = 39;
+classes = [769 770];      
+nchannels = 16;
 nclasses = length(classes);
 filterOrder = 4;
 avg = 1;% 0.75;
+channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'CP3', 'CP1', 'CP2', 'CP4', 'Pz'};
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
@@ -39,14 +40,12 @@ for idx_file= 1: nFiles
     disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', filenames{idx_file}]);
     [c_signal,header] = sload(fullpath_file_shift);
     c_signal = c_signal(:,1:nchannels);
-    channels_label = header.Label;
     sampleRate = header.SampleRate;
 
-    [~, roi_idx_L] = ismember(upper({'O1', 'PO7', 'PO3'}), upper(channels_label));
-    [~, roi_idx_R] = ismember(upper({'O2', 'PO8', 'PO4'}), upper(channels_label));
+    [~, roi_idx_L] = ismember(upper({'C1', 'C3'}), upper(channels_label));
+    [~, roi_idx_R] = ismember(upper({'C2', 'C4'}), upper(channels_label));
 
-    excl_ch = {'FP1', 'FP2', 'EOG'};
-    [~, excl_chs] = ismember(excl_ch, channels_label);
+    excl_chs = [];
 
     for idx_band = 1:nbands
         band = bands{idx_band};
@@ -54,11 +53,7 @@ for idx_file= 1: nFiles
         % for power band using hilbert transformation
         bufferSize = floor(avg*sampleRate);
         chunkSize = 32;
-        eog.filterOrder = 4;
-        eog.band = [1 7];
-        eog.label = {'FP1', 'FP2', 'EOG'};
-        eog.h_threshold = 60;
-        eog.v_threshold = 60;
+        eog.label = [];
         muscle.filterOrder = 4;
         muscle.freq = 1; % remove antneuro problems
         muscle.threshold = 100;
@@ -146,7 +141,7 @@ for idx_trial_class = 1:2:ntrial
 end
 trial_data = tmp_data; % samples x bands x channels x trials
 artifacts_data = tmp_art; % data x bands x trial
-trial_data(:,:,[1, 2, 19],:) = 0; % remove the power of the EOG channel, FP1 anf FP2 --> also in sparsity
+% trial_data(:,:,[1, 2, 19],:) = 0; % remove the power of the EOG channel, FP1 anf FP2 --> also in sparsity
 
 %% compute sparsity
 % define regions
@@ -157,10 +152,12 @@ sparsity = nan(min_trial_data, nbands, ntrial, nsparsity); % sample x band x tri
 % c_l_ch = {'FC1', 'C3', 'CP1', 'FC3', 'C1', 'CP3'};
 % c_r_ch = {'FC2', 'C4', 'CP2', 'FC4', 'C2', 'CP4'};
 
-o_l_ch = {'O1', 'PO5', 'PO3', 'PO7'};
-o_r_ch = {'O2', 'PO4', 'PO6', 'PO8'};
-c_l_ch = {'C3', 'CP1', 'C1', 'CP3'};
-c_r_ch = {'C4', 'CP2', 'C2', 'CP4'};
+% o_l_ch = {'O1', 'PO5', 'PO3', 'PO7'};
+% o_r_ch = {'O2', 'PO4', 'PO6', 'PO8'};
+o_l_ch = {'FC1', 'FC3'};
+o_r_ch = {'FC2', 'FC4'};
+c_l_ch = {'C3', 'C1'};
+c_r_ch = {'C4', 'C2'};
 
 [~, o_l] = ismember(o_l_ch, channels_label);
 [~, o_r] = ismember(o_r_ch, channels_label);
@@ -176,7 +173,7 @@ for idx_trial = 1:ntrial
         for idx_band = 1:nbands
             tmp = squeeze(c_sample(idx_band,:)); % 1 x channels
 
-            [feat_vals, label_sparsity] = compute_features_icnic(tmp, 'cvsa', o_l, o_r, c_l, c_r, nsparsity);
+            [feat_vals, label_sparsity] = compute_features_icnic(tmp, 'mi', o_l, o_r, c_l, c_r, nsparsity);
             
             % Salva tutte e 3 le feature
             sparsity(sample, idx_band, idx_trial, 1:nsparsity) = feat_vals;
@@ -508,7 +505,8 @@ cl_train_data = log(cl_train_data);
 cl_test_data  = log(cl_test_data);
 
 %% fisher score on the train data
-occipital = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'}; 
+% occipital = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'}; 
+occipital = channels_label;
 [~, ch_occipital] = ismember(occipital, channels_label);
 noccipital = size(ch_occipital, 2);
 
@@ -541,9 +539,13 @@ colorbar;
 yticks(1:noccipital); yticklabels(occipital)
 xticks(1:4); xticklabels(x_labels)
 
+% R^2
+calc_r2_from_data(IC_train_data, IC_train_labels, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['QDA data | size data: ' num2str(size(IC_train_data,1))]);
+calc_r2_from_data(cl_train_data, cl_train_labels, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['all data | size data: ' num2str(size(cl_train_data,1))]);
+
 %% train and test the qda
-IC_select_channels = {'PO4', 'O2', 'PO8', 'PO6', 'O1', 'PO3', 'PO7', 'PO5'}; %%%%% ----> features selection
-cl_select_channels = {'PO4', 'O2', 'PO8', 'PO6', 'O1', 'PO3', 'PO7', 'PO5'};
+IC_select_channels = {'C3', 'C4'}; %%%%% ----> features selection
+cl_select_channels = {'C3', 'C4'};
 
 
 % features selection

@@ -53,11 +53,9 @@ nchunks = floor(size(signal, 1)/chunkSize);
 buffer_peak = nan(bufferSize, nchannels);
 buffer_eog = nan(bufferSize, nchannels);
 sampleRate = header.SampleRate;
-if ~isempty(eog.label)
+if ~empty(eog.label)
     [~, eog_idx] = ismember(eog.label, header.Label);
     non_eog = setdiff(1:nchannels, eog_idx);
-else
-    non_eog = 1:nchannels;
 end
 
 % correct the signal according to the nchannesl
@@ -67,12 +65,12 @@ signal = signal(:,1:nchannels);
 [b_high, a_high] = butter(picks.filterOrder, picks.freq*(2/sampleRate),'high');
 zi_high = [];
 
-if ~isempty(eog.label)
-    eog_band = eog.band;
-    [b_low_eog, a_low_eog] = butter(eog.filterOrder, eog_band(2)*(2/sampleRate),'low');
-    z_low_eog = [];
-    [b_high_eog, a_high_eog] = butter(eog.filterOrder, eog_band(1)*(2/sampleRate),'high');
-    z_high_eog = [];
+if ~empty(eog.label)
+eog_band = eog.band;
+[b_low_eog, a_low_eog] = butter(eog.filterOrder, eog_band(2)*(2/sampleRate),'low');
+z_low_eog = [];
+[b_high_eog, a_high_eog] = butter(eog.filterOrder, eog_band(1)*(2/sampleRate),'high');
+z_high_eog = [];
 end
 
 artifact = zeros(nchunks, 1);
@@ -90,7 +88,7 @@ for i=1:nchunks
     buffer_peak(end-chunkSize+1:end, :) = frame_peak;
 
     % --- eog artefact part buffer ---
-    if ~isempty(eog.label)
+    if ~empty(eog.label)
         % compte eog with horizontal and vertical movement
         [data_eog,z_low_eog] = filter(b_low_eog,a_low_eog,frame,z_low_eog);
         [frame_eog,z_high_eog] = filter(b_high_eog,a_high_eog,data_eog,z_high_eog);
@@ -116,20 +114,19 @@ for i=1:nchunks
     end
 
     % vertical and horizontal movements
-    if ~isempty(eog.label)
-        heog = buffer_eog(:, eog_idx(1)) - buffer_eog(:, eog_idx(2));
-        if size(eog_idx, 2) == 2
-            % we have only FP1 and FP2
-            veog = (buffer_eog(:, eog_idx(1)) + buffer_eog(:, eog_idx(2))) / 2;
-        else
-            veog = ((buffer_eog(:, eog_idx(1)) + buffer_eog(:, eog_idx(2))) / 2) - buffer_eog(:, eog_idx(3));
-        end
-        if any(abs(heog(:)) > eog.h_threshold)
-            artifact(i) = 1;
-        end
-        if any(abs(veog(:)) > eog.v_threshold)
-            artifact(i) = 1;
-        end
+    if 
+    heog = buffer_eog(:, eog_idx(1)) - buffer_eog(:, eog_idx(2));
+    if size(eog_idx, 2) == 2
+        % we have only FP1 and FP2
+        veog = (buffer_eog(:, eog_idx(1)) + buffer_eog(:, eog_idx(2))) / 2;
+    else
+        veog = ((buffer_eog(:, eog_idx(1)) + buffer_eog(:, eog_idx(2))) / 2) - buffer_eog(:, eog_idx(3));
+    end
+    if any(abs(heog(:)) > eog.h_threshold)
+        artifact(i) = 1;
+    end
+    if any(abs(veog(:)) > eog.v_threshold)
+        artifact(i) = 1;
     end
 end
 

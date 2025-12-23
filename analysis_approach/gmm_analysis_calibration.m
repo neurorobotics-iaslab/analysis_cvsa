@@ -71,8 +71,7 @@ for idx_file= 1: nFiles
         muscle.filterOrder = 4;
         muscle.freq = 1; % remove antneuro problems
         muscle.threshold = 100;
-%         [signal_processed, header_processed] = processing_onlineROS_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
-        [signal_processed, header_processed] = processing_onlineROS_CSD_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize);
+        [signal_processed, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
         artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
 
         c_header = headers{1, idx_band};
