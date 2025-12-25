@@ -50,6 +50,7 @@ for i=1:nchunks
     tmp_data = abs(analytic).^2;
 
     % apply average
+%     tmp_data = mean(tmp_data(0.5*bufferSize:bufferSize,:), 1);
     tmp_data = mean(tmp_data, 1);
 
     signal_processed(i,:) = tmp_data;

@@ -4,12 +4,14 @@ addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_cvsa/equal_ros')
 
 %% Initialization
 DATAPAH = '/home/paolo/cvsa/ic_cvsa_ws/src/';
-classes = [730 731];      
-nchannels = 39;
+classes = [769 770];
+nchannels = 16;
 nclasses = length(classes);
 filterOrder = 4;
 avg = 0.5;% 0.75;
 threshold_gmm_ic = 0.7;
+channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'CP3', 'CP1', 'CP2', 'CP4', 'Pz'};
+
 
 %% Load file
 [filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files', 'MultiSelect', 'on');
@@ -28,11 +30,11 @@ peaks = zeros(1, nFiles);
 for idx_file = 1:nFiles
     fullpath_file = fullfile(pathname, filenames{idx_file});
     peaks(idx_file) = analyze_alpha_peak(fullpath_file, 'RestTrigger', 786, 'band', [8 14], ...
-        'target_regions', {'O1', 'O2', 'OZ', 'PO7', 'PO8', 'PO3', 'PO4', 'PO5', 'PO6', 'POZ'});
+        'target_regions', {'C1', 'C3', 'C2', 'C4'});
 end
 
 %% start processing data
-bands = [{[8 14]}];
+bands = [{[8 13]} {[18 24]}];
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 signals = cell(1, nbands);
@@ -51,11 +53,9 @@ for idx_file= 1: nFiles
     disp(['file (' num2str(idx_file) '/' num2str(nFiles)  '): ', filenames{idx_file}]);
     [c_signal,header] = sload(fullpath_file);
     c_signal = c_signal(:,1:nchannels);
-    channels_label = header.Label;
     sampleRate = header.SampleRate;
 
-    excl_ch = {'FP1', 'FP2', 'EOG'};
-    [~, excl_chs] = ismember(excl_ch, channels_label);
+    excl_chs = [];
 
     disp('   [proc] power band');
     for idx_band = 1:nbands
@@ -65,8 +65,8 @@ for idx_file= 1: nFiles
         bufferSize = floor(avg*sampleRate);
         chunkSize = 32;
         eog.filterOrder = 4;
-        eog.band = [1 7];
-        eog.label = excl_ch;
+        eog.band = [];
+        eog.label = excl_chs;
         eog.h_threshold = 60;
         eog.v_threshold = 60;
         muscle.filterOrder = 4;
@@ -166,8 +166,8 @@ sparsity = nan(min_trial_data, nbands, ntrial, nsparsity); % sample x band x tri
 % c_l_ch = {'FC1', 'C3', 'CP1', 'FC3', 'C1', 'CP3'};
 % c_r_ch = {'FC2', 'C4', 'CP2', 'FC4', 'C2', 'CP4'};
 
-o_l_ch = {'O1', 'PO5', 'PO3', 'PO7'};
-o_r_ch = {'O2', 'PO4', 'PO6', 'PO8'};
+o_l_ch = {};
+o_r_ch = {};
 c_l_ch = {'C3', 'CP1', 'C1', 'CP3'};
 c_r_ch = {'C4', 'CP2', 'C2', 'CP4'};
 
@@ -176,7 +176,7 @@ c_r_ch = {'C4', 'CP2', 'C2', 'CP4'};
 [~, c_l] = ismember(c_l_ch, channels_label);
 [~, c_r] = ismember(c_r_ch, channels_label);
 
-type = 'cvsa';
+type = 'mi';
 
 for c = 1:ntrial
     c_data = squeeze(trial_data(:,:,:,c)); % samples x band x channels
@@ -293,10 +293,10 @@ grid on;
 axis tight;
 hold off;
 
-% 1. Ottieni le etichette "Hard" dal GMM (assegna ogni punto al cluster più probabile)
+% Ottieni le etichette "Hard" dal GMM (assegna ogni punto al cluster più probabile)
 cluster_idx = cluster(gmm_model, data_2D_noArtif);
 
-% 2. Calcola la Silhouette
+% Calcola la Silhouette
 figure;
 [s, ~] = silhouette(data_2D_noArtif, cluster_idx);
 mean_sil = mean(s);
@@ -336,14 +336,12 @@ X_all = log(X_all);
 
 %% Check the data used for the QDA
 % fisher score
-occipital = {'P3', 'PZ', 'P4', 'POZ', 'O1', 'O2', 'P5', 'P1', 'P2', 'P6', 'PO5', 'PO3', 'PO4', 'PO6', 'PO7', 'PO8', 'OZ'}; 
-[~, ch_occipital] = ismember(occipital, channels_label);
-noccipital = size(ch_occipital, 2);
+chs = 1:nchannels;
 
-fisher = nan(2, noccipital);
+fisher = nan(2, nchannels);
 
-for idx_ch_occipital=1:noccipital
-    idx_ch = ch_occipital(idx_ch_occipital);
+for idx_ch_occipital=1:nchannels
+    idx_ch = chs(idx_ch_occipital);
     % IC
     mu1 = mean(X(y == classes(1),idx_ch));
     sigma1 = std(X(y == classes(1),idx_ch));
@@ -362,7 +360,7 @@ end
 figure();
 imagesc(fisher')
 colorbar;
-yticks(1:noccipital); yticklabels(occipital)
+yticks(1:nchannels); yticklabels(channels_label)
 xticks(1:2); xticklabels({'IC', 'traditional'})
 sgtitle('gmm ic and classical fisher score')
 
@@ -379,11 +377,21 @@ if exist(path_locs, 'file')
     loc_data = load(path_locs);
     % Estrae la variabile in modo dinamico
     f_names = fieldnames(loc_data);
-    chanlocs = loc_data.(f_names{1}); 
+    chanlocs_full = loc_data.(f_names{1}); 
     disp(['[INFO] Chanlocs caricato.']);
 else
     error(['File chanlocs non trovato in: ' path_locs]);
 end
+
+% Creiamo il subset ordinato esattamente come target_labels
+all_labels = {chanlocs_full.labels};
+[is_present, idx_in_full] = ismember(channels_label, all_labels);
+if ~all(is_present)
+    missing_chans = target_labels(~is_present);
+    error('I seguenti canali non sono stati trovati nel file chanlocs39: %s', strjoin(missing_chans, ', '));
+end
+chanlocs_subset = chanlocs_full(idx_in_full);
+disp(['[INFO] Chanlocs ridotto a ' num2str(length(chanlocs_subset)) ' canali per il plotting.']);
 
 % --- A. Per X (GMM Selected) ---
 X_c1 = X(y == classes(1), :); % Classe 1 (es. 730)
@@ -414,13 +422,13 @@ if exist('topoplot', 'file')
     
     % Subplot 1: GMM (IC)
     subplot(1, 2, 1);
-    topoplot(diff_ic, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
+    topoplot(diff_ic, chanlocs_subset, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
     title({'GMM Selected (IC)', ['Mean Diff (' num2str(classes(1)) ' - ' num2str(classes(2)) ')']}, 'FontSize', 12, 'FontWeight', 'bold');
     colorbar;
     
     % Subplot 2: All Data
     subplot(1, 2, 2);
-    topoplot(diff_all, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
+    topoplot(diff_all, chanlocs_subset, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
     title({'All Data ', ['Mean Diff (' num2str(classes(1)) ' - ' num2str(classes(2)) ')']}, 'FontSize', 12, 'FontWeight', 'bold');
     colorbar;
     

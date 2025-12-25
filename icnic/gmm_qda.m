@@ -4,7 +4,7 @@ addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_cvsa/equal_ros')
 
 %% Initialization
 threshold_gmm_ic = 0.7;
-bands = [{[8 14]}];
+bands = [{[8 12]}];
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 signals = cell(1, nbands);
@@ -540,6 +540,10 @@ title('gmm ic and classical fisher score')
 colorbar;
 yticks(1:noccipital); yticklabels(occipital)
 xticks(1:4); xticklabels(x_labels)
+
+% R^2
+calc_r2_from_data(IC_train_data, IC_train_labels, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['QDA data | size data: ' num2str(size(IC_train_data,1))]);
+calc_r2_from_data(cl_train_data, cl_train_labels, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['all data | size data: ' num2str(size(cl_train_data,1))]);
 
 %% train and test the qda
 IC_select_channels = {'PO4', 'O2', 'PO8', 'PO6', 'O1', 'PO3', 'PO7', 'PO5'}; %%%%% ----> features selection

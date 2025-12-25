@@ -13,10 +13,14 @@ function [peak_freq] = analyze_alpha_peak(filename, varargin)
     p = inputParser;
     addRequired(p, 'filename', @ischar);
     addParameter(p, 'RestTrigger', [], @isnumeric);
+    addParameter(p, 'band', [8 14], @isnumeric)
+    addParameter(p, 'target_regions',  {'O1', 'O2', 'OZ', 'PO7', 'PO8', 'PO3', 'PO4', 'PZ', 'POZ'}, ...
+        @(x) iscell(x) && all(cellfun(@ischar, x)));
     parse(p, filename, varargin{:});
     
     rest_typ = p.Results.RestTrigger;
-    target_regions = {'O1', 'O2', 'OZ', 'PO7', 'PO8', 'PO3', 'PO4', 'PZ', 'POZ'};
+    band = p.Results.band;
+    target_regions = p.Results.target_regions;
     
     %% 2. Caricamento e Pre-processing
     disp('--------------------------------------------------');
@@ -148,7 +152,7 @@ function [peak_freq] = analyze_alpha_peak(filename, varargin)
     lower_db = 10*log10(lower_val);
     
     %% 7. Ricerca Picco (8-14 Hz)
-    search_mask = (F_vector >= 8 & F_vector <= 14);
+    search_mask = (F_vector >= band(1) & F_vector <= band(2));
     f_band = F_vector(search_mask);
     p_band = mean_pxx(search_mask);
     
