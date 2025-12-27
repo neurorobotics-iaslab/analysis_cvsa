@@ -8,7 +8,7 @@ classes = [769 770];
 nchannels = 16;
 nclasses = length(classes);
 filterOrder = 4;
-avg = 0.5;% 0.75;
+avg = 1;% 0.75;
 threshold_gmm_ic = 0.7;
 channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'CP3', 'CP1', 'CP2', 'CP4', 'Pz'};
 
@@ -38,14 +38,13 @@ bands = [{[8 13]} {[18 24]}];
 bands_str = cellfun(@(x) sprintf('%d-%d', x(1), x(2)), bands, 'UniformOutput', false);
 nbands = length(bands);
 signals = cell(1, nbands);
-artifacts = cell(1, nbands);
+artifacts = [];
 headers = cell(1, nbands);
 for idx_band = 1:nbands
     headers{idx_band}.TYP = [];
     headers{idx_band}.DUR = [];
     headers{idx_band}.POS = [];
     signals{idx_band} = [];
-    artifacts{idx_band} = [];
 end
 
 for idx_file= 1: nFiles
@@ -57,24 +56,26 @@ for idx_file= 1: nFiles
 
     excl_chs = [];
 
+    % for power band using hilbert transformation and artefact remotion -----------------------------------------------
+    bufferSize = floor(avg*sampleRate);
+    chunkSize = 32;
+    eog.filterOrder = 4;
+    eog.band = [];
+    eog.label = excl_chs;
+    eog.h_threshold = 60;
+    eog.v_threshold = 60;
+    muscle.filterOrder = 4;
+    muscle.freq = 1; % remove antneuro problems
+    muscle.threshold = 100;
+    artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
+    artifacts = cat(1, artifacts, artifact(:,:));
+
     disp('   [proc] power band');
     for idx_band = 1:nbands
         band = bands{idx_band};
 
-        % for power band using hilbert transformation and artefact remotion -----------------------------------------------
-        bufferSize = floor(avg*sampleRate);
-        chunkSize = 32;
-        eog.filterOrder = 4;
-        eog.band = [];
-        eog.label = excl_chs;
-        eog.h_threshold = 60;
-        eog.v_threshold = 60;
-        muscle.filterOrder = 4;
-        muscle.freq = 1; % remove antneuro problems
-        muscle.threshold = 100;
         [signal_processed, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
-        artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
-
+        
         c_header = headers{1, idx_band};
         c_header.sampleRate = header_processed.SampleRate/chunkSize;
         c_header.channels_labels = header_processed.Label;
@@ -89,7 +90,6 @@ for idx_file= 1: nFiles
             c_header.POS = cat(1, c_header.POS, header_processed.EVENT.POS(k:end) + size(signals{1, idx_band}, 1));
         end
         signals{1, idx_band} = cat(1, signals{1, idx_band}, signal_processed(:,:));
-        artifacts{1, idx_band} = cat(1, artifacts{1, idx_band}, artifact(:,:));
         headers{1, idx_band} = c_header;
     end
 end
@@ -124,15 +124,15 @@ end
 
 min_trial_data = min(trial_end - trial_start+1);
 trial_data = nan(min_trial_data, nbands, nchannels, ntrial); % data x bands x channels x trial
-artifacts_data = nan(min_trial_data, nbands, ntrial); % data x bands x trial
+artifacts_data = nan(min_trial_data, ntrial); % data x trial
 for idx_band = 1:nbands
     c_signal = signals{idx_band};
-    c_artifact = artifacts{idx_band};
+    c_artifact = artifacts;
     for trial = 1:ntrial
         c_start = trial_start(trial);
         c_end = trial_start(trial) + min_trial_data - 1;
         trial_data(:,idx_band,:,trial) = c_signal(c_start:c_end,:);
-        artifacts_data(:,idx_band,trial) = c_artifact(c_start:c_end,:);
+        artifacts_data(:,trial) = c_artifact(c_start:c_end,:);
     end
 end
 
@@ -149,7 +149,7 @@ i = 1;
 for idx_trial_class = 1:2:ntrial
     for idx_class = 1:nclasses
         tmp_data(:,:,:,idx_trial_class + idx_class - 1) = trial_data(:,:,:,idx_classes_trial(i, idx_class));
-        tmp_art(:,:,idx_trial_class + idx_class - 1) = artifacts_data(:,:,idx_classes_trial(i, idx_class));
+        tmp_art(:,idx_trial_class + idx_class - 1) = artifacts_data(:,idx_classes_trial(i, idx_class));
         trial_typ(idx_trial_class + idx_class - 1) = classes(idx_class);
     end
     i = i + 1;
@@ -160,7 +160,7 @@ artifacts_data = tmp_art;
 %% compute sparsity
 % define regions
 nsparsity = 2;
-sparsity = nan(min_trial_data, nbands, ntrial, nsparsity); % sample x band x trial x sparsity
+sparsity = nan(min_trial_data, ntrial, nsparsity*nbands); % sample x trial x sparsity*nbands
 % o_l_ch = {'P3', 'O1', 'P5', 'P1', 'PO5', 'PO3', 'PO7'};
 % o_r_ch = {'P4', 'O2', 'P2', 'P6', 'PO4', 'PO6', 'PO8'};
 % c_l_ch = {'FC1', 'C3', 'CP1', 'FC3', 'C1', 'CP3'};
@@ -184,23 +184,35 @@ for c = 1:ntrial
     for sample = 1:min_trial_data
         c_sample = squeeze(c_data(sample,:,:)); % bands x channels
 
+        sparsity_vec = []; label_plot = [];
+
         for idx_band = 1:nbands
             tmp = squeeze(c_sample(idx_band,:)); % 1 x channels
+            
+            [tmp, label_plot_tmp] =  compute_features_icnic(tmp, type, o_l, o_r, c_l, c_r, nsparsity);
 
-            [sparsity(sample, idx_band, c,:), label_plot] = compute_features_icnic(tmp, type, o_l, o_r, c_l, c_r, nsparsity);
+            sparsity_vec = [sparsity_vec; tmp];
+            label_plot = [label_plot, label_plot_tmp];
         end
+
+        sparsity(sample, c, :) = sparsity_vec;
+    end
+end
+
+for idx_band = 1:nbands
+    for idx_s = 1:nsparsity
+        idx = (idx_band-1)*nbands+idx_s;
+        label_plot{idx} = [label_plot{idx}, ' ', bands_str{idx_band}];
     end
 end
 
 %% ----------------- gmm -----------------
-% update to work with subbands -> tesista
-choosen_band = 1;
 K_range = 2:2; 
 best_gmm = [];
 min_bic = inf;
 
-sparsity_cf = squeeze(sparsity(minDurFix+minDurCue+1:end, choosen_band,:,:));
-artifacts_cf = squeeze(artifacts_data(minDurFix+minDurCue+1:end, choosen_band,:));
+sparsity_cf = squeeze(sparsity(minDurFix+minDurCue+1:end, :,:));
+artifacts_cf = squeeze(artifacts_data(minDurFix+minDurCue+1:end, :));
 
 % z-score -> train and use the mu and var also for the test
 data_3D = sparsity_cf(:, :, :);
@@ -248,16 +260,14 @@ classes_icnic = zeros(1,2);
 classes_icnic(idx_ic) = 1;
 
 % Crea le etichette finali
-labels_gmm = {'IC', 'NIC'};
-
-train_gmm = nan(ntrial * size(sparsity_cf, 1), nsparsity);
+train_gmm = nan(ntrial * size(sparsity_cf, 1), nsparsity*nbands);
 for c = 1:ntrial
     train_gmm((c-1)*size(sparsity_cf, 1) + 1: c * size(sparsity_cf, 1),:) = sparsity_cf(:,c,:);
 end
 P_soft = posterior(gmm_model, train_gmm);
 cluster_labels = nan(size(sparsity_cf, 1), ntrial); % contains the prob to be ic
 for c = 1:ntrial
-    cluster_labels(:,c) = P_soft((c-1)*size(sparsity_cf, 1) + 1: c * size(sparsity_cf, 1),idx_ic);
+    cluster_labels(:,c) = P_soft((c-1)*size(sparsity_cf, 1) + 1: c * size(sparsity_cf, 1), idx_ic);
 end
 
 fprintf('Mappatura: Cluster GMM %d -> "ic", Cluster GMM %d -> "nic"\n', idx_ic, idx_nic);
@@ -267,32 +277,6 @@ disp('centroids: ')
 disp(gmm_model.mu)
 
 %% --- VISUALIZZAZIONE GMM ---
-figure('Color', 'w'); % Crea una figura con sfondo bianco
-hold on;
-scatter(data_2D_noArtif(:,1), data_2D_noArtif(:,2), 15, ...
-        'MarkerFaceColor', [0.2 0.5 0.9], ...
-        'MarkerEdgeColor', 'none', ...
-        'MarkerFaceAlpha', 0.4);
-
-x_min = min(data_2D_noArtif(:,1)) - 1; x_max = max(data_2D_noArtif(:,1)) + 1;
-y_min = min(data_2D_noArtif(:,2)) - 1; y_max = max(data_2D_noArtif(:,2)) + 1;
-step = 0.05; 
-[x1Grid, x2Grid] = meshgrid(x_min:step:x_max, y_min:step:y_max);
-XGrid = [x1Grid(:), x2Grid(:)];
-
-prob_GMM = pdf(gmm_model, XGrid);
-prob_GMM = reshape(prob_GMM, size(x1Grid));
-[C, ~] = contour(x1Grid, x2Grid, prob_GMM, 10, 'LineWidth', 2, 'LineColor', [0.8 0.2 0.2]);
-plot(gmm_model.mu(:,1), gmm_model.mu(:,2), 'k+', 'MarkerSize', 15, 'LineWidth', 3);
-
-xlabel(label_plot{1}, 'FontSize', 12, 'FontWeight', 'bold');
-ylabel(label_plot{2}, 'FontSize', 12, 'FontWeight', 'bold');
-title('GMM Fit: Cluster IC vs NIC', 'FontSize', 14);
-legend({'Dati Reali', 'Ellissi GMM', 'Centroidi'}, 'Location', 'best');
-grid on;
-axis tight;
-hold off;
-
 % Ottieni le etichette "Hard" dal GMM (assegna ogni punto al cluster più probabile)
 cluster_idx = cluster(gmm_model, data_2D_noArtif);
 
@@ -311,62 +295,77 @@ disp(['Calinski-Harabasz Index: ' num2str(eva_ch.CriterionValues)]);
 eva_db = evalclusters(data_2D_noArtif, cluster_idx, 'DaviesBouldin');
 disp(['Davies-Bouldin Index: ' num2str(eva_db.CriterionValues)]);
 
-%% extract and save data for the QDA
-data = squeeze(trial_data(minDurCue+minDurFix+1:end,choosen_band,:,:)); % take just the 8-14 band
+%% extract data for the selection of the features
+data = trial_data(minDurCue+minDurFix+1:end,:,:,:); % data x bands x channels x trial
 nsamples = size(data,1);
 X = []; X_all = [];
 y = []; y_all = [];
-trials = [];
-for idx_trial =  1:ntrial
-    for idx_sample = 1:nsamples
-        if artifacts_cf(idx_sample,idx_trial) == 0 % no artifact
-            X_all = [X_all; data(idx_sample,:,idx_trial)];
-            y_all = [y_all; trial_typ(idx_trial)];
-            if cluster_labels(idx_sample, idx_trial) >= threshold_gmm_ic % IC state
-                X = [X; data(idx_sample,:,idx_trial)];
-                y = [y; trial_typ(idx_trial)];
-                trials = [trials; idx_trial];
+for idx_band = 1:nbands
+    tmp_X = []; tmp_X_all = [];
+    y = []; y_all = [];
+    trials = [];
+    for idx_trial =  1:ntrial
+        for idx_sample = 1:nsamples
+            if artifacts_cf(idx_sample,idx_trial) == 0 % no artifact
+                tmp_X_all = [tmp_X_all; data(idx_sample,idx_band,:,idx_trial)];
+                y_all = [y_all; trial_typ(idx_trial)];
+                if cluster_labels(idx_sample, idx_trial) >= threshold_gmm_ic % IC state
+                    tmp_X = [tmp_X; data(idx_sample,idx_band,:,idx_trial)];
+                    y = [y; trial_typ(idx_trial)];
+                    trials = [trials; idx_trial];
+                end
             end
         end
     end
+    tmp_X = log(tmp_X);
+    tmp_X_all = log(tmp_X_all);
+
+    X = [X, tmp_X];
+    X_all = [X_all, tmp_X_all];
 end
-X = log(X);
-X_all = log(X_all);
 
-
-%% Check the data used for the QDA
+%% Features selection QDA
 % fisher score
 chs = 1:nchannels;
 
-fisher = nan(2, nchannels);
+fisher = nan(nbands*2, nchannels);
+label_fisher = [];
 
 for idx_ch_occipital=1:nchannels
     idx_ch = chs(idx_ch_occipital);
-    % IC
-    mu1 = mean(X(y == classes(1),idx_ch));
-    sigma1 = std(X(y == classes(1),idx_ch));
-    mu2 = mean(X(y == classes(2),idx_ch));
-    sigma2 = std(X(y == classes(2),idx_ch));
-    fisher(1, idx_ch_occipital) = abs(mu1 - mu2)^2 / (sigma1^2 + sigma2^2);
 
-    % all
-    mu1 = mean(X_all(y_all == classes(1),idx_ch));
-    sigma1 = std(X_all(y_all == classes(1),idx_ch));
-    mu2 = mean(X_all(y_all == classes(2),idx_ch));
-    sigma2 = std(X_all(y_all == classes(2),idx_ch));
-    fisher(2, idx_ch_occipital) = abs(mu1 - mu2)^2 / (sigma1^2 + sigma2^2);
+    % IC
+    for idx_band = 1:nbands
+        mu1 = mean(X(y == classes(1),idx_band, idx_ch));
+        sigma1 = std(X(y == classes(1),idx_band, idx_ch));
+        mu2 = mean(X(y == classes(2),idx_band,idx_ch));
+        sigma2 = std(X(y == classes(2),idx_band, idx_ch));
+        fisher(idx_band*nbands -1, idx_ch_occipital) = abs(mu1 - mu2)^2 / (sigma1^2 + sigma2^2);
+        label_fisher = [label_fisher, {['IC', bands_str{idx_band}]}];
+
+
+        % all
+        mu1 = mean(X_all(y_all == classes(1), idx_band, idx_ch));
+        sigma1 = std(X_all(y_all == classes(1),idx_band, idx_ch));
+        mu2 = mean(X_all(y_all == classes(2),idx_band, idx_ch));
+        sigma2 = std(X_all(y_all == classes(2),idx_band, idx_ch));
+        fisher(idx_band*nbands, idx_ch_occipital) = abs(mu1 - mu2)^2 / (sigma1^2 + sigma2^2);
+        label_fisher = [label_fisher, {['traditional', bands_str{idx_band}]}];
+    end
 end
 
 figure();
 imagesc(fisher')
 colorbar;
 yticks(1:nchannels); yticklabels(channels_label)
-xticks(1:2); xticklabels({'IC', 'traditional'})
+xticks(1:size(fisher, 1)); xticklabels(label_fisher)
 sgtitle('gmm ic and classical fisher score')
 
 % R^2
-calc_r2_from_data(X, y, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['QDA data | size data: ' num2str(size(X,1))]);
-calc_r2_from_data(X_all, y_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['all data | size data: ' num2str(size(X_all,1))]);
+for idx_band = 1:nbands
+    calc_r2_from_data(squeeze(X(:,idx_band,:)), y, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['QDA data | size data: ' num2str(size(X,1)) ' | band: ' bands_str{idx_band}]);
+    calc_r2_from_data(squeeze(X_all(:,idx_band,:)), y_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['all data | size data: ' num2str(size(X_all,1)) ' | band: ' bands_str{idx_band}]);
+end
 
 %% --- TOPOPLOTS VISUALIZATION (Mean Difference) ---
 disp('Generazione Topoplot (Differenza Media)...');
@@ -393,70 +392,76 @@ end
 chanlocs_subset = chanlocs_full(idx_in_full);
 disp(['[INFO] Chanlocs ridotto a ' num2str(length(chanlocs_subset)) ' canali per il plotting.']);
 
-% --- A. Per X (GMM Selected) ---
-X_c1 = X(y == classes(1), :); % Classe 1 (es. 730)
-X_c2 = X(y == classes(2), :); % Classe 2 (es. 731)
 
-% Media sulle colonne (canali)
-mu1_ic = mean(X_c1, 1);
-mu2_ic = mean(X_c2, 1);
-diff_ic = mu1_ic - mu2_ic;
+figure('Color', 'w', 'Name', 'Topoplot Mean Difference', 'Position', [100, 100, 1200, 500]);
+max_val = 0.1;
+handles = [];
+for idx_band = 1:nbands
+    % --- X (GMM Selected) ---
+    X_c1 = squeeze(X(y == classes(1), idx_band, :)); % Classe 1 (es. 730)
+    X_c2 = squeeze(X(y == classes(2), idx_band, :)); % Classe 2 (es. 731)
 
-% --- B. Per X_all (All Data) ---
-Xall_c1 = X_all(y_all == classes(1), :);
-Xall_c2 = X_all(y_all == classes(2), :);
+    mu1_ic = mean(X_c1, 1);
+    mu2_ic = mean(X_c2, 1);
+    diff_ic = mu1_ic - mu2_ic;
 
-mu1_all = mean(Xall_c1, 1);
-mu2_all = mean(Xall_c2, 1);
-diff_all = mu1_all - mu2_all;
+    % ---X_all (All Data) ---
+    Xall_c1 = squeeze(X_all(y_all == classes(1), idx_band, :));
+    Xall_c2 = squeeze(X_all(y_all == classes(2), idx_band, :));
 
-% 3. Plotting
-if exist('topoplot', 'file')
-    figure('Color', 'w', 'Name', 'Topoplot Mean Difference', 'Position', [100, 100, 1200, 500]);
-    
-    % Calcolo limiti colore comuni per confronto diretto
-    % Troviamo il valore massimo di differenza in assoluto per centrare la colormap
-    max_val = max([abs(diff_ic), abs(diff_all)]);
-    if max_val == 0, max_val = 0.1; end
-    clim = [-max_val, max_val];
-    
+    mu1_all = mean(Xall_c1, 1);
+    mu2_all = mean(Xall_c2, 1);
+    diff_all = mu1_all - mu2_all;
+
+    % 3. Plotting
+    max_val = max([abs(diff_ic), abs(diff_all), max_val]);
+
     % Subplot 1: GMM (IC)
-    subplot(1, 2, 1);
-    topoplot(diff_ic, chanlocs_subset, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'GMM Selected (IC)', ['Mean Diff (' num2str(classes(1)) ' - ' num2str(classes(2)) ')']}, 'FontSize', 12, 'FontWeight', 'bold');
+    subplot(nbands, 2, (idx_band-1)*nbands + 1);
+    topoplot(diff_ic, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
+    title(['GMM Selected (IC) | ', num2str(bands{idx_band}(1)) '-' num2str(bands{idx_band}(2)) ' Hz)'], 'FontSize', 12, 'FontWeight', 'bold');
+    handles = [handles, gca];
     colorbar;
-    
+
     % Subplot 2: All Data
-    subplot(1, 2, 2);
-    topoplot(diff_all, chanlocs_subset, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'All Data ', ['Mean Diff (' num2str(classes(1)) ' - ' num2str(classes(2)) ')']}, 'FontSize', 12, 'FontWeight', 'bold');
+    subplot(nbands, 2, (idx_band-1)*nbands + 2);
+    topoplot(diff_all, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
+    title(['All Data | ', num2str(bands{idx_band}(1)) '-' num2str(bands{idx_band}(2)) ' Hz)'], 'FontSize', 12, 'FontWeight', 'bold');
+    handles = [handles, gca];
     colorbar;
-    
+
     % Colormap: Rosso = Classe 1 Maggiore, Blu = Classe 2 Maggiore
-    colormap(jet); 
-    sgtitle(['Difference power (' num2str(bands{choosen_band}(1)) '-' num2str(bands{choosen_band}(2)) ' Hz)'], 'FontSize', 14);
-    
-else
-    warning('EEGLAB topoplot non trovato.');
+    colormap(jet);
+    sgtitle(['Mean Diff | ' num2str(classes(1)) ' - ' num2str(classes(2))], 'FontSize', 14);
+
 end
+set(handles, 'CLim', [-max_val, max_val])
 
 %% --- TRIAL PLOTS ---
 for c = 1:10
     figure();
     
-    % --- log band ---
+    % --- log band band 1---
     subplot(4,1,1)
-    imagesc(squeeze(trial_data(minDurFix+minDurCue+1:end,choosen_band,:,c))')
+    imagesc(squeeze(trial_data(minDurFix+minDurCue+1:end,1,:,c))')
     xticks(0:sampleRate:min_trial_data)
     xticklabels(string((minDurFix+minDurCue:sampleRate:min_trial_data) / sampleRate));
     yticks(1:nchannels); yticklabels(channels_label)
-    title('log band')
+    title(['log band ' bands_str{1}])
+
+    % --- log band band 2 ---
+    subplot(4,1,2)
+    imagesc(squeeze(trial_data(minDurFix+minDurCue+1:end,2,:,c))')
+    xticks(0:sampleRate:min_trial_data)
+    xticklabels(string((minDurFix+minDurCue:sampleRate:min_trial_data) / sampleRate));
+    yticks(1:nchannels); yticklabels(channels_label)
+    title(['log band ' bands_str{2}])
 
     % --- sparsity indices ---
-    subplot(4,1,2)
+    subplot(4,1,3)
     plot(squeeze(sparsity_cf(:, c, 1)))
     hold on
-    for i = 2:nsparsity
+    for i = 2:nsparsity*nbands
         plot(squeeze(sparsity_cf(:, c, i)))
     end
     hold off
@@ -464,53 +469,42 @@ for c = 1:10
     xticks(0:sampleRate:min_trial_data)
     xticklabels(string((minDurFix+minDurCue:sampleRate:min_trial_data) / sampleRate));
     xlim([1 size(sparsity_cf, 1)])
-%     ylim([0, 1])
     title('sparsity')
 
     % --- cluster labels gmm ---
-    subplot(4,1,3)
+    subplot(4,1,4)
     plot(squeeze(cluster_labels(:, c)), 'r')
     hold on
     yline(threshold_gmm_ic, 'k--', 'LineWidth', 2);
+    plot(squeeze(artifacts_data(minDurFix+minDurCue+1:end,c)), 'b')
     hold off
-    legend('gmm', 'threshold gmm ic')
+    legend('gmm', 'threshold gmm ic', 'artifact')
     xticks(0:sampleRate:min_trial_data)
     xticklabels(string((minDurFix+minDurCue:sampleRate:min_trial_data) / sampleRate));
     xlim([1 size(sparsity_cf, 1)])
     yticks(0:K-1);
-    yticklabels(labels_gmm)   
-    title('cluster comparison')
-
-    % --- plot if artefacts ---
-    subplot(4,1,4)
-    plot(squeeze(artifacts_data(minDurFix+minDurCue+1:end,choosen_band,c)), 'b')
-    legend('artefact in the trial')
-    xticks(0:sampleRate:min_trial_data)
-    xticklabels(string((minDurFix+minDurCue:sampleRate:min_trial_data) / sampleRate));
-    xlim([1 size(sparsity_cf, 1)])
-    yticks(0:1);
+    yticklabels({'NIC/NO', 'IC/YES'})  
     ylim([0 1])
-    yticklabels([{'no'}, {'yes'}])   
-    title('artefacts')
+    title('cluster amd artifacts')
     
-    sgtitle(['Trial: ' num2str(c) ' | Task: ' num2str(trial_typ(c)) ' | band: '  bands_str{choosen_band}])
+    sgtitle(['Trial: ' num2str(c) ' | Task: ' num2str(trial_typ(c))])
 end
 
 %% ERD ERS
-% 1. Prepara i dati per la banda scelta (es. choosen_band = 1)
+choosen_band = 1;
 data_for_plot = squeeze(trial_data(:, choosen_band, :, :)); % Diventa [Samples x Ch x Trials]
 arts_for_plot = squeeze(artifacts_data(:, choosen_band, :)); % [Samples x Trials]
 
 plot_header.SampleRate = sampleRate; % Assicurati che sia il rateo DOPO il chunking 
 plot_header.Label = channels_label;  % O headers{1}.channels_labels
 
-ch_list = {'PO7', 'PO8', 'O1', 'P5', 'PO5', 'O2'};
+ch_list = {'C3', 'C1', 'C4', 'C2', 'Cz'};
 
 disp('Plotting ERD/ERS...');
-plot_erd_ers(log(data_for_plot), trial_typ, arts_for_plot, plot_header, minDurFix, ch_list);
+plot_erd_ers(log(data_for_plot), trial_typ, arts_for_plot, plot_header, minDurFix, ch_list, ['band: ' bands_str{choosen_band}]);
 
 
-function plot_erd_ers(trial_data_band, trial_typ, artifacts_band, header, minDurFix, channels_to_plot)
+function plot_erd_ers(trial_data_band, trial_typ, artifacts_band, header, minDurFix, channels_to_plot, title_plot)
 % PLOT_ERD_ERS Visualizza l'andamento temporale della potenza (ERD/ERS).
 %
 % INPUT:
@@ -602,6 +596,7 @@ function plot_erd_ers(trial_data_band, trial_typ, artifacts_band, header, minDur
         grid on;
         xlim([t_axis(1), t_axis(end)]);
     end
+    sgtitle(title_plot)
 end
 
 function plot_shaded(x, y, err, color)

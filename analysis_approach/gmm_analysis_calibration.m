@@ -8,7 +8,7 @@ classes = [730 731];
 nchannels = 39;
 nclasses = length(classes);
 filterOrder = 4;
-avg = 0.5;% 0.75;
+avg = 1;% 0.75;
 threshold_gmm_ic = 0.7;
 
 %% Load file

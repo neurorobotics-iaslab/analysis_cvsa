@@ -19,6 +19,12 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
     LI = (P_right_window - P_left_window) ./ (P_right_window + P_left_window + eps);
     sparsity(1) = abs(LI);
 
+    % --- max desyncronization ---
+    Act_L = -log(P_left_window + eps);
+    Act_R = -log(P_right_window + eps);
+    Max_Activation = max(Act_L, Act_R);
+    sparsity(1) = Max_Activation;
+
     % --- Gini Index  ---  -> IC means focus on a specific zone
     if isempty(o_l) | isempty(o_r) | isempty(c_l) | isempty(c_r)
         mean_roi_raw = c_signal;
