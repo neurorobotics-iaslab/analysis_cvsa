@@ -229,35 +229,45 @@ sparsity_cf = reshape(data_standardized_2D, size(data_3D, 1), ntrial, size(data_
 
 disp('Esecuzione di GMM sui dati di training globali...');
 options = statset('MaxIter', 1000, 'Display', 'off');
+BIC = [];
 for k = K_range
     try
         % RegularizationValue = 1e-5 evita che le gaussiane collassino su un punto
-        gm_temp = fitgmdist(data_2D_noArtif, k, ...
+        gmm_temp = fitgmdist(data_2D_noArtif, k, ...
                             'Options', options, ...
                             'CovarianceType', 'Full', ...
                             'SharedCovariance', false, ...
                             'RegularizationValue', 1e-5, ...
-                            'Replicates', 150); 
+                            'Replicates', 50); 
         
-        if gm_temp.BIC < min_bic
-            min_bic = gm_temp.BIC;
-            best_gmm = gm_temp;
+        if gmm_temp.BIC < min_bic
+            min_bic = gmm_temp.BIC;
+            best_gmm = gmm_temp;
         end
+        BIC =[BIC, gmm_temp.BIC];
     catch ME
         fprintf(2, 'Errore durante il fit con k=%d:\n%s\n', k, ME.message);
         continue;
     end
 end
 
+if length(BIC) > 1
+    figure();
+    plot(BIC)
+end
+
 gmm_model = best_gmm;
 K = gmm_model.NumComponents;
 disp(['GMM ottimizzato: K = ' num2str(K) ' (BIC = ' num2str(min_bic) ')']);
 
-[~, sort_order] = sort(gmm_model.mu(:, 1), 'descend');
-idx_ic = sort_order(1);  % Index cluster IC
-idx_nic = sort_order(2); 
+log_min_features = gmm_model.mu(:, [1, 3]);
+mean_power_score = mean(log_min_features, 2);
+[sorted_values, sort_order] = sort(mean_power_score, 'descend');
+idx_nic = sort_order(1); 
+idx_ic = sort_order(2); % Potenza Media BASSA = Il cervello sta lavorando (ERD su uno o entrambi i lati) -> IC
 classes_icnic = zeros(1,2);
 classes_icnic(idx_ic) = 1;
+
 
 % Crea le etichette finali
 train_gmm = nan(ntrial * size(sparsity_cf, 1), nsparsity*nbands);

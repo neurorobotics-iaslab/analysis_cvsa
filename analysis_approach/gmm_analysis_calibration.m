@@ -159,7 +159,7 @@ artifacts_data = tmp_art;
 
 %% compute sparsity
 % define regions
-nsparsity = 2;
+nsparsity = 3;
 sparsity = nan(min_trial_data, nbands, ntrial, nsparsity); % sample x band x trial x sparsity
 % o_l_ch = {'P3', 'O1', 'P5', 'P1', 'PO5', 'PO3', 'PO7'};
 % o_r_ch = {'P4', 'O2', 'P2', 'P6', 'PO4', 'PO6', 'PO8'};
@@ -241,9 +241,9 @@ gmm_model = best_gmm;
 K = gmm_model.NumComponents;
 disp(['GMM ottimizzato: K = ' num2str(K) ' (BIC = ' num2str(min_bic) ')']);
 
-[~, sort_order] = sort(gmm_model.mu(:, 1), 'descend');
-idx_ic = sort_order(1);  % Index cluster IC
-idx_nic = sort_order(2); 
+[~, sort_order] = sort(gmm_model.mu(:, 2), 'descend');
+idx_nic = sort_order(1); 
+idx_ic = sort_order(2); % Potenza BASSA = Il cervello sta lavorando (ERD su uno o entrambi i lati) -> IC
 classes_icnic = zeros(1,2);
 classes_icnic(idx_ic) = 1;
 

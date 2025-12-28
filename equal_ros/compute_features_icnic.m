@@ -2,28 +2,26 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
 % signal: signal 1 x channels, according to the notion of my 39 channels
     
     sparsity = nan(nsparsity,1);
-    label_sparsity = [{'LI'}, {'Gini'}];
-
+    
     % --- LI --- Lateralization index
     if strcmp(type, 'cvsa')
         % show the occipital lateralization --> CVSA
         P_left_window  = mean(c_signal(o_l));
         P_right_window = mean(c_signal(o_r));
+        LI = (P_right_window - P_left_window) ./ (P_right_window + P_left_window + eps);
+        sparsity(1) = abs(LI);
+        sparsity(2) = log(min(P_right_window, P_left_window));
+        label_sparsity = [{'LI'}, {'minLOG'}, {'Gini'}];
     elseif strcmp(type, 'mi')
         % show the central lateralization --> MI
         P_left_window  = mean(c_signal(c_l));
         P_right_window = mean(c_signal(c_r));
+        sparsity(1) = log(min(P_right_window, P_left_window));
+        label_sparsity = [{'minLOG'}, {'Gini'}];
     else
         disp('ERROR')
     end
-    LI = (P_right_window - P_left_window) ./ (P_right_window + P_left_window + eps);
-    sparsity(1) = abs(LI);
 
-    % --- max desyncronization ---
-    Act_L = -log(P_left_window + eps);
-    Act_R = -log(P_right_window + eps);
-    Max_Activation = max(Act_L, Act_R);
-    sparsity(1) = Max_Activation;
 
     % --- Gini Index  ---  -> IC means focus on a specific zone
     if isempty(o_l) | isempty(o_r) | isempty(c_l) | isempty(c_r)
@@ -47,6 +45,6 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
     else
         gi = 0;
     end
-    sparsity(2) = gi;
+    sparsity(end) = gi;
 
 end
