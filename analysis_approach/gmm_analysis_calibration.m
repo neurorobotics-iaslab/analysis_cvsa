@@ -137,25 +137,27 @@ for idx_band = 1:nbands
 end
 
 %% refactoring the data --> odd trial class 1 even class 2
-idx_classes_trial = nan(ntrial/2, nclasses);
-for idx_class = 1:nclasses
-    idx_classes_trial(:,idx_class) = find(trial_typ == classes(idx_class));
-end
-
-tmp_data = nan(size(trial_data));
-tmp_art = nan(size(artifacts_data));
-trial_typ = nan(size(trial_typ));
-i = 1;
-for idx_trial_class = 1:2:ntrial
+if sum(trial_typ == classes(1)) == sum(trial_typ == classes(2))
+    idx_classes_trial = nan(ntrial/2, nclasses);
     for idx_class = 1:nclasses
-        tmp_data(:,:,:,idx_trial_class + idx_class - 1) = trial_data(:,:,:,idx_classes_trial(i, idx_class));
-        tmp_art(:,:,idx_trial_class + idx_class - 1) = artifacts_data(:,:,idx_classes_trial(i, idx_class));
-        trial_typ(idx_trial_class + idx_class - 1) = classes(idx_class);
+        idx_classes_trial(:,idx_class) = find(trial_typ == classes(idx_class));
     end
-    i = i + 1;
+
+    tmp_data = nan(size(trial_data));
+    tmp_art = nan(size(artifacts_data));
+    trial_typ = nan(size(trial_typ));
+    i = 1;
+    for idx_trial_class = 1:2:ntrial
+        for idx_class = 1:nclasses
+            tmp_data(:,:,:,idx_trial_class + idx_class - 1) = trial_data(:,:,:,idx_classes_trial(i, idx_class));
+            tmp_art(:,:,idx_trial_class + idx_class - 1) = artifacts_data(:,:,idx_classes_trial(i, idx_class));
+            trial_typ(idx_trial_class + idx_class - 1) = classes(idx_class);
+        end
+        i = i + 1;
+    end
+    trial_data = tmp_data; % samples x bands x channels x trials
+    artifacts_data = tmp_art;
 end
-trial_data = tmp_data; % samples x bands x channels x trials
-artifacts_data = tmp_art;
 
 %% compute sparsity
 % define regions
@@ -248,7 +250,7 @@ classes_icnic = zeros(1,2);
 classes_icnic(idx_ic) = 1;
 
 % Crea le etichette finali
-labels_gmm = {'IC', 'NIC'};
+labels_gmm = {'NIC', 'IC'};
 
 train_gmm = nan(ntrial * size(sparsity_cf, 1), nsparsity);
 for c = 1:ntrial
@@ -267,31 +269,31 @@ disp('centroids: ')
 disp(gmm_model.mu)
 
 %% --- VISUALIZZAZIONE GMM ---
-figure('Color', 'w'); % Crea una figura con sfondo bianco
-hold on;
-scatter(data_2D_noArtif(:,1), data_2D_noArtif(:,2), 15, ...
-        'MarkerFaceColor', [0.2 0.5 0.9], ...
-        'MarkerEdgeColor', 'none', ...
-        'MarkerFaceAlpha', 0.4);
-
-x_min = min(data_2D_noArtif(:,1)) - 1; x_max = max(data_2D_noArtif(:,1)) + 1;
-y_min = min(data_2D_noArtif(:,2)) - 1; y_max = max(data_2D_noArtif(:,2)) + 1;
-step = 0.05; 
-[x1Grid, x2Grid] = meshgrid(x_min:step:x_max, y_min:step:y_max);
-XGrid = [x1Grid(:), x2Grid(:)];
-
-prob_GMM = pdf(gmm_model, XGrid);
-prob_GMM = reshape(prob_GMM, size(x1Grid));
-[C, ~] = contour(x1Grid, x2Grid, prob_GMM, 10, 'LineWidth', 2, 'LineColor', [0.8 0.2 0.2]);
-plot(gmm_model.mu(:,1), gmm_model.mu(:,2), 'k+', 'MarkerSize', 15, 'LineWidth', 3);
-
-xlabel(label_plot{1}, 'FontSize', 12, 'FontWeight', 'bold');
-ylabel(label_plot{2}, 'FontSize', 12, 'FontWeight', 'bold');
-title('GMM Fit: Cluster IC vs NIC', 'FontSize', 14);
-legend({'Dati Reali', 'Ellissi GMM', 'Centroidi'}, 'Location', 'best');
-grid on;
-axis tight;
-hold off;
+% figure('Color', 'w'); % Crea una figura con sfondo bianco
+% hold on;
+% scatter(data_2D_noArtif(:,1), data_2D_noArtif(:,2), 15, ...
+%         'MarkerFaceColor', [0.2 0.5 0.9], ...
+%         'MarkerEdgeColor', 'none', ...
+%         'MarkerFaceAlpha', 0.4);
+% 
+% x_min = min(data_2D_noArtif(:,1)) - 1; x_max = max(data_2D_noArtif(:,1)) + 1;
+% y_min = min(data_2D_noArtif(:,2)) - 1; y_max = max(data_2D_noArtif(:,2)) + 1;
+% step = 0.05; 
+% [x1Grid, x2Grid] = meshgrid(x_min:step:x_max, y_min:step:y_max);
+% XGrid = [x1Grid(:), x2Grid(:)];
+% 
+% prob_GMM = pdf(gmm_model, XGrid);
+% prob_GMM = reshape(prob_GMM, size(x1Grid));
+% [C, ~] = contour(x1Grid, x2Grid, prob_GMM, 10, 'LineWidth', 2, 'LineColor', [0.8 0.2 0.2]);
+% plot(gmm_model.mu(:,1), gmm_model.mu(:,2), 'k+', 'MarkerSize', 15, 'LineWidth', 3);
+% 
+% xlabel(label_plot{1}, 'FontSize', 12, 'FontWeight', 'bold');
+% ylabel(label_plot{2}, 'FontSize', 12, 'FontWeight', 'bold');
+% title('GMM Fit: Cluster IC vs NIC', 'FontSize', 14);
+% legend({'Dati Reali', 'Ellissi GMM', 'Centroidi'}, 'Location', 'best');
+% grid on;
+% axis tight;
+% hold off;
 
 % 1. Ottieni le etichette "Hard" dal GMM (assegna ogni punto al cluster più probabile)
 cluster_idx = cluster(gmm_model, data_2D_noArtif);
