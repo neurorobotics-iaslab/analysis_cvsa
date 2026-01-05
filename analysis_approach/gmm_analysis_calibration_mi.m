@@ -1,6 +1,6 @@
 clear all; % close all;
 
-addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_cvsa/equal_ros')
+addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_bci/equal_ros')
 
 %% Initialization
 DATAPAH = '/home/paolo/cvsa/ic_cvsa_ws/src/';
