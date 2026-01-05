@@ -8,7 +8,7 @@ classes = [769 770];
 nchannels = 16;
 nclasses = length(classes);
 filterOrder = 4;
-avg = 1;% 0.75;
+avg = 1;
 threshold_gmm_ic = 0.7;
 channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'CP3', 'CP1', 'CP2', 'CP4', 'Pz'};
 
