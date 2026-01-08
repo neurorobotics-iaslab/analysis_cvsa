@@ -19,10 +19,6 @@ if ischar(filenames)
     filenames = {filenames};
 end
 subject = filenames{1}(1:2);
-time_str = datestr(now, 'ddmmyyyy_HHMMSS');
-gmm_file = ['gmm_' subject '_' time_str '.yaml'];
-save_path_gmm = [DATAPAH, 'gmm_cvsa/cfg/' gmm_file];
-save_path_qda_dataset = [DATAPAH 'qda_cvsa/create_qda/datasets/gmm/data_' subject '_' time_str '.mat'];
 
 %% understand the band
 nFiles = length(filenames);

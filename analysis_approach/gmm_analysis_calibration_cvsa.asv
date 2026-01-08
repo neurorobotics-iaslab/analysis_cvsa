@@ -487,19 +487,19 @@ if exist('topoplot', 'file')
     % Plot 1: ALL
     subplot(1, 3, 1);
     topoplot(diff_all, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'ALL Data (Traditional)', ['samples: ' num2str(size(X_all,1))]}, 'FontSize', 12);
+    title({'ALL Data', '(Traditional)'}, 'FontSize', 12);
     colorbar;
     
     % Plot 2: IC (Il risultato buono)
     subplot(1, 3, 2);
     topoplot(diff_ic, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'IC Data (GMM Selected)',  ['samples: ' num2str(size(X_ic,1))]}, 'FontSize', 12, 'FontWeight', 'bold');
+    title({'IC Data (GMM Selected)', 'Strong Lateralization'}, 'FontSize', 12, 'FontWeight', 'bold');
     colorbar;
     
     % Plot 3: NIC (Lo scarto)
     subplot(1, 3, 3);
     topoplot(diff_nic, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'NIC Data (GMM Rejected)',  ['samples: ' num2str(size(X_nic,1))]}, 'FontSize', 12);
+    title({'NIC Data (GMM Rejected)', 'Noise / No Pattern'}, 'FontSize', 12);
     colorbar;
     
     colormap(jet); 
