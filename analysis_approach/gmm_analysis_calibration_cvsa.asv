@@ -190,7 +190,7 @@ for c = 1:ntrial
         for idx_band = 1:nbands
             tmp = squeeze(c_sample(idx_band,:)); % 1 x channels
 
-            [sparsity(sample, idx_band, c,:), label_plot] = compute_features_icnic(tmp, type, o_l, o_r, c_l, c_r, nsparsity);
+            [sparsity(sample, idx_band, c,:), features_name] = compute_features_icnic(tmp, type, o_l, o_r, c_l, c_r, nsparsity);
         end
     end
 end
@@ -280,21 +280,18 @@ disp(gmm_model.mu)
 
 %% --- VISUALIZZAZIONE GMM ---
 cluster_idx = cluster(gmm_model, data_2D_noArtif);
-
 colors = lines(K); 
 
 % --- Scatter Plot 3D Interattivo ---
 figure('Color', 'w', 'Name', 'GMM 3D Clustering'); 
 hold on; grid on; rotate3d on;
 
-view(3); % Imposta vista 3D standard
+view(3);
 for k = 1:K
     idx_k = (cluster_idx == k);
     scatter3(data_2D_noArtif(idx_k, 1), data_2D_noArtif(idx_k, 2), data_2D_noArtif(idx_k, 3), ...
              20, colors(k,:), 'filled', 'MarkerFaceAlpha', 0.5);
 end
-
-% Plot dei Centroidi
 plot3(gmm_model.mu(:,1), gmm_model.mu(:,2), gmm_model.mu(:,3), ...
       'k+', 'MarkerSize', 15, 'LineWidth', 3);
 
@@ -308,8 +305,6 @@ hold off;
 % --- Matrice di proiezioni 2D (Plotmatrix) ---
 figure('Color', 'w', 'Name', 'GMM Feature Pairs');
 [H,AX,BigAx,P,PAx] = plotmatrix(data_2D_noArtif);
-
-% Colora i punti in base al cluster nella plotmatrix
 for i = 1:size(AX,1)
     for j = 1:size(AX,2)
         if i ~= j
@@ -341,15 +336,17 @@ eva_db = evalclusters(data_2D_noArtif, cluster_idx, 'DaviesBouldin');
 disp(['Davies-Bouldin Index: ' num2str(eva_db.CriterionValues)]);
 
 %% extract and save data for the QDA
-data = squeeze(trial_data(minDurCue+minDurFix+1:end,choosen_band,:,:)); % take just the 8-14 band
+test_trials  = ntrial_train+1:ntrial; % ------------------------------------------------------------------------------------------------------------------ chenage here for train/te
+data = squeeze(trial_data(minDurCue+minDurFix+1:end,choosen_band,:,test_trials)); % take just the 8-14 band
+data_artifact_cf = artifacts_cf(:,test_trials);
 nsamples = size(data,1);
-X_ic = []; X_all = []; X_nic = [];
-y_ic = []; y_all = []; y_nic = [];
-for idx_trial =  1:ntrial
+X_ic = []; X_traditional = []; X_nic = [];
+y_ic = []; y_traditional = []; y_nic = [];
+for idx_trial = 1:length(test_trials)
     for idx_sample = 1:nsamples
         if artifacts_cf(idx_sample,idx_trial) == 0 % no artifact
-            X_all = [X_all; data(idx_sample,:,idx_trial)];
-            y_all = [y_all; trial_typ(idx_trial)];
+            X_traditional = [X_traditional; data(idx_sample,:,idx_trial)];
+            y_traditional = [y_traditional; trial_typ(idx_trial)];
             if cluster_labels_cf(idx_sample, idx_trial) >= threshold_gmm_ic % IC state
                 X_ic = [X_ic; data(idx_sample,:,idx_trial)];
                 y_ic = [y_ic; trial_typ(idx_trial)];
@@ -361,7 +358,7 @@ for idx_trial =  1:ntrial
     end
 end
 X_ic = log(X_ic);
-X_all = log(X_all);
+X_traditional = log(X_traditional);
 X_nic = log(X_nic);
 
 %% Comparison GMM: ALL vs IC vc NIC
@@ -382,10 +379,10 @@ for idx_ch_occipital=1:noccipital
     fisher(1, idx_ch_occipital) = abs(mu1 - mu2)^2 / (sigma1^2 + sigma2^2);
 
     % all
-    mu1 = mean(X_all(y_all == classes(1),idx_ch));
-    sigma1 = std(X_all(y_all == classes(1),idx_ch));
-    mu2 = mean(X_all(y_all == classes(2),idx_ch));
-    sigma2 = std(X_all(y_all == classes(2),idx_ch));
+    mu1 = mean(X_traditional(y_traditional == classes(1),idx_ch));
+    sigma1 = std(X_traditional(y_traditional == classes(1),idx_ch));
+    mu2 = mean(X_traditional(y_traditional == classes(2),idx_ch));
+    sigma2 = std(X_traditional(y_traditional == classes(2),idx_ch));
     fisher(2, idx_ch_occipital) = abs(mu1 - mu2)^2 / (sigma1^2 + sigma2^2);
 
     % nic
@@ -418,7 +415,7 @@ grid on;
 
 % R^2 
 r2_ic_allch = calc_r2_from_data(X_ic, y_ic, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['QDA data | size data: ' num2str(size(X_ic,1))]);
-r2_all_allch = calc_r2_from_data(X_all, y_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['all data | size data: ' num2str(size(X_all,1))]);
+r2_all_allch = calc_r2_from_data(X_traditional, y_traditional, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['all data | size data: ' num2str(size(X_traditional,1))]);
 r2_nic_allch = calc_r2_from_data(X_nic, y_nic, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['nic data | size data: ' num2str(size(X_nic,1))]);
 
 r2_ic_roi  = r2_ic_allch(ch_occipital);
@@ -459,8 +456,8 @@ else
 end
 
 % ALL data -- traditional approach
-mu1_all = mean(X_all(y_all == classes(1), :), 1);
-mu2_all = mean(X_all(y_all == classes(2), :), 1);
+mu1_all = mean(X_traditional(y_traditional == classes(1), :), 1);
+mu2_all = mean(X_traditional(y_traditional == classes(2), :), 1);
 diff_all = mu1_all - mu2_all;
 
 % IC data
@@ -487,19 +484,19 @@ if exist('topoplot', 'file')
     % Plot 1: ALL
     subplot(1, 3, 1);
     topoplot(diff_all, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'ALL Data', '(Traditional)'}, 'FontSize', 12);
+    title({'ALL Data (Traditional)', ['samples: ' num2str(size(X_traditional,1))]}, 'FontSize', 12);
     colorbar;
     
     % Plot 2: IC (Il risultato buono)
     subplot(1, 3, 2);
     topoplot(diff_ic, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'IC Data (GMM Selected)', 'Strong Lateralization'}, 'FontSize', 12, 'FontWeight', 'bold');
+    title({'IC Data (GMM Selected)',  ['samples: ' num2str(size(X_ic,1))]}, 'FontSize', 12, 'FontWeight', 'bold');
     colorbar;
     
     % Plot 3: NIC (Lo scarto)
     subplot(1, 3, 3);
     topoplot(diff_nic, chanlocs, 'maplimits', clim, 'electrodes', 'on', 'style', 'map', 'shading', 'interp');
-    title({'NIC Data (GMM Rejected)', 'Noise / No Pattern'}, 'FontSize', 12);
+    title({'NIC Data (GMM Rejected)',  ['samples: ' num2str(size(X_nic,1))]}, 'FontSize', 12);
     colorbar;
     
     colormap(jet); 
@@ -508,17 +505,17 @@ else
     warning('EEGLAB topoplot non trovato.');
 end
 
-%% General behaviour of the GMM
+%% --- GMM GENERAL BEHAVIOUR ---
 figure('Color', 'w', 'Name', 'Paper Proof: Attention Modulation');
 
-prob_mean = mean(cluster_labels_cuecf, 2);
-prob_sem = std(cluster_labels_cuecf, 0, 2) / sqrt(ntrial);
+prob_mean = mean(cluster_labels_cuecf(:,test_trials), 2);
+prob_sem = std(cluster_labels_cuecf(:,test_trials), 0, 2) / sqrt(ntrial);
 
 time_axis = (0:length(prob_mean)-1) / sampleRate; 
 fill([time_axis fliplr(time_axis)], [prob_mean'+prob_sem' fliplr(prob_mean'-prob_sem')], ...
      [0.8 0.2 0.2], 'FaceAlpha', 0.3, 'EdgeColor', 'none');
 hold on;
-xline(minDurCue, 'k-', 'cue', 'LabelVerticalAlignment', 'bottom')
+xline(minDurCue/sampleRate, 'k-', 'cue', 'LabelVerticalAlignment', 'bottom')
 plot(time_axis, prob_mean, 'r-', 'LineWidth', 2);
 yline(threshold_gmm_ic, 'k--', 'Threshold', 'LabelVerticalAlignment', 'bottom');
 xlabel('Time from Task Start (s)');
@@ -527,6 +524,79 @@ title('Temporal Dynamics of Attention (Grand Average) | ondulatory behaviour');
 grid on;
 ylim([0 1]);
 xlim([0 time_axis(end)]);
+
+%% --- MULTI-FEATURE GMM VALIDATION ---
+feat_LI_all = [];    
+feat_LOG_all = [];   
+feat_GINI_all = [];  
+prob_gmm_all = [];
+
+for tr = test_trials
+    probs = cluster_labels_cf(:, tr);
+    curr_LI   = squeeze(sparsity(minDurFix+minDurCue+1:end, choosen_band, tr, 1));
+    curr_LOG  = squeeze(sparsity(minDurFix+minDurCue+1:end, choosen_band, tr, 2));
+    curr_GINI = squeeze(sparsity(minDurFix+minDurCue+1:end, choosen_band, tr, 3));
+    
+    feat_LI_all   = [feat_LI_all; curr_LI];
+    feat_LOG_all  = [feat_LOG_all; curr_LOG];
+    feat_GINI_all = [feat_GINI_all; curr_GINI];
+    prob_gmm_all  = [prob_gmm_all; probs];
+end
+
+[N,edges, bin_idx] = histcounts(prob_gmm_all,10);
+feature_data = {feat_LI_all, feat_LOG_all, feat_GINI_all};
+
+figure('Color', 'w', 'Name', 'GMM Behavior on All Features', 'Position', [50, 50, 1400, 800]);
+min_samples = 5; 
+for f = 1:3
+    mean_bin = []; 
+    sem_bin = []; 
+    x_c = [];
+    
+    current_feat = feature_data{f};
+    
+    for b = 1:length(edges)-1
+        idx = (bin_idx == b);
+        
+        if N(b) > min_samples
+            vals = current_feat(idx);
+            vals = vals(isfinite(vals)); 
+            
+            if ~isempty(vals)
+                mean_bin = [mean_bin; mean(vals)];
+                sem_bin = [sem_bin; std(vals) / sqrt(length(vals))];
+                x_c = [x_c; (edges(b) + edges(b+1)) / 2];
+            end
+        end
+    end
+    
+    % --- TREND PLOT ---
+    ax_trend = subplot(2, 3, f);
+    errorbar(x_c, mean_bin, sem_bin, '-o', 'LineWidth', 2, 'MarkerSize', 6, ...
+        'MarkerFaceColor', 'r', 'Color', 'k');
+    
+    title(features_name{f}, 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Feature Value');
+    grid on; xlim([0 1]);
+    
+    % Calcolo Correlazione
+    if length(mean_bin) > 2
+        R = corr(x_c, mean_bin);
+        subtitle(['Trend Corr: R = ' num2str(R, '%.2f')]);
+    end
+    
+    % --- HISTOGRAM PLOT ---
+    ax_hist = subplot(2, 3, f + 3); 
+    bar(x_c, N, 'FaceColor', [0.4 0.4 0.4], 'EdgeColor', 'none');
+    
+    xlabel('GMM Confidence');
+    ylabel('# Samples');
+    grid on; xlim([0 1]);
+    title(['Samples per Bin (N=' num2str(sum(N)) ')']);
+    
+    linkaxes([ax_trend, ax_hist], 'x');
+end
+sgtitle('How does GMM Confidence relate to ALL Input Features?', 'FontSize', 16);
 
 %% --- ONDULATORY PLOT ROI ---
 % prepare the data
@@ -577,6 +647,7 @@ for c = 1:nclasses
 
     set(handles, 'clim', [0 c_l]);
 end
+
 %% --- TRIAL PLOTS ---
 for c = ntrial-10:ntrial
     figure();
@@ -597,7 +668,7 @@ for c = ntrial-10:ntrial
         plot(squeeze(sparsity_cf(:, c, i)))
     end
     hold off
-    legend(label_plot)
+    legend(features_name)
     xticks(0:sampleRate:min_trial_data)
     xticklabels(string((minDurFix+minDurCue:sampleRate:min_trial_data) / sampleRate));
     xlim([1 size(sparsity_cf, 1)])
@@ -631,360 +702,4 @@ for c = ntrial-10:ntrial
     title('artefacts')
     
     sgtitle(['Trial: ' num2str(c) ' | Task: ' num2str(trial_typ(c)) ' | band: '  bands_str{choosen_band}])
-end
-
-%% BOHHHH
-% --- PAPER PROOF: GMM vs PHYSIOLOGY CORRELATION (ROBUST VERSION) ---
-
-% Definiamo la lunghezza target basandoci sulle etichette GMM
-n_samples_target = size(cluster_labels_cf, 1);
-
-% Inizializzazione vettori concatenati
-LI_all = [];
-GMM_prob_all = [];
-
-% Inizializzazione Matrice per Sorted Plot (Usa n_samples_target per sicurezza)
-LI_matrix = nan(n_samples_target, ntrial);
-
-for tr = 1:ntrial
-    % 1. Estrazione Probabilità GMM per questo trial
-    % Assicuriamoci che sia un vettore colonna
-    probs = cluster_labels_cf(:, tr);
-    
-    % 2. Estrazione Dati Fisiologici (Stesso taglio temporale)
-    % trial_data parte dalla fissazione.
-    % Se cluster_labels_cf rappresenta la fase di feedback (dopo il cue), 
-    % dobbiamo prendere gli stessi campioni da trial_data.
-    % Nota: trial_data è [samples x bands x channels x trials]
-    
-    % Calcoliamo l'indice di partenza per allinearci a cluster_labels_cf
-    % Se cluster_labels_cf è la fase di feedback, dobbiamo saltare Fix e Cue.
-    start_idx = size(trial_data, 1) - n_samples_target + 1;
-    
-    % Safety check: se start_idx < 1, prendiamo tutto quello che c'è
-    if start_idx < 1, start_idx = 1; end
-    
-    raw_band = squeeze(trial_data(start_idx:end, choosen_band, :, tr));
-    
-    % 3. Gestione Disallineamento Dimensioni (FIX PER IL TUO ERRORE)
-    % Tagliamo entrambi alla lunghezza minima comune
-    len_common = min(length(probs), size(raw_band, 1));
-    
-    probs = probs(1:len_common);
-    raw_band = raw_band(1:len_common, :);
-    
-    % 4. Calcolo Lateralization Index (LI)
-    p_left = mean(raw_band(:, o_l), 2);
-    p_right = mean(raw_band(:, o_r), 2);
-    
-    if trial_typ(tr) == classes(1) % Attendo SX
-        % LI Positivo se il pattern è corretto (ERS Ipsi o ERD Contra)
-        feat_lat = log(p_left) - log(p_right); 
-    else % Attendo DX
-        feat_lat = log(p_right) - log(p_left);
-    end
-    
-    % 5. Accumulo dati per Correlazione (Binned)
-    LI_all = [LI_all; feat_lat];
-    GMM_prob_all = [GMM_prob_all; probs];
-    
-    % 6. Riempimento Matrice (Sorted Trials)
-    % Assegnamo solo fino alla lunghezza disponibile (gestisce i NaN finali)
-    LI_matrix(1:len_common, tr) = feat_lat;
-end
-
-% FIGURE A: BINNED ANALYSIS (La prova scientifica)
-% Dividiamo la probabilità GMM in 10 bin
-edges = 0:0.1:1;
-[~, bin_idx] = histc(GMM_prob_all, edges);
-
-mean_LI_bin = [];
-sem_LI_bin = [];
-x_centers = [];
-
-for b = 1:length(edges)-1
-    idx_in_bin = (bin_idx == b);
-    
-    % Consideriamo validi solo i bin con abbastanza campioni (>100)
-    if sum(idx_in_bin) > 100 
-        vals = LI_all(idx_in_bin);
-        % Rimuovi eventuali NaN o Inf
-        vals = vals(isfinite(vals));
-        
-        if ~isempty(vals)
-            mean_LI_bin(end+1) = mean(vals);
-            sem_LI_bin(end+1) = std(vals) / sqrt(length(vals)); 
-            x_centers(end+1) = (edges(b) + edges(b+1)) / 2;
-        end
-    end
-end
-
-figure('Color', 'w', 'Name', 'Paper: GMM Confidence vs Physiology');
-errorbar(x_centers, mean_LI_bin, sem_LI_bin, '-o', 'LineWidth', 2, 'MarkerSize', 8, ...
-    'MarkerFaceColor', 'r', 'Color', 'k');
-xlabel('GMM Posterior Probability (Confidence)', 'FontSize', 12);
-ylabel('Alpha Lateralization Index (Log Ipsi - Log Contra)', 'FontSize', 12);
-title('Validation: Does the Brain Follow the GMM?', 'FontSize', 14);
-grid on;
-xlim([0 1]);
-
-% Calcolo Correlazione sui Bin (molto più pulita)
-if length(mean_LI_bin) > 2
-    [R_bin, P_bin] = corr(x_centers', mean_LI_bin');
-    subtitle(['Trend Correlation (Binned): R = ' num2str(R_bin, '%.2f') ' (p < ' num2str(P_bin, '%.3f') ')']);
-end
-
-% Annotazioni esplicative
-yl = ylim;
-text(0.05, yl(1) + (yl(2)-yl(1))*0.1, 'Low Confidence', 'Color', 'b', 'FontWeight', 'bold');
-text(0.75, yl(2) - (yl(2)-yl(1))*0.1, 'High Confidence', 'Color', 'r', 'FontWeight', 'bold');
-
-
-% FIGURE B: SORTED TRIALS (La prova visiva) - FIXED
-% Ordiniamo i trial in base alla "bontà" vista dal GMM
-
-% Score medio per ogni trial (media delle probabilità nel tempo)
-trial_scores = mean(cluster_labels_cf, 1, 'omitnan'); 
-[sorted_scores, sort_idx] = sort(trial_scores, 'descend'); % Dal migliore al peggiore
-
-% Riordiniamo la matrice LI in base allo score del GMM
-LI_matrix_sorted = LI_matrix(:, sort_idx);
-
-figure('Color', 'w', 'Name', 'Paper: Sorted Trials Heatmap', 'Position', [100, 100, 1000, 500]);
-
-% Inizializziamo l'array per gli handles se volessimo gestirli tutti insieme
-% Ma qui li trattiamo separatamente per dare limiti diversi (0-1 vs simmetrico)
-
-% --- Subplot 1: Score GMM (Barra laterale verticale) ---
-ax1 = subplot(1, 10, 1);
-imagesc(sorted_scores');
-title('GMM Score'); 
-ylabel('Trials (Sorted: Best to Worst)');
-set(gca, 'XTick', []);
-colormap(ax1, hot); 
-% Qui fissiamo a mano 0.5-1 perché sono probabilità
-set(ax1, 'clim', [0.5 1]); 
-
-% --- Subplot 2: Heatmap Fisiologica ---
-ax2 = subplot(1, 10, 2:10);
-% Usiamo imagesc trasposto per avere Time su X e Trials su Y
-imagesc(LI_matrix_sorted'); 
-title('Physiological Response (Alpha Lateralization)');
-xlabel('Time (samples)');
-% Togli label Y per pulizia (già a sinistra)
-set(gca, 'YTick', []); 
-
-% Colormap per la fisiologia (Blu=Male/Contra, Rosso=Bene/Ipsi)
-colormap(ax2, jet); 
-colorbar;
-
-% --- FIX RICHIESTO (Gestione Clim robusta) ---
-handles_heat = [ax2]; % Raccogliamo l'handle del plot fisiologico
-
-% Calcolo del limite robusto (98esimo percentile per evitare outlier)
-c_l = prctile(abs(LI_matrix(:)), 98);
-if isnan(c_l) || c_l == 0, c_l = 1; end % Safety check
-
-% Applicazione dei limiti usando 'set' come richiesto
-set(handles_heat, 'clim', [-c_l, c_l]);
-
-sgtitle('Visual Proof: High GMM Probability corresponds to Strong Lateralization');
-
-% --- PAPER PROOF: MULTI-FEATURE GMM VALIDATION ---
-% Analizziamo come il GMM "sceglie" basandosi su TUTTI gli indici, non solo LI.
-
-% 1. Recuperiamo le Feature usate per il GMM (già calcolate in 'sparsity')
-% sparsity è: [samples x bands x trials x features]
-% Features ordine: 1=LI (abs), 2=MinLog, 3=Gini (come da tua funzione compute_features)
-
-% Allineamento temporale: prendiamo solo la fase di feedback/task
-start_idx_spars = size(sparsity, 1) - size(cluster_labels_cf, 1) + 1;
-if start_idx_spars < 1, start_idx_spars = 1; end
-
-% Estraiamo le 3 feature per tutti i trial
-feat_LI_all = [];    % Feature 1
-feat_LOG_all = [];   % Feature 2
-feat_GINI_all = [];  % Feature 3
-prob_gmm_all = [];
-
-for tr = 1:ntrial
-    % Probabilità GMM per questo trial
-    probs = cluster_labels_cf(:, tr);
-    
-    % Feature corrispondenti (Raw, prima della normalizzazione z-score)
-    % Nota: Usiamo i dati raw per dare significato fisico al grafico
-    curr_LI   = squeeze(sparsity(start_idx_spars:end, choosen_band, tr, 1));
-    curr_LOG  = squeeze(sparsity(start_idx_spars:end, choosen_band, tr, 2));
-    curr_GINI = squeeze(sparsity(start_idx_spars:end, choosen_band, tr, 3));
-    
-    % Gestione lunghezze (safety check come prima)
-    len = min([length(probs), length(curr_LI)]);
-    
-    feat_LI_all   = [feat_LI_all; curr_LI(1:len)];
-    feat_LOG_all  = [feat_LOG_all; curr_LOG(1:len)];
-    feat_GINI_all = [feat_GINI_all; curr_GINI(1:len)];
-    prob_gmm_all  = [prob_gmm_all; probs(1:len)];
-end
-
-% 2. Binned Analysis per ogni Feature
-edges = 0:0.1:1;
-[~, bin_idx] = histc(prob_gmm_all, edges);
-
-feature_names = {'Lateralization (Abs)', 'Log Power (Min)', 'Gini Index (Sparsity)'};
-feature_data = {feat_LI_all, feat_LOG_all, feat_GINI_all};
-
-figure('Color', 'w', 'Name', 'Paper: GMM Behavior on All Features', 'Position', [100, 100, 1400, 400]);
-
-for f = 1:3
-    subplot(1, 3, f);
-    
-    mean_bin = []; sem_bin = []; x_c = [];
-    current_feat = feature_data{f};
-    
-    for b = 1:length(edges)-1
-        idx = (bin_idx == b);
-        if sum(idx) > 100
-            vals = current_feat(idx);
-            vals = vals(isfinite(vals)); % Rimuovi nan
-            
-            mean_bin(end+1) = mean(vals);
-            sem_bin(end+1) = std(vals) / sqrt(length(vals));
-            x_c(end+1) = (edges(b) + edges(b+1)) / 2;
-        end
-    end
-    
-    % Plot
-    errorbar(x_c, mean_bin, sem_bin, '-o', 'LineWidth', 2, 'MarkerSize', 6, ...
-        'MarkerFaceColor', 'r', 'Color', 'k');
-    
-    title(feature_names{f}, 'FontSize', 12, 'FontWeight', 'bold');
-    xlabel('GMM Confidence');
-    grid on; xlim([0 1]);
-    
-    % Calcolo Correlazione del trend
-    if length(mean_bin) > 2
-        R = corr(x_c', mean_bin');
-        subtitle(['Trend Corr: R = ' num2str(R, '%.2f')]);
-    end
-end
-
-sgtitle('How does GMM Confidence relate to ALL Input Features?');
-
-%% ERD ERS
-% Prepara i dati per la banda scelta (es. choosen_band = 1)
-data_for_plot = squeeze(trial_data(:, choosen_band, :, :)); % Diventa [Samples x Ch x Trials]
-arts_for_plot = squeeze(artifacts_data(:, choosen_band, :)); % [Samples x Trials]
-
-plot_header.SampleRate = sampleRate; % Assicurati che sia il rateo DOPO il chunking 
-plot_header.Label = channels_label;  % O headers{1}.channels_labels
-
-ch_list = {'PO7', 'PO8', 'O1', 'P5', 'PO5', 'O2'};
-
-disp('Plotting ERD/ERS...');
-plot_erd_ers(log(data_for_plot), trial_typ, arts_for_plot, plot_header, minDurFix, ch_list);
-
-
-function plot_erd_ers(trial_data_band, trial_typ, artifacts_band, header, minDurFix, channels_to_plot)
-% PLOT_ERD_ERS Visualizza l'andamento temporale della potenza (ERD/ERS).
-%
-% INPUT:
-%   trial_data_band: Matrice 3D [Samples x Channels x Trials] (già selezionata la banda!)
-%   trial_typ:       Vettore [Trials x 1] con le classi (es. 730, 731)
-%   artifacts_band:  Matrice 2D [Samples x Trials] maschera artefatti (0=clean, 1=artifact)
-%   header:          Header struct (per SampleRate e Label)
-%   minDurFix:       Numero di campioni della fissazione (per allineare lo 0 al Cue)
-%   channels_to_plot: Cell array con i nomi dei canali da plottare (es. {'PO7', 'PO8'})
-
-    fs = header.SampleRate;
-    labels = header.Label;
-    
-    % Identifica le classi
-    classes = unique(trial_typ);
-    if length(classes) ~= 2
-        warning('Trovate %d classi. Il plot è ottimizzato per 2 classi.', length(classes));
-    end
-    
-    % Asse Temporale: 0 = Inizio Cue
-    [n_samples, ~, n_trials] = size(trial_data_band);
-    t_axis = ((1:n_samples) - minDurFix) / fs; % Secondi relativi al Cue
-    
-    % Baseline Period: Fixation
-    base_start = 1; 
-    base_end = minDurFix;
-    
-    figure('Color', 'w', 'Name', 'ERD/ERS Time Course', 'Position', [100, 100, 1200, 600]);
-    
-    for i = 1:length(channels_to_plot)
-        ch_name = channels_to_plot{i};
-        
-        % Trova indice canale
-        % Gestione label (rimuove 'EEG ' se presente per il confronto)
-        clean_labels = strrep(labels, 'EEG ', '');
-        ch_idx = find(strcmpi(clean_labels, ch_name), 1);
-        
-        if isempty(ch_idx)
-            warning('Canale %s non trovato.', ch_name);
-            continue;
-        end
-        
-        % Estrai dati canale: [Samples x Trials]
-        raw_ch_data = squeeze(trial_data_band(:, ch_idx, :));
-        % artifacts_band è [Samples x Trials]
-        raw_ch_data(artifacts_band == 1) = NaN;
-        
-        % --- CALCOLO ERD% ---
-        % Formula: (Potenza(t) - Baseline) / Baseline * 100
-        baseline = mean(mean(raw_ch_data(base_start:base_end, :), 1, 'omitnan'), 2, 'omitnan');
-        
-        erd_data = zeros(size(raw_ch_data));
-        for tr = 1:n_trials
-            erd_data(:, tr) = raw_ch_data(:, tr) - baseline; % dB change
-        end
-        
-        % Media per Classe
-        mean_c1 = mean(erd_data(:, trial_typ == classes(1)), 2, 'omitnan');
-        mean_c2 = mean(erd_data(:, trial_typ == classes(2)), 2, 'omitnan');
-        
-        % Standard Error (per l'ombra)
-        se_c1 = std(erd_data(:, trial_typ == classes(1)), 0, 2, 'omitnan') ./ sqrt(sum(trial_typ == classes(1)));
-        se_c2 = std(erd_data(:, trial_typ == classes(2)), 0, 2, 'omitnan') ./ sqrt(sum(trial_typ == classes(2)));
-        
-        % Smoothing grafico (Moving average per pulire le linee)
-        smooth_win = round(fs * 0.2); % 200ms
-        mean_c1 = movmean(mean_c1, smooth_win);
-        mean_c2 = movmean(mean_c2, smooth_win);
-        
-        % --- SUBPLOT ---
-        subplot(ceil(length(channels_to_plot)/2), 2, i);
-        hold on;
-        
-        % Area Fissazione (Grigio chiaro)
-        xline(0, 'k-', 'LineWidth', 1.5); % Cue Onset
-        xline(1, 'k', 'LineWidth',1.5);
-        
-        % Plot con ombra (funzione interna semplice o fill)
-        plot_shaded(t_axis, mean_c1, se_c1, [0.2 0.6 1]); % Blu (Classe 1)
-        plot_shaded(t_axis, mean_c2, se_c2, [1 0.4 0.4]); % Rosso (Classe 2)
-        
-        title(['Canale ' ch_name], 'FontSize', 12, 'FontWeight', 'bold');
-        if i == 1
-            legend({'cue start', 'cf start', ['std class ' num2str(classes(1))], ['mean class ' num2str(classes(1))], ...
-                ['std class ' num2str(classes(2))], ['mean class ' num2str(classes(2))]}, 'Location', 'best');
-        end
-        xlabel('Time (s)');
-        ylabel('Log Power Change (dB-like)');
-        grid on;
-        xlim([t_axis(1), t_axis(end)]);
-    end
-end
-
-function plot_shaded(x, y, err, color)
-    % Helper per disegnare linea + errore
-    x = x(:)'; y = y(:)'; err = err(:)';
-    % Rimuovi NaN per il patch
-    valid = ~isnan(y) & ~isnan(err);
-    x = x(valid); y = y(valid); err = err(valid);
-    
-    fill([x fliplr(x)], [y+err fliplr(y-err)], color, 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-    plot(x, y, 'Color', color, 'LineWidth', 2);
 end
