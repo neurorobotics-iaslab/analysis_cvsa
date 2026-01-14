@@ -1,6 +1,7 @@
 clear all; % close all;
 
 addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_bci/equal_ros')
+addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_bci/utils')
 
 %% Initialization
 DATAPAH = '/home/paolo/cvsa/ic_cvsa_ws/src/';
@@ -10,7 +11,7 @@ nclasses = length(classes);
 filterOrder = 4;
 avg = 1;
 threshold_gmm_ic = 0.7;
-channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'CP3', 'CP1', 'CP2', 'CP4', 'Pz'};
+channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'Fp1', 'CP1', 'Pz', 'CP2', 'Fp2'};
 
 
 %% Load file
@@ -58,12 +59,12 @@ for idx_file= 1: nFiles
     eog.filterOrder = 4;
     eog.band = [];
     eog.label = excl_chs;
-    eog.h_threshold = 60;
-    eog.v_threshold = 60;
-    muscle.filterOrder = 4;
-    muscle.freq = 1; % remove antneuro problems
-    muscle.threshold = 100;
-    artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
+    eog.h_threshold = 75; %60;
+    eog.v_threshold = 75; %60;
+    picks.filterOrder = 4;
+    picks.freq = 1; % remove antneuro problems
+    picks.threshold = 120; %100;
+    artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, picks);
     artifacts = cat(1, artifacts, artifact(:,:));
 
     disp('   [proc] power band');
@@ -164,8 +165,8 @@ sparsity = nan(min_trial_data, ntrial, nsparsity*nbands); % sample x trial x spa
 
 o_l_ch = {};
 o_r_ch = {};
-c_l_ch = {'C3', 'CP1', 'C1', 'CP3'};
-c_r_ch = {'C4', 'CP2', 'C2', 'CP4'};
+c_l_ch = {'C3', 'CP1', 'C1'};
+c_r_ch = {'C4', 'CP2', 'C2'};
 
 [~, o_l] = ismember(o_l_ch, channels_label);
 [~, o_r] = ismember(o_r_ch, channels_label);
@@ -306,6 +307,7 @@ data = trial_data(minDurCue+minDurFix+1:end,:,:,:); % data x bands x channels x 
 nsamples = size(data,1);
 X = []; X_all = [];
 y = []; y_all = [];
+count_artifact = 0; count_all = 0; count_rejected = 0;
 for idx_band = 1:nbands
     tmp_X = []; tmp_X_all = [];
     y = []; y_all = [];
@@ -319,8 +321,13 @@ for idx_band = 1:nbands
                     tmp_X = [tmp_X; data(idx_sample,idx_band,:,idx_trial)];
                     y = [y; trial_typ(idx_trial)];
                     trials = [trials; idx_trial];
+                else
+                    count_rejected = count_rejected + 1;
                 end
+            else
+                count_artifact = count_artifact + 1;
             end
+            count_all = count_all + 1;
         end
     end
     tmp_X = log(tmp_X);
@@ -329,6 +336,8 @@ for idx_band = 1:nbands
     X = [X, tmp_X];
     X_all = [X_all, tmp_X_all];
 end
+
+disp(['all sample for the trials: ' num2str(count_all) ', rejected for artifact: ' num2str(count_artifact) ', rejected gmm: ' num2str(count_rejected)])
 
 %% Features selection QDA
 % fisher score
@@ -392,7 +401,7 @@ end
 all_labels = {chanlocs_full.labels};
 [is_present, idx_in_full] = ismember(channels_label, all_labels);
 if ~all(is_present)
-    missing_chans = target_labels(~is_present);
+    missing_chans = all_labels(~is_present);
     error('I seguenti canali non sono stati trovati nel file chanlocs39: %s', strjoin(missing_chans, ', '));
 end
 chanlocs_subset = chanlocs_full(idx_in_full);
@@ -444,7 +453,7 @@ end
 set(handles, 'CLim', [-max_val, max_val])
 
 %% --- TRIAL PLOTS ---
-for c = 1:10
+for c = ntrial-10:ntrial
     figure();
     
     % --- log band band 1---
