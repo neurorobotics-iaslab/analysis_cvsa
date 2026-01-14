@@ -60,10 +60,10 @@ for idx_file= 1: nFiles
     eog.label = excl_chs;
     eog.h_threshold = 60;
     eog.v_threshold = 60;
-    picks.filterOrder = 4;
-    picks.freq = 1; % remove antneuro problems
-    picks.threshold = 100;
-    artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, picks);
+    muscle.filterOrder = 4;
+    muscle.freq = 1; % remove antneuro problems
+    muscle.threshold = 100;
+    artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
     artifacts = cat(1, artifacts, artifact(:,:));
 
     disp('   [proc] power band');

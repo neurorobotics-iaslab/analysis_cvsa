@@ -70,11 +70,11 @@ for idx_file= 1: nFiles
         eog.label = excl_ch;
         eog.h_threshold = 60;
         eog.v_threshold = 60;
-        muscle.filterOrder = 4;
-        muscle.freq = 1; % remove antneuro problems
-        muscle.threshold = 100;
+        picks.filterOrder = 4;
+        picks.freq = 1; % remove antneuro problems
+        picks.threshold = 100;
         [signal_processed, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
-        artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, muscle);
+        artifact = artifact_rejection(c_signal, header, nchannels, bufferSize, chunkSize, eog, picks);
 
         c_header = headers{1, idx_band};
         c_header.sampleRate = header_processed.SampleRate/chunkSize;
@@ -336,8 +336,9 @@ eva_db = evalclusters(data_2D_noArtif, cluster_idx, 'DaviesBouldin');
 disp(['Davies-Bouldin Index: ' num2str(eva_db.CriterionValues)]);
 
 %% extract and save data for the QDA
-% test_trials  = ntrial_train+1:ntrial; % ---------------------------------------------------------------------------------------------------------------- chenage here for train/test
-test_trials = 1:ntrial_train;
+test_trials  = ntrial_train+1:ntrial; % ---------------------------------------------------------------------------------------------------------------- chenage here for train/test
+% test_trials = 1:ntrial_train;
+ntrial_test = length(test_trials);
 data = squeeze(trial_data(minDurCue+minDurFix+1:end,choosen_band,:,test_trials)); % take just the 8-14 band
 data_artifact_cf = artifacts_cf(:,test_trials);
 nsamples = size(data,1);
@@ -510,7 +511,7 @@ end
 figure('Color', 'w', 'Name', 'Paper Proof: Attention Modulation');
 
 prob_mean = mean(cluster_labels_cuecf(:,test_trials), 2);
-prob_sem = std(cluster_labels_cuecf(:,test_trials), 0, 2) / sqrt(ntrial);
+prob_sem = std(cluster_labels_cuecf(:,test_trials), 0, 2) / sqrt(ntrial_test);
 
 time_axis = (0:length(prob_mean)-1) / sampleRate; 
 fill([time_axis fliplr(time_axis)], [prob_mean'+prob_sem' fliplr(prob_mean'-prob_sem')], ...
@@ -547,9 +548,10 @@ end
 [N,edges, bin_idx] = histcounts(prob_gmm_all,10);
 feature_data = {feat_LI_all, feat_LOG_all, feat_GINI_all};
 
-figure('Color', 'w', 'Name', 'GMM Behavior on All Features', 'Position', [50, 50, 1400, 800]);
+c_fig = figure('Color', 'w', 'Name', 'GMM Behavior on All Features', 'Position', [50, 50, 1400, 800]);
 min_samples = 5; 
 for f = 1:3
+    set(0, 'CurrentFigure', c_fig);
     mean_bin = []; 
     sem_bin = []; 
     x_c = [];
@@ -650,7 +652,7 @@ for c = 1:nclasses
 end
 
 %% --- TRIAL PLOTS ---
-for c = ntrial-10:ntrial
+for c = test_trials
     figure();
     
     % --- log band ---
