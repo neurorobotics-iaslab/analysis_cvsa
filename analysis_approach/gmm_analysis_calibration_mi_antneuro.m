@@ -50,14 +50,16 @@ for idx_file= 1: nFiles
     sampleRate = header.SampleRate;
     channels_label = header.Label;
 
-    excl_chs = [];
+    excl_ch = {'FP1', 'FP2', 'EOG'};
+    [found, indices] = ismember(excl_ch, channels_label);
+    excl_chs = indices(found);
 
     % for power band using hilbert transformation and artefact remotion -----------------------------------------------
     bufferSize = floor(avg*sampleRate);
     chunkSize = 32;
     eog.filterOrder = 4;
-    eog.band = [];
-    eog.label = excl_chs;
+    eog.band = [1 10];
+    eog.label = {'FP1', 'FP2'};;
     eog.h_threshold = 60;
     eog.v_threshold = 60;
     picks.filterOrder = 4;

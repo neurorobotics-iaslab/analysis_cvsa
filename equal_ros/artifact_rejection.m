@@ -101,9 +101,7 @@ for i=1:nchunks
 
     % check
     if ~isempty(eog.label)
-        if any(isnan(buffer_eog))
-            continue;
-        end
+        continue;
     end
     if any(isnan(buffer_peak)) 
         continue;
