@@ -54,7 +54,8 @@ buffer_peak = nan(bufferSize, nchannels);
 buffer_eog = nan(bufferSize, nchannels);
 sampleRate = header.SampleRate;
 if ~isempty(eog.label)
-    [~, eog_idx] = ismember(eog.label, header.Label);
+    [found, indices] = ismember(eog.label, header.Label);
+    eog_idx = indices(found);
     non_eog = setdiff(1:nchannels, eog_idx);
 else
     non_eog = 1:nchannels;
@@ -100,11 +101,8 @@ for i=1:nchunks
     end
 
     % check
-    if ~isempty(eog.label)
-        continue;
-    end
     if any(isnan(buffer_peak)) 
-        continue;
+        disp('some data are NAN');
     end
     
     % buffer pick
