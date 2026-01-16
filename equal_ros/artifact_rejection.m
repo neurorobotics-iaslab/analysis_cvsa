@@ -112,7 +112,7 @@ for i=1:nchunks
     end
 
     % vertical and horizontal movements
-    if ~isempty(eog.label)
+    if ~isempty(eog.label) && size(eog_idx, 2) > 0
         heog = buffer_eog(:, eog_idx(1)) - buffer_eog(:, eog_idx(2));
         if size(eog_idx, 2) == 2
             % we have only FP1 and FP2
