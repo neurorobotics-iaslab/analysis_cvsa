@@ -336,14 +336,15 @@ eva_db = evalclusters(data_2D_noArtif, cluster_idx, 'DaviesBouldin');
 disp(['Davies-Bouldin Index: ' num2str(eva_db.CriterionValues)]);
 
 %% extract and save data for the QDA
-test_trials  = ntrial_train+1:ntrial; % ---------------------------------------------------------------------------------------------------------------- chenage here for train/test
-% test_trials = 1:ntrial_train;
+% test_trials  = ntrial_train+1:ntrial; % ---------------------------------------------------------------------------------------------------------------- chenage here for train/test
+test_trials = 1:ntrial_train;
 ntrial_test = length(test_trials);
 data = squeeze(trial_data(minDurCue+minDurFix+1:end,choosen_band,:,test_trials)); % take just the 8-14 band
 data_artifact_cf = artifacts_cf(:,test_trials);
 nsamples = size(data,1);
 X_ic = []; X_traditional = []; X_nic = [];
 y_ic = []; y_traditional = []; y_nic = [];
+count_rejected = 0; count_artifact = 0; count_all = 0;
 for idx_trial = 1:length(test_trials)
     for idx_sample = 1:nsamples
         if artifacts_cf(idx_sample,idx_trial) == 0 % no artifact
@@ -355,13 +356,19 @@ for idx_trial = 1:length(test_trials)
             else
                 X_nic = [X_nic; data(idx_sample,:, idx_trial)];
                 y_nic = [y_nic; trial_typ(idx_trial)];
+                count_rejected = count_rejected + 1;
             end
+        else
+            count_artifact = count_artifact +1;
         end
+        count_all = count_all + 1;
     end
 end
 X_ic = log(X_ic);
 X_traditional = log(X_traditional);
 X_nic = log(X_nic);
+
+disp(['all sample for the trials: ' num2str(count_all) ', rejected for artifact: ' num2str(count_artifact) ', rejected gmm: ' num2str(count_rejected)])
 
 %% Comparison GMM: ALL vs IC vc NIC
 % fisher score
@@ -402,7 +409,7 @@ yticks(1:noccipital); yticklabels(occipital)
 xticks(1:3); xticklabels({'IC', 'traditional', 'NIC'})
 sgtitle('gmm ic and classical fisher score')
 
-figure('Color', 'w', 'Name', 'Paper Proof: Fisher Score Comparison');
+figure('Color', 'w', 'Name', 'Fisher Score Comparison');
 b = bar(fisher');
 b(1).FaceColor = [0.8 0.2 0.2]; 
 b(2).FaceColor = [0.6 0.6 0.6]; 
@@ -423,7 +430,7 @@ r2_nic_allch = calc_r2_from_data(X_nic, y_nic, 'Plot', true, 'ChanLabels', chann
 r2_ic_roi  = r2_ic_allch(ch_occipital);
 r2_all_roi = r2_all_allch(ch_occipital);
 r2_nic_roi = r2_nic_allch(ch_occipital);
-figure('Color', 'w', 'Name', 'Paper Proof: R2 Separability Gain (Tri-state)', 'Position', [100, 100, 1000, 500]);
+figure('Color', 'w', 'Name', 'R2 Separability Gain (Tri-state)', 'Position', [100, 100, 1000, 500]);
 data_to_plot = [r2_ic_roi(:), r2_all_roi(:), r2_nic_roi(:)];
 b = bar(data_to_plot);
 b(1).FaceColor = [0.8 0.2 0.2]; % Rosso (IC)

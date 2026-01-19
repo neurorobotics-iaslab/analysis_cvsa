@@ -99,16 +99,13 @@ for i=1:nchunks
         buffer_eog(1:end-chunkSize,:) = buffer_eog(chunkSize+1:end,:);
         buffer_eog(end-chunkSize+1:end, :) = frame_eog;
     end
-
-    % check
-    if any(isnan(buffer_peak)) 
-        disp('some data are NAN');
-    end
     
     % buffer pick
     data_non_eog = buffer_peak(:,non_eog);
-    if any(abs(data_non_eog(:)) > picks.threshold)
-        artifact(i) = 1;
+    if ~any(isnan(buffer_peak))
+        if any(abs(data_non_eog(:)) > picks.threshold)
+            artifact(i) = 1;
+        end
     end
 
     % vertical and horizontal movements
