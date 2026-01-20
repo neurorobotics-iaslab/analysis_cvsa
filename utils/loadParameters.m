@@ -9,9 +9,9 @@ function [ringBuffer, artifact, processing, gmm, qda, integrator] = loadParamete
     artifact = param.ArtifactCfg.params;
 
     % processing params
-    processing.bands = str2num(param.processing_cvsa_node.filters_band);
-    processing.filterOrder = param.processing_cvsa_node.filter_order;
-    processing.chunkSize = param.processing_cvsa_node.chunkSize;
+    processing.bands = str2num(param.processing_bci_node.filters_band);
+    processing.filterOrder = param.processing_bci_node.filter_order;
+    processing.chunkSize = param.processing_bci_node.chunkSize;
 
     % gmm params
     tmp = param.gmm_node.path_gmm_model;
@@ -29,7 +29,14 @@ function [ringBuffer, artifact, processing, gmm, qda, integrator] = loadParamete
     integrator.type = param.integrator.plugin(23:end);
     integrator.ic_threshold = param.integrator.ic_threshold;
     integrator.ic_class_label = param.integrator.ic_class_label;
-    integrator.feedbackThs = cell2mat(param.trainingCVSA_node.thresholds);
+    if all(param.protocol.task(1:2) == 'mi')
+        integrator.feedbackThs = cell2mat(param.trainingwheel.thresholds);
+    elseif all(param.protocol.task(1:4) == 'cvsa')
+        integrator.feedbackThs = cell2mat(param.trainingCVSA_node.thresholds); 
+    end
+    
+    integrator.k_gain = param.integrator.k_gain;
+    
     if all(integrator.type == 'Buffer')
         integrator.init_val = param.integrator.init_val;
         integrator.bufferSize = param.integrator.buffer_size;

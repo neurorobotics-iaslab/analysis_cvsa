@@ -1,4 +1,4 @@
-function [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, gmm_prob, qda_prob, event, event_start, gmm_classes)
+function [integrated_prob, mask] = applyIntegration_withrejection(integratorCfg, artifact, gmm_prob, qda_prob, event, event_start, gmm_classes)
 cfPOS = event.POS(event.TYP == event_start);
 cfDUR = event.DUR(event.TYP == event_start);
 ntrial = length(cfPOS);

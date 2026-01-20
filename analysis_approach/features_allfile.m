@@ -11,7 +11,7 @@ nclasses = length(classes);
 filterOrder = 4;
 avg = 1;
 threshold_gmm_ic = 0.7;
-channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'Fp1', 'CP1', 'Pz', 'CP2', 'Fp2'};
+channels_label = {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'Fp1', 'CP1', 'CPz', 'CP2', 'Fp2'};
 
 
 %% Load file
@@ -96,7 +96,7 @@ end
 events = headers{1,1};
 
 %%
-nsparsity = 2;
+nsparsity = 1;
 % o_l_ch = {'P3', 'O1', 'P5', 'P1', 'PO5', 'PO3', 'PO7'};
 % o_r_ch = {'P4', 'O2', 'P2', 'P6', 'PO4', 'PO6', 'PO8'};
 % c_l_ch = {'FC1', 'C3', 'CP1', 'FC3', 'C1', 'CP3'};
@@ -106,11 +106,13 @@ o_l_ch = {};
 o_r_ch = {};
 c_l_ch = {'C3', 'CP1', 'C1'};
 c_r_ch = {'C4', 'CP2', 'C2'};
+c_c_ch = {'Cz', 'CPz', 'FCz'};
 
 [~, o_l] = ismember(o_l_ch, channels_label);
 [~, o_r] = ismember(o_r_ch, channels_label);
 [~, c_l] = ismember(c_l_ch, channels_label);
 [~, c_r] = ismember(c_r_ch, channels_label);
+[~, c_c] = ismember(c_c_ch, channels_label);
 
 type = 'mi';
 
@@ -120,7 +122,7 @@ label_plot = [];
 for idx_band = 1:nbands
     c_signal = signals{idx_band};
     for idx_sample = 1:size(c_signal, 1)
-        [tmp, label_plot_tmp] =  compute_features_icnic(c_signal(idx_sample,:), type, o_l, o_r, c_l, c_r, nsparsity);
+        [tmp, label_plot_tmp] =  compute_features_icnic_mi(c_signal(idx_sample,:), c_l, c_r, c_c);
         sparsity(idx_sample, (idx_band-1)*nsparsity+1:(idx_band-1)*nsparsity+nsparsity) = tmp;
     end
     label_plot = [label_plot, label_plot_tmp];
@@ -128,12 +130,12 @@ end
 
 for idx_band = 1:nbands
     for idx_s = 1:nsparsity
-        idx = (idx_band-1)*nbands+idx_s;
+        idx = (idx_band-1)*nsparsity+idx_s;
         label_plot{idx} = [label_plot{idx}, ' ', bands_str{idx_band}];
     end
 end
 
-%% PLOT INTERATTIVO DEFINITIVO
+%% PLOT INTERATTIVO 
 close all;
 
 % --- CONFIGURAZIONE ---

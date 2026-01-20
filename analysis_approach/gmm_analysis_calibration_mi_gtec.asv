@@ -539,8 +539,8 @@ prob_gmm_all = [];
 for tr = test_trials
     probs = cluster_labels_cf(:, tr);
     tmp_f = [];
-    for f=1:size(sparsity,3)
-        tmp_f = [tmp_f, squeeze(sparsity(minDurFix+minDurCue+1:end, tr,f))]; 
+    for f=1:size(sparsity_cf,3)
+        tmp_f = [tmp_f, squeeze(sparsity(minDurFix+minDurCue+1:end, :,:))]; squeeze()
     end
 
     prob_gmm_all  = [prob_gmm_all; probs];
@@ -602,48 +602,6 @@ for f = 1:size(feature_data, 2)
 end
 sgtitle('How does GMM Confidence relate to ALL Input Features?', 'FontSize', 16);
 
-%% --- VALIDAZIONE GMM: REST vs TASK (Le due campane) ---
-figure('Color', 'w', 'Name', 'GMM Reliability Validation', 'Position', [100, 100, 800, 500]);
-% cue
-probs_rest_cue = cluster_labels_cuecf(1:minDurCue, :);
-probs_rest_cue = probs_rest_cue(:); 
-probs_rest_cue(isnan(probs_rest_cue)) = []; 
-% cf
-probs_task_cf = cluster_labels_cuecf(minDurCue+1:end, :);
-probs_task_cf = probs_task_cf(:); 
-probs_task_cf(isnan(probs_task_cf)) = []; 
-
-pts = linspace(0, 1, 200);
-[f_rest, xi_rest] = ksdensity(probs_rest_cue, pts, 'Bandwidth', 0.05);
-[f_task, xi_task] = ksdensity(probs_task_cf, pts, 'Bandwidth', 0.05);
-
-hold on;
-area(xi_rest, f_rest, 'FaceColor', [0.2 0.2 0.8], 'FaceAlpha', 0.4, 'EdgeColor', 'none');
-area(xi_task, f_task, 'FaceColor', [0.8 0.2 0.2], 'FaceAlpha', 0.4, 'EdgeColor', 'none');
-plot(xi_rest, f_rest, 'Color', [0.2 0.2 0.8], 'LineWidth', 2);
-plot(xi_task, f_task, 'Color', [0.8 0.2 0.2], 'LineWidth', 2);
-xline(0.5, 'k--', 'Threshold 0.5', 'LabelVerticalAlignment', 'bottom');
-title('Distribuzione di Affidabilità GMM (P(IC))', 'FontSize', 14);
-subtitle('Confronto Temporale: Fase Cue (Rest) vs Fase Feedback (Task)', 'FontSize', 12);
-xlabel('Probabilità GMM (Indice di Controllo)', 'FontSize', 12);
-ylabel('Densità', 'FontSize', 12);
-legend({'Rest (Cue Interval)', 'Task (Feedback Interval)'}, 'Location', 'north', 'FontSize', 11);
-xlim([0 1]);
-grid on;
-hold off;
-
-med_rest = median(probs_rest_cue);
-med_task = median(probs_task_cf);
-separation_score = med_task - med_rest;
-text(0.05, max([f_rest, f_task])*0.9, ...
-{['Median Rest: ' num2str(med_rest, '%.2f')], ...
-['Median Task: ' num2str(med_task, '%.2f')], ...
-['Separation: ' num2str(separation_score, '%.2f')]}, ...
-'BackgroundColor', 'w', 'EdgeColor', 'k');
-disp('--- Analisi Separazione GMM ---');
-disp(['Mediana Probabilità durante CUE (Rest): ' num2str(med_rest)]);
-disp(['Mediana Probabilità durante TASK (Feedback): ' num2str(med_task)]);
-disp('Se la separazione è > 0.5, il GMM funziona molto bene.');
 
 %% --- TRIAL PLOTS ---
 for c = ntrial-10:ntrial
