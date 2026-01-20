@@ -30,15 +30,24 @@ for idx_trial =1:ntrial
             if all(integratorCfg.type == 'Buffer')
                 merged_prob = (1-c_gmm_prob(idx_sample,ic_index)) * 0.5 + c_gmm_prob(idx_sample,ic_index) * c_qda_prob(idx_sample, :);
                 if merged_prob(1) >= 0.5
-                    vel = (merged_prob(1) - 0.5) * 2.0 * integratorCfg.k_gain;
-                    vel = min(vel, 1);
-                    inc = 1/bufferSize * vel;
+                    if integratorCfg.increment_type == 0 % HARDINCREMENT
+                        inc = 1/bufferSize;
+                    elseif integratorCfg.increment_type == 1 % softincrement
+                        vel = (merged_prob(1) - 0.5) * 2.0 * integratorCfg.k_gain;
+                        vel = min(vel, 1);
+                        inc = 1/bufferSize * vel;
+                    end
                     c_integrated(idx_sample+1, 1)=min(c_integrated(idx_sample, 1) + inc, 1);
                     c_integrated(idx_sample+1, 2)=max(c_integrated(idx_sample, 2) - inc, 0);
+                    
                 else
-                    vel = (merged_prob(2) - 0.5) * 2.0 * integratorCfg.k_gain;
-                    vel = min(vel, 1);
-                    inc = -1/bufferSize * vel;
+                    if integratorCfg.increment_type == 0
+                        inc = -1/bufferSize;
+                    elseif integratorCfg.increment_type == 1
+                        vel = (merged_prob(2) - 0.5) * 2.0 * integratorCfg.k_gain;
+                        vel = min(vel, 1);
+                        inc = -1/bufferSize * vel;
+                    end
                     c_integrated(idx_sample+1, 1)=max(c_integrated(idx_sample, 1) + inc,0);
                     c_integrated(idx_sample+1, 2)=max(c_integrated(idx_sample, 2) - inc,0);
                 end

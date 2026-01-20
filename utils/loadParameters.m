@@ -36,6 +36,7 @@ function [ringBuffer, artifact, processing, gmm, qda, integrator] = loadParamete
     end
     
     integrator.k_gain = param.integrator.k_gain;
+    integrator.increment_type = param.integrator.increment;
     
     if all(integrator.type == 'Buffer')
         integrator.init_val = param.integrator.init_val;

@@ -137,15 +137,15 @@ for idx_file = 1:nFiles
     r_square_data_all = []; r_square_label_all = [];
     r_square_data_gmm = []; r_square_label_gmm = [];
     for idx_trial = 1:ntrial
-        start_trial = fixPOS(idx_trial)+1;
-        end_trial = cfPOS(idx_trial) + cfDUR(idx_trial);
-        trial_dur = end_trial - start_trial+1;
+        start_trial = fixPOS(idx_trial);
+        end_trial = cfPOS(idx_trial) + cfDUR(idx_trial)-1;
         c_power = log(signal_processed(start_trial:end_trial,:));
         c_gmm_prob = gmm_prob(start_trial:end_trial, :);
         c_artifact = artifact(start_trial:end_trial);
         c_qda_prob = qda_prob(start_trial:end_trial,:);
         c_mask = mask(start_trial:end_trial);
         c_integrated = integrated_prob(start_trial:end_trial,:);
+        trial_dur = size(c_power, 1);
 
         % for metrics r^2
         r_square_data_all = [r_square_data_all; c_power];
