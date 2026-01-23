@@ -14,10 +14,16 @@ function [ringBuffer, artifact, processing, gmm, qda, integrator] = loadParamete
     processing.chunkSize = param.processing_bci_node.chunkSize;
 
     % gmm params
-    tmp = param.gmm_node.path_gmm_model;
-    [~, name, ext] = fileparts(tmp);
-    gmm.file_name = [name, ext];
-    gmm.name = 'GMM';
+    if isfield(param, 'gmm_node')
+        tmp = param.gmm_node.path_gmm_model;
+        [~, name, ext] = fileparts(tmp);
+        gmm.file_name = [name, ext];
+        gmm.name = 'GMM';
+    else
+        warning('Il campo param.gmm_node non è stato trovato. Uso valori di default.');
+        gmm.file_name = '';
+        gmm.name = 'UNKNOWN';
+    end
 
     % qda params
     tmp = param.qda_node.path_qda_model;

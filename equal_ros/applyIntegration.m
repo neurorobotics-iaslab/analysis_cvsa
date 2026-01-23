@@ -1,4 +1,4 @@
-function [integrated_prob, mask] = applyIntegration_withrejection(integratorCfg, artifact, gmm_prob, qda_prob, event, event_start, gmm_classes)
+function [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, gmm_prob, qda_prob, event, event_start, gmm_classes, rejection_look_gmm)
 cfPOS = event.POS(event.TYP == event_start);
 cfDUR = event.DUR(event.TYP == event_start);
 ntrial = length(cfPOS);
@@ -26,7 +26,12 @@ for idx_trial =1:ntrial
 
     c_integrated = ones(nsamples_trial + 1, 2) .* cell2mat(integratorCfg.init_val);
     for idx_sample = 1:nsamples_trial
-        if c_gmm_prob(idx_sample,ic_index) >= integratorCfg.ic_threshold && c_artifact(idx_sample) == 0
+        if rejection_look_gmm
+            withrejection = c_gmm_prob(idx_sample,ic_index) >= integratorCfg.ic_threshold && c_artifact(idx_sample) == 0;
+        else
+            withrejection = c_artifact(idx_sample) == 0;
+        end
+        if withrejection
             % integration
             if all(integratorCfg.type == 'Buffer')
                 merged_prob = (1-c_gmm_prob(idx_sample,ic_index)) * 0.5 + c_gmm_prob(idx_sample,ic_index) * c_qda_prob(idx_sample, :);
