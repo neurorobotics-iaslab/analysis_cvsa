@@ -25,7 +25,11 @@ function qda = loadQDA(path_file)
             idchans{i} = cell2mat(c_qda.QdaCfg.params.idchannels);
             lbchans{i} = c_qda.QdaCfg.params.channels{i};
         else
-            idchans{i} = c_qda.QdaCfg.params.idchannels{i}; % cell2mat
+            if iscell(c_qda.QdaCfg.params.idchannels{i})
+                idchans{i} = cell2mat(c_qda.QdaCfg.params.idchannels{i}); 
+            else
+                idchans{i} = c_qda.QdaCfg.params.idchannels{i};
+            end
             lbchans{i} = c_qda.QdaCfg.params.channels{i};
         end
     end

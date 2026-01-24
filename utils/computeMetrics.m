@@ -1,39 +1,37 @@
 function [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, event, event_start, gmm_classes, task_classes)
-CODE_SX = 769; CODE_DX = 770; CODE_REST = 783;
+% COMPUTEMETRICS - Calcola metriche per Active (QDA Sample Acc, GMM Conf, Timeout Dist) e Rest (Dist da 0.5).
+
+% --- INIZIALIZZAZIONE ---
+CODE_SX = task_classes(1); CODE_DX = task_classes(2); CODE_REST = task_classes(3);
 CODE_HIT = 897; CODE_MISS = 898; CODE_TIMEOUT = 899;
 
 cfPOS = event.POS(event.TYP == event_start);
 cfDUR = event.DUR(event.TYP == event_start);
 ntrials = length(cfPOS);
-
-% Filtra solo gli eventi rilevanti per sincronizzare con i trial
 all_cues = event.TYP(ismember(event.TYP, task_classes));
 all_results = event.TYP(ismember(event.TYP, [CODE_HIT, CODE_MISS, CODE_TIMEOUT]));
-
-% Safety Check
-if length(all_cues) ~= ntrials || length(all_results) ~= ntrials
-    ntrials = min([length(cfPOS), length(all_cues), length(all_results)]);
-end
-
 ic_index = find(gmm_classes == integratorCfg.ic_class_label);
+if isempty(ic_index), ic_index = 1; warning('Classe GMM 1 non trovata, uso colonna 1'); end
 
-% --- ACCUMULATORI ---
-% Trial Counters
+% counting variables
 cnt_act_hit = 0; cnt_act_miss = 0; cnt_act_timeout = 0; cnt_act_total = 0;
-cnt_rest_fp = 0; cnt_rest_ok = 0; cnt_rest_total = 0;
+cnt_rest_ok = 0; cnt_rest_err = 0; cnt_rest_total = 0;
+samp_corr_qda = 0; samp_tot_qda = 0; 
+samp_gmm_high = 0; samp_tot_gmm = 0; 
 
-% Sample Counters
-samp_corr_all = 0; samp_tot_all = 0;       % Tutti i trial attivi
-samp_corr_noto = 0; samp_tot_noto = 0;     % Solo trial NO-TIMEOUT
+% time variables
+time_act_hit = []; time_act_miss = []; time_act_to = [];
+time_rest_err = []; 
 
-% Time Lists (in samples)
-list_time_hit = []; list_time_miss = [];
-list_time_rest_fp = []; list_time_rest_ok = [];
+% distance variables
+dist_act_to = []; 
+dist_rest_err = []; 
 
-% Stability Lists
-list_wobble = []; list_wdr = []; list_rest_dev = [];
+% progress signal (act and rest)
+l_prog_act_to = [];
+l_safe_zone_rest = [];
 
-%% 2. CICLO DI ANALISI
+% --- iterate over trials ---
 for i = 1:ntrials
     idx_start = cfPOS(i);
     idx_end = cfPOS(i) + cfDUR(i) - 1;
@@ -42,94 +40,102 @@ for i = 1:ntrials
     cue = all_cues(i);
     res = all_results(i);
     
-    % Slice segnali
     s_art = artifact(idx_start:idx_end);
     s_qda = qda_prob(idx_start:idx_end, :);
+    s_gmm = gmm_prob(idx_start:idx_end, :);
     s_int = integrated_prob(idx_start:idx_end, 1); 
     
-    % --- ACTIVE TASK (769/770) ---
+    % --- ACTIVE TASK ---
     if cue == CODE_SX || cue == CODE_DX
         cnt_act_total = cnt_act_total + 1;
         
-        % A. Trial Result & Time
+        % Trial Result & Time
         if res == CODE_HIT
             cnt_act_hit = cnt_act_hit + 1;
-            list_time_hit = [list_time_hit; dur];
+            time_act_hit = [time_act_hit; dur];
         elseif res == CODE_MISS
             cnt_act_miss = cnt_act_miss + 1;
-            list_time_miss = [list_time_miss; dur];
+            time_act_miss = [time_act_miss; dur];
         elseif res == CODE_TIMEOUT
             cnt_act_timeout = cnt_act_timeout + 1;
+            time_act_to = [time_act_to; dur];
+            
+            % Distanza da 0.5 nei Timeout
+            avg_dist = mean(abs(s_int - 0.5), 'omitnan');
+            dist_act_to = [dist_act_to; avg_dist];
+
+            is_target_high = (cue == CODE_SX);
+            if is_target_high
+                progress = (s_int - 0.5) * 2; 
+            else
+                progress = (0.5 - s_int) * 2;
+            end
+            l_prog_act_to = [l_prog_act_to; mean(progress)];
         end
         
-        % B. Stability (Wobble & WDR)
-        diffs = diff(s_int);
-        list_wobble = [list_wobble; sum(abs(diffs))];
-        
-        is_target_sx = (cue == CODE_SX); % 1 se SX
-        if is_target_sx, n_wrong = sum(diffs < -1e-6); else, n_wrong = sum(diffs > 1e-6); end
-        list_wdr = [list_wdr; n_wrong / (length(diffs)+eps)];
-
-        % C. Sample Accuracy (All vs No-Timeout)
-        qda_idx = find(task_classes == cue);
-        if qda_idx <= size(s_qda, 2)
-            % Estrai samples validi (no artifact)
+        % QDA Sample Accuracy
+        if cue == CODE_SX, qda_col = 1; else, qda_col = 2; end
+        if qda_col <= size(s_qda, 2)
             valid_mask = (s_art == 0);
             if any(valid_mask)
-                preds = s_qda(valid_mask, qda_idx) >= 0.5;
-                n_corr = sum(preds);
-                n_tot = length(preds);
-                
-                % 1. Accumula per "ALL"
-                samp_corr_all = samp_corr_all + n_corr;
-                samp_tot_all = samp_tot_all + n_tot;
-                
-                % 2. Accumula per "NO-TIMEOUT" solo se non è timeout
-                if res ~= CODE_TIMEOUT
-                    samp_corr_noto = samp_corr_noto + n_corr;
-                    samp_tot_noto = samp_tot_noto + n_tot;
-                end
+                preds = s_qda(valid_mask, qda_col) >= 0.5;
+                samp_corr_qda = samp_corr_qda + sum(preds);
+                samp_tot_qda = samp_tot_qda + length(preds);
             end
         end
         
+        % GMM Confidence (> 0.5)
+        gmm_vals = s_gmm(:, ic_index);
+        samp_gmm_high = samp_gmm_high + sum(gmm_vals > 0.5);
+        samp_tot_gmm = samp_tot_gmm + length(gmm_vals);
+
     % --- REST TASK (783) ---
     elseif cue == CODE_REST
         cnt_rest_total = cnt_rest_total + 1;
+
+        safe_samples = sum(s_int >= 0.4 & s_int <= 0.6);
+        safe_ratio = safe_samples / length(s_int);
+        l_safe_zone_rest = [l_safe_zone_rest; safe_ratio];
+
+        dist_from_center = mean(abs(s_int - 0.5), 'omitnan');
         
-        % A. Trial Result
-        if res == CODE_TIMEOUT
-            cnt_rest_ok = cnt_rest_ok + 1; % Successo (rimasto fermo)
-            list_time_rest_ok = [list_time_rest_ok; dur];
-        else
-            cnt_rest_fp = cnt_rest_fp + 1; % Fallimento (attivato per sbaglio)
-            list_time_rest_fp = [list_time_rest_fp; dur];
+        if res == CODE_HIT
+            cnt_rest_ok = cnt_rest_ok + 1;
+        elseif res == CODE_MISS
+            cnt_rest_err = cnt_rest_err + 1;
+            time_rest_err = [time_rest_err; dur];
+            
+            dist_rest_err = [dist_rest_err; dist_from_center];
         end
-        
-        % B. Stability (Max Deviation)
-        list_rest_dev = [list_rest_dev; max(abs(s_int - 0.5))];
     end
 end
 
-%% 3. CREAZIONE STRUTTURA OUTPUT
-
 % --- Active Metrics ---
-m.accuracy.trial.active.raw = cnt_act_hit / (cnt_act_total + eps);
-m.accuracy.trial.active.no_timeout = cnt_act_hit / (cnt_act_hit + cnt_act_miss + eps);
+m.act.num.hit = cnt_act_hit;
+m.act.num.miss = cnt_act_miss;
+m.act.num.timeout = cnt_act_timeout;
 
-m.accuracy.sample.active.all = samp_corr_all / (samp_tot_all + eps);
-m.accuracy.sample.active.no_timeout = samp_corr_noto / (samp_tot_noto + eps);
+m.act.acc.trial = cnt_act_hit / (cnt_act_total + eps); % Trial Accuracy
+m.act.acc.no_timeout = cnt_act_hit / (cnt_act_miss + cnt_act_hit + eps);
+m.act.acc.sample_qda = samp_corr_qda / (samp_tot_qda + eps); % QDA Sample Accuracy
+m.act.gmm.high_conf_ratio = samp_gmm_high / (samp_tot_gmm + eps); % % Sample GMM > 0.5
 
-m.time.active.hit_avg = mean(list_time_hit);
-m.time.active.miss_avg = mean(list_time_miss);
+m.act.time.hit = mean(time_act_hit, 'omitnan');
+m.act.time.miss = mean(time_act_miss, 'omitnan');
+m.act.time.timeout = mean(time_act_to, 'omitnan');
 
-m.stability.active.wobble_avg = mean(list_wobble);
-m.stability.active.wdr_avg = mean(list_wdr);
+m.act.dist.timeout = mean(dist_act_to, 'omitnan');
+m.act.prog.timeout_score = mean(l_prog_act_to, 'omitnan');
 
 % --- Rest Metrics ---
-m.accuracy.trial.rest.acc = cnt_rest_ok / (cnt_rest_total + eps); % % Successo
-m.accuracy.trial.rest.fpr = cnt_rest_fp / (cnt_rest_total + eps); % False Positive Rate
+m.rest.num.ok = cnt_rest_ok;
+m.rest.num.err = cnt_rest_err;
 
-m.time.rest.fp_avg = mean(list_time_rest_fp); % Tempo medio all'errore
-m.stability.rest.max_dev_avg = mean(list_rest_dev);
+% Trial Accuracy Rest (Successo = Timeout)
+m.rest.acc.trial = cnt_rest_ok / (cnt_rest_total + eps); 
+
+m.rest.time.err = mean(time_rest_err, 'omitnan'); % Tempo medio errori
+m.rest.dist.err = mean(dist_rest_err, 'omitnan'); % Distanza da 0.5 errori
+m.rest.stab.safe_time_ratio = mean(l_safe_zone_rest, 'omitnan');
 
 end

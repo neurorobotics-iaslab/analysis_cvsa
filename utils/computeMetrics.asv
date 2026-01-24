@@ -1,264 +1,121 @@
-function [accuracy, number, time, stability] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, event, event_start, gmm_classes, task_classes)
-% --- 1. SETUP E INIZIALIZZAZIONE ---
+function [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, event, event_start, gmm_classes, task_classes)
+% COMPUTEMETRICS - Calcola metriche per Active (QDA Sample Acc, GMM Conf, Timeout Dist) e Rest (Dist da 0.5).
+
+% --- INIZIALIZZAZIONE ---
+CODE_SX = task_classes(1); CODE_DX = task_classes(2); CODE_REST = task_classes(3);
+CODE_HIT = 897; CODE_MISS = 898; CODE_TIMEOUT = 899;
+
 cfPOS = event.POS(event.TYP == event_start);
 cfDUR = event.DUR(event.TYP == event_start);
-
-% Estrazione tipologie trial (Active vs Rest) e Risultati (Hit/Miss)
-cueTYP = event.TYP(ismember(event.TYP, task_classes));
-hitmissTYP = event.TYP(ismember(event.TYP, [897, 898, 899])); 
-
-ntrial = length(cfPOS);
+ntrials = length(cfPOS);
+all_cues = event.TYP(ismember(event.TYP, task_classes));
+all_results = event.TYP(ismember(event.TYP, [CODE_HIT, CODE_MISS, CODE_TIMEOUT]));
 ic_index = find(gmm_classes == integratorCfg.ic_class_label);
+if isempty(ic_index), ic_index = 1; warning('Classe GMM 1 non trovata, uso colonna 1'); end
 
-% Variabili conteggio SAMPLE LEVEL (Ripristinate)
-n_correct_gmm = 0;         n_total_gmm = 0;
-n_correct_traditional = 0; n_total_traditional = 0;
-n_discarded_artifact = 0;  n_total_all_samples = 0;
+% counting variables
+cnt_act_hit = 0; cnt_act_miss = 0; cnt_act_timeout = 0; cnt_act_total = 0;
+cnt_rest_ok = 0; cnt_rest_err = 0; cnt_rest_total = 0;
+samp_corr_qda = 0; samp_tot_qda = 0; 
+samp_gmm_high = 0; samp_tot_gmm = 0; 
 
-% Variabili conteggio TRIAL LEVEL
-cnt_active_trials = 0;
-cnt_hits = 0; cnt_miss = 0; cnt_timeout = 0;
+% time variables
+time_act_hit = []; time_act_miss = []; time_act_to = [];
+time_rest_err = []; 
 
-% Variabili TEMPO
-time_hit = 0; time_miss = 0; time_timeout = 0;
+% distance variables
+dist_act_to = []; 
+dist_rest_err = []; 
 
-% Variabili STABILITÀ
-wobble_list = [];
-wdr_list = [];
-rest_max_dev_list = [];
-rest_false_positives = 0;
-n_rest_trials = 0;
-
-% Identificazione classi
-class_target_1 = task_classes(1); % Es. 769 (Left) -> QDA Col 1
-class_target_0 = task_classes(2); % Es. 770 (Right) -> QDA Col 2 (o Col 1 basso)
-if length(task_classes) >= 3
-    class_rest = task_classes(3); % Es. 783 (Rest)
-else
-    class_rest = -1; 
-end
-
-%% --- 2. CICLO SUI TRIAL ---
-for idx_trial = 1:ntrial
-    % Dati trial corrente
-    start_trial = cfPOS(idx_trial);
-    end_trial = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
-    nsamples_trial = end_trial - start_trial + 1;
+% --- iterate over trials ---
+for i = 1:ntrials
+    idx_start = cfPOS(i);
+    idx_end = cfPOS(i) + cfDUR(i) - 1;
+    dur = idx_end - idx_start + 1;
     
-    % Controllo sicurezza indici
-    if idx_trial > length(cueTYP) || idx_trial > length(hitmissTYP), break; end
+    cue = all_cues(i);
+    res = all_results(i);
     
-    current_class = cueTYP(idx_trial);
-    result_code = hitmissTYP(idx_trial); 
+    s_art = artifact(idx_start:idx_end);
+    s_qda = qda_prob(idx_start:idx_end, :);
+    s_gmm = gmm_prob(idx_start:idx_end, :);
+    s_int = integrated_prob(idx_start:idx_end, 1); 
     
-    % Slice dei segnali
-    c_gmm_prob = gmm_prob(start_trial:end_trial,:);
-    c_qda_prob = qda_prob(start_trial:end_trial,:);
-    c_artifact = artifact(start_trial:end_trial,:);
-    c_integrated = integrated_prob(start_trial:end_trial, 1); 
-    
-    % Determina indice colonna QDA corretta per questo trial
-    % Se current_class == task_classes(1) -> target index 1
-    % Se current_class == task_classes(2) -> target index 2
-    prob_index = find(task_classes == current_class);
-    
-    is_active_trial = (current_class == class_target_1 || current_class == class_target_0);
-
-    %% --- A. SAMPLE LEVEL ANALYSIS (Il pezzo mancante) ---
-    % Calcoliamo accuracy "frame-by-frame" usando QDA e Artifact
-    if is_active_trial && prob_index <= size(c_qda_prob, 2)
-        for k = 1:nsamples_trial
-            % 1. Controllo Artefatto
-            if c_artifact(k) == 0
-                % 2. Verifica se QDA ha ragione (> 0.5)
-                is_correct = c_qda_prob(k, prob_index) >= 0.5;
-                
-                % Metodo TRADITIONAL: Conta sempre se no artifact
-                if is_correct
-                    n_correct_traditional = n_correct_traditional + 1;
-                end
-                n_total_traditional = n_total_traditional + 1;
-                
-                % Metodo GMM: Conta solo se GMM > threshold
-                if c_gmm_prob(k, ic_index) >= integratorCfg.ic_threshold
-                    if is_correct
-                        n_correct_gmm = n_correct_gmm + 1;
-                    end
-                    n_total_gmm = n_total_gmm + 1;
-                end
-            else
-                n_discarded_artifact = n_discarded_artifact + 1;
+    % --- ACTIVE TASK ---
+    if cue == CODE_SX || cue == CODE_DX
+        cnt_act_total = cnt_act_total + 1;
+        
+        % Trial Result & Time
+        if res == CODE_HIT
+            cnt_act_hit = cnt_act_hit + 1;
+            time_act_hit = [time_act_hit; dur];
+        elseif res == CODE_MISS
+            cnt_act_miss = cnt_act_miss + 1;
+            time_act_miss = [time_act_miss; dur];
+        elseif res == CODE_TIMEOUT
+            cnt_act_timeout = cnt_act_timeout + 1;
+            time_act_to = [time_act_to; dur];
+            
+            % Distanza da 0.5 nei Timeout
+            avg_dist = mean(abs(s_int - 0.5), 'omitnan');
+            dist_act_to = [dist_act_to; avg_dist];
+        end
+        
+        % QDA Sample Accuracy
+        if cue == CODE_SX, qda_col = 1; else, qda_col = 2; end
+        if qda_col <= size(s_qda, 2)
+            valid_mask = (s_art == 0);
+            if any(valid_mask)
+                preds = s_qda(valid_mask, qda_col) >= 0.5;
+                samp_corr_qda = samp_corr_qda + sum(preds);
+                samp_tot_qda = samp_tot_qda + length(preds);
             end
         end
-        n_total_all_samples = n_total_all_samples + nsamples_trial;
-    end
+        
+        % GMM Confidence (> 0.5)
+        gmm_vals = s_gmm(:, ic_index);
+        samp_gmm_high = samp_gmm_high + sum(gmm_vals > 0.5);
+        samp_tot_gmm = samp_tot_gmm + length(gmm_vals);
 
-    %% --- B. TRIAL LEVEL & TIME ANALYSIS ---
-    if is_active_trial
-        cnt_active_trials = cnt_active_trials + 1;
+    % --- REST TASK (783) ---
+    elseif cue == CODE_REST
+        cnt_rest_total = cnt_rest_total + 1;
+        dist_from_center = mean(abs(s_int - 0.5), 'omitnan');
         
-        if result_code == 897 % HIT
-            cnt_hits = cnt_hits + 1;
-            time_hit = time_hit + nsamples_trial;
-        elseif result_code == 898 % MISS
-            cnt_miss = cnt_miss + 1;
-            time_miss = time_miss + nsamples_trial;
-        elseif result_code == 899 % TIMEOUT
-            cnt_timeout = cnt_timeout + 1;
-            time_timeout = time_timeout + nsamples_trial;
-        end
-        
-        %% --- C. STABILITY ANALYSIS (Wobble & WDR) ---
-        diffs = diff(c_integrated);
-        
-        % 1. Wobble (Path Length)
-        path_length = sum(abs(diffs));
-        wobble_list = [wobble_list; path_length];
-        
-        % 2. WDR (Wrong Direction)
-        if current_class == class_target_1
-            n_wrong = sum(diffs < -1e-6); % Target 1, errore se scende
-        else
-            n_wrong = sum(diffs > 1e-6);  % Target 0, errore se sale
-        end
-        wdr_val = n_wrong / (length(diffs) + eps);
-        wdr_list = [wdr_list; wdr_val];
-        
-    elseif current_class == class_rest
-        %% --- D. REST ANALYSIS ---
-        n_rest_trials = n_rest_trials + 1;
-        max_dev = max(abs(c_integrated - 0.5));
-        rest_max_dev_list = [rest_max_dev_list; max_dev];
-        
-        if result_code == 897 || result_code == 898
-            rest_false_positives = rest_false_positives + 1;
+        if res == CODE_HIT
+            cnt_rest_ok = cnt_rest_ok + 1;
+        elseif res == CODE_MISS
+            cnt_rest_err = cnt_rest_err + 1;
+            time_rest_err = [time_rest_err; dur];
+            
+            dist_rest_err = [dist_rest_err; dist_from_center];
         end
     end
 end
 
-%% --- 3. OUTPUT FINALI ---
+% --- Active Metrics ---
+m.act.num.hit = cnt_act_hit;
+m.act.num.miss = cnt_act_miss;
+m.act.num.timeout = cnt_act_timeout;
 
-% Sample Accuracy (Classificatore puro)
-accuracy.sample.icnic = n_correct_gmm / (n_total_gmm + eps);
-accuracy.sample.traditional = n_correct_traditional / (n_total_traditional + eps);
+m.act.acc.trial = cnt_act_hit / (cnt_act_total + eps); % Trial Accuracy
+m.act.acc.sample_qda = samp_corr_qda / (samp_tot_qda + eps); % QDA Sample Accuracy
+m.act.gmm.high_conf_ratio = samp_gmm_high / (samp_tot_gmm + eps); % % Sample GMM > 0.5
 
-number.sample.icnic.correct = n_correct_gmm;
-number.sample.icnic.total = n_total_gmm;
-number.sample.traditional.correct = n_correct_traditional;
-number.sample.traditional.total = n_total_traditional;
-number.sample.discarded = n_discarded_artifact;
+m.act.time.hit = mean(time_act_hit, 'omitnan');
+m.act.time.miss = mean(time_act_miss, 'omitnan');
+m.act.time.timeout = mean(time_act_to, 'omitnan');
 
-% Trial Accuracy (Risultato reale utente)
-accuracy.trial.hit = cnt_hits / (cnt_active_trials + eps);
-accuracy.trial.miss = cnt_miss / (cnt_active_trials + eps);
-accuracy.trial.timeout = cnt_timeout / (cnt_active_trials + eps);
+m.act.dist.timeout = mean(dist_act_to, 'omitnan'); % Distanza da 0.5 (solo timeout)
 
-number.trial.hit = cnt_hits;
-number.trial.miss = cnt_miss;
-number.trial.timeout = cnt_timeout;
-number.trial.total = ntrial;
+% --- Rest Metrics ---
+m.rest.num.ok = cnt_rest_ok;
+m.rest.num.err = cnt_rest_err;
 
-% Time
-time.hit = time_hit;
-time.miss = time_miss;
-time.timeout = time_timeout;
+% Trial Accuracy Rest (Successo = Timeout)
+m.rest.acc.trial = cnt_rest_ok / (cnt_rest_total + eps); 
 
-% Stability
-stability.active.wobble_avg = mean(wobble_list);
-stability.active.wdr_avg = mean(wdr_list);
-
-if n_rest_trials > 0
-    stability.rest.max_dev_avg = mean(rest_max_dev_list);
-    stability.rest.fpr = rest_false_positives / n_rest_trials; 
-else
-    stability.rest.max_dev_avg = NaN;
-    stability.rest.fpr = NaN;
-end
+m.rest.time.err = mean(time_rest_err, 'omitnan'); % Tempo medio errori
+m.rest.dist.err = mean(dist_rest_err, 'omitnan'); % Distanza da 0.5 errori
 
 end
-
-% function [accuracy, number, time] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, event, event_start, gmm_classes, task_classes)
-% cfPOS = event.POS(event.TYP == event_start);
-% cfDUR = event.DUR(event.TYP == event_start);
-% cueTYP = event.TYP(ismember(event.TYP, task_classes));
-% hitmissTYP = event.TYP(ismember(event.TYP, [897, 898, 899]));
-% ntrial = length(cfPOS);
-% ic_index = find(gmm_classes == integratorCfg.ic_class_label);
-% 
-% % variables for counting
-% n_correct_gmm = 0;         n_total_gmm = 0;
-% n_correct_traditional = 0; n_total_traditional = 0;
-% n_discarded_artifact = 0;  n_total_all = 0;
-% 
-% % variables for time
-% time_hit = 0;
-% time_miss = 0;
-% time_timeout = 0;
-% 
-% for idx_trial = 1:ntrial
-%     start_trial = cfPOS(idx_trial);
-%     end_trial = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
-% 
-%     nsamples_trial = end_trial - start_trial + 1;
-%     c_gmm_prob = gmm_prob(start_trial:end_trial,:);
-%     c_qda_prob = qda_prob(start_trial:end_trial,:);
-%     c_artifact = artifact(start_trial:end_trial,:);
-% 
-%     prob_index = find(task_classes == cueTYP(idx_trial));
-% 
-%     % counting for accuracy and number variable
-%     for idx_sample = 1:nsamples_trial
-%         if c_artifact(idx_sample) == 0
-%             if c_qda_prob(idx_sample, prob_index) >= 0.5
-%                 if c_gmm_prob(idx_sample,ic_index) >= integratorCfg.ic_threshold
-%                     n_correct_gmm = n_correct_gmm + 1;
-%                     n_total_gmm = n_total_gmm + 1;
-%                 end
-%                 n_correct_traditional = n_correct_traditional + 1;
-%                 n_total_traditional = n_total_traditional + 1;
-%             else
-%                 if c_gmm_prob(idx_sample,ic_index) >= integratorCfg.ic_threshold
-%                     n_total_gmm = n_total_gmm + 1;
-%                 end
-%                 n_total_traditional = n_total_traditional + 1;
-%             end
-%         else
-%             n_discarded_artifact = n_discarded_artifact + 1;
-%         end
-%     end
-%     n_total_all = n_total_all + nsamples_trial;
-% 
-%     % time variables
-%     if hitmissTYP(idx_trial) == 897
-%         time_hit = time_hit + nsamples_trial;
-%     elseif hitmissTYP(idx_trial) == 898
-%         time_miss = time_miss + nsamples_trial;
-%     elseif hitmissTYP(idx_trial) == 899
-%         time_timeout = time_timeout + nsamples_trial;
-%     else
-%         disp('ERROR in type for time hit-miss-timeout')
-%     end
-% end
-% 
-% accuracy.sample.icnic = n_correct_gmm/n_total_gmm;
-% accuracy.sample.traditional   = n_correct_traditional/n_total_traditional;
-% accuracy.trial.hit = sum(event.TYP == 897)/ntrial;
-% accuracy.trial.miss = sum(event.TYP == 898)/ntrial;
-% accuracy.trial.timeout = sum(event.TYP == 899)/ntrial;
-% 
-% number.sample.icnic.correct = n_correct_gmm;
-% number.sample.icnic.total = n_total_gmm;
-% number.sample.traditional.correct = n_correct_traditional;
-% number.sample.traditional.total = n_total_traditional;
-% number.sample.discrded = n_discarded_artifact;
-% number.sample.all = n_total_all;
-% number.trial.hit = sum(event.TYP == 897);
-% number.trial.miss = sum(event.TYP == 898);
-% number.trial.timeout = sum(event.TYP == 899);
-% number.trial.ntrial = ntrial;
-% 
-% time.hit = time_hit;
-% time.miss = time_miss;
-% time.timeout = time_timeout;
-
-% end

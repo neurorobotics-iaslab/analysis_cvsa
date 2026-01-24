@@ -256,44 +256,34 @@ for idx_file = 1:nFiles
     %% take accuracy
     [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, cell2mat(gmmCfg.params.classes), [769 770 783]);
     current_method = 'gmm';
-    % Crea entry per il database
     entry = struct();
     entry.File = filenames{idx_file};
-    entry.Method = current_method; % 'GMM' o 'Traditional' (impostalo tu nel loop)
+    entry.Method = current_method; 
     
-    % --- ACTIVE TASK METRICS ---
-    % Trial Accuracy
-    entry.Act_Acc_Raw = m.accuracy.trial.active.raw * 100;
-    entry.Act_Acc_NoTimeout = m.accuracy.trial.active.no_timeout * 100;
+    if ~exist('sampleRate_ros', 'var'), sampleRate_ros = 16; end
+
+    % 1. ACTIVE METRICS
+    entry.Act_Trial_Acc = m.act.acc.trial * 100;           % %
+    entry.Act_Sample_QDA = m.act.acc.sample_qda * 100;     % %
+    entry.Act_GMM_Conf = m.act.gmm.high_conf_ratio * 100;  % %
+    entry.Act_Acc_NoTo  = m.act.acc.no_timeout * 100;
+    entry.Act_Prog_Score = m.act.prog.timeout_score;       % Score (+1/-1)
     
-    % Sample Accuracy
-    entry.Act_SampAcc_All = m.accuracy.sample.active.all * 100;
-    entry.Act_SampAcc_NoTimeout = m.accuracy.sample.active.no_timeout * 100;
+    entry.Act_Time_Hit = m.act.time.hit / sampleRate_ros;  % Secondi
     
-    % Time (Convertito in secondi)
-    % Assicurati che sampleRate_ros sia corretto (es. 16 Hz)
-    entry.Act_Time_Hit = m.time.active.hit_avg / sampleRate_ros;
-    entry.Act_Time_Miss = m.time.active.miss_avg / sampleRate_ros;
-    
-    % Stability
-    entry.Act_Wobble = m.stability.active.wobble_avg;
-    entry.Act_WDR = m.stability.active.wdr_avg * 100;
-    
-    % --- REST TASK METRICS ---
-    entry.Rest_Acc = m.accuracy.trial.rest.acc * 100; % Corretti (Timeout)
-    entry.Rest_FPR = m.accuracy.trial.rest.fpr * 100; % False Positives
-    entry.Rest_Time_FP = m.time.rest.fp_avg / sampleRate_ros;
-    entry.Rest_MaxDev = m.stability.rest.max_dev_avg;
+    % 2. REST METRICS
+    entry.Rest_Acc = m.rest.acc.trial * 100;               % %
+    entry.Rest_Safe_Zone = m.rest.stab.safe_time_ratio * 100; % %
+    entry.Rest_Time_Err = m.rest.time.err / sampleRate_ros;   % Secondi
 
     % Aggiungi al database
-    % (Inizializza Database = [] fuori dal loop)
     if ~exist('Database','var'), Database = []; end
     Database = [Database; entry];
 
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_1, r_square_label_gmm, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_1, r_square_label_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_2, r_square_label_gmm, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_gmm_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_2, r_square_label_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_gmm_1, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_all_1, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_gmm_2, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_gmm_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_all_2, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
 
 end
 
@@ -526,46 +516,36 @@ for idx_file = 1:nFiles
 
     %% take accuracy
     [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, gmmCfg.params.classes, [769 770 783]);
+
     current_method = 'traditional';
-    % Crea entry per il database
     entry = struct();
     entry.File = filenames{idx_file};
-    entry.Method = current_method; % 'GMM' o 'Traditional' (impostalo tu nel loop)
+    entry.Method = current_method; 
     
-    % --- ACTIVE TASK METRICS ---
-    % Trial Accuracy
-    entry.Act_Acc_Raw = m.accuracy.trial.active.raw * 100;
-    entry.Act_Acc_NoTimeout = m.accuracy.trial.active.no_timeout * 100;
+    if ~exist('sampleRate_ros', 'var'), sampleRate_ros = 16; end
+
+    % 1. ACTIVE METRICS
+    entry.Act_Trial_Acc = m.act.acc.trial * 100;           % %
+    entry.Act_Sample_QDA = m.act.acc.sample_qda * 100;     % %
+    entry.Act_Acc_NoTo  = m.act.acc.no_timeout * 100;
+    entry.Act_GMM_Conf = m.act.gmm.high_conf_ratio * 100;  % %
+    entry.Act_Prog_Score = m.act.prog.timeout_score;       % Score (+1/-1)
     
-    % Sample Accuracy
-    entry.Act_SampAcc_All = m.accuracy.sample.active.all * 100;
-    entry.Act_SampAcc_NoTimeout = m.accuracy.sample.active.no_timeout * 100;
+    entry.Act_Time_Hit = m.act.time.hit / sampleRate_ros;  % Secondi
     
-    % Time (Convertito in secondi)
-    % Assicurati che sampleRate_ros sia corretto (es. 16 Hz)
-    entry.Act_Time_Hit = m.time.active.hit_avg / sampleRate_ros;
-    entry.Act_Time_Miss = m.time.active.miss_avg / sampleRate_ros;
-    
-    % Stability
-    entry.Act_Wobble = m.stability.active.wobble_avg;
-    entry.Act_WDR = m.stability.active.wdr_avg * 100;
-    
-    % --- REST TASK METRICS ---
-    entry.Rest_Acc = m.accuracy.trial.rest.acc * 100; % Corretti (Timeout)
-    entry.Rest_FPR = m.accuracy.trial.rest.fpr * 100; % False Positives
-    entry.Rest_Time_FP = m.time.rest.fp_avg / sampleRate_ros;
-    entry.Rest_MaxDev = m.stability.rest.max_dev_avg;
+    % 2. REST METRICS
+    entry.Rest_Acc = m.rest.acc.trial * 100;               % %
+    entry.Rest_Safe_Zone = m.rest.stab.safe_time_ratio * 100; % %
+    entry.Rest_Time_Err = m.rest.time.err / sampleRate_ros;   % Secondi
 
     % Aggiungi al database
-    % (Inizializza Database = [] fuori dal loop)
     if ~exist('Database','var'), Database = []; end
     Database = [Database; entry];
 
-
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_1, r_square_label_gmm, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_1, r_square_label_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_2, r_square_label_gmm, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_gmm_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_2, r_square_label_all, 'Plot', true, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_gmm_1, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_all_1, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_gmm_2, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_gmm_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_all_2, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
 
 end
 
@@ -573,93 +553,148 @@ end
 
 
 
+%% ========================================================================
+%  VISUALIZZAZIONE FINALE AGGIORNATA
+%  (Eseguire SOLO DOPO aver popolato 'Database' con i nuovi campi)
+% ========================================================================
 
-%% VISUALIZZAZIONE RISULTATI: GMM vs TRADITIONAL
-% Richiede la struct 'Database' popolata
+% Setup Metodi
+if ~exist('Database', 'var') || isempty(Database)
+    error('La variabile Database è vuota o non esiste. Esegui prima i cicli di analisi!');
+end
 
 methods = {Database.Method};
-is_gmm = strcmp(methods, 'gmm');
-is_trad = strcmp(methods, 'traditional'); % o 'traditional'
+is_gmm = strcmpi(methods, 'gmm');
+is_trad = strcmpi(methods, 'traditional') | strcmpi(methods, 'trad');
 
-% Colori
-c_gmm = [0 0.4470 0.7410];
-c_trad = [0.6350 0.0780 0.1840];
-grp_colors = [c_gmm; c_trad];
+% Colori: Blu (GMM) vs Arancio (Traditional)
+colors = [0 0.4470 0.7410; 0.8500 0.3250 0.0980];
 
-%% FIGURA 1: ACTIVE TASK PERFORMANCE (Accuracy)
-figure('Name', 'Active Task Accuracy', 'Color', 'w', 'Position', [100 100 1000 400]);
+% Helper Function Handle
+get_d = @(field) extract_data_nan_zero(Database, is_gmm, is_trad, field);
 
-subplot(1, 2, 1);
-data_raw = [[Database(is_gmm).Act_Acc_Raw]', [Database(is_trad).Act_Acc_Raw]'];
-boxplot(data_raw, 'Labels', {'GMM', 'Traditional'});
-ylabel('Accuracy (%)'); title('Trial Accuracy (Raw - inc. Timeouts)');
-grid on;
+% FIGURA 1: ACTIVE TASK - PERFORMANCE
+figure('Name', 'Active Task: Performance', 'Color', 'w', 'Position', [50 50 1200 400]);
 
-subplot(1, 2, 2);
-data_noto = [[Database(is_gmm).Act_Acc_NoTimeout]', [Database(is_trad).Act_Acc_NoTimeout]'];
-boxplot(data_noto, 'Labels', {'GMM', 'Traditional'});
-ylabel('Accuracy (%)'); title('Trial Accuracy (No Timeouts)');
-grid on;
+% 1. Trial Accuracy (Raw - include i Timeout)
+subplot(1, 4, 1);
+[d, g] = get_d('Act_Trial_Acc');
+custom_boxplot(d, g, colors, 'Accuracy (%)', 'Raw Trial Accuracy (inc. Timeouts)', [0 105]);
 
-%% FIGURA 2: ACTIVE TASK TIME & SAMPLE ACCURACY
-figure('Name', 'Active Time & Sample Acc', 'Color', 'w', 'Position', [100 550 1000 400]);
+% 2. Sample Accuracy (Classificatore)
+subplot(1, 4, 2);
+[d, g] = get_d('Act_Sample_QDA');
+custom_boxplot(d, g, colors, 'Accuracy (%)', 'QDA Sample Accuracy', [50 100]);
 
-subplot(1, 3, 1);
-% Time to Hit comparison
-data_time = [[Database(is_gmm).Act_Time_Hit]', [Database(is_trad).Act_Time_Hit]'];
-boxplot(data_time, 'Labels', {'GMM', 'Traditional'});
-ylabel('Time (s)'); title('Avg Time to Hit');
-grid on;
-
-subplot(1, 3, 2);
-% Sample Accuracy All
-data_samp = [[Database(is_gmm).Act_SampAcc_All]', [Database(is_trad).Act_SampAcc_All]'];
-boxplot(data_samp, 'Labels', {'GMM', 'Traditional'});
-ylabel('Sample Acc (%)'); title('Sample Acc (All Trials)');
-grid on;
-
-subplot(1, 3, 3);
-% Sample Accuracy No Timeout
-data_samp_nt = [[Database(is_gmm).Act_SampAcc_NoTimeout]', [Database(is_trad).Act_SampAcc_NoTimeout]'];
-boxplot(data_samp_nt, 'Labels', {'GMM', 'Traditional'});
-ylabel('Sample Acc (%)'); title('Sample Acc (Hit/Miss Only)');
-grid on;
-
-%% FIGURA 3: ACTIVE STABILITY
-figure('Name', 'Active Stability', 'Color', 'w', 'Position', [100 100 800 400]);
-
-subplot(1, 2, 1);
-data_wobble = [[Database(is_gmm).Act_Wobble]', [Database(is_trad).Act_Wobble]'];
-boxplot(data_wobble, 'Labels', {'GMM', 'Traditional'});
-ylabel('Path Length'); title('Wobble (Lower is Better)');
-grid on;
-
-subplot(1, 2, 2);
-data_wdr = [[Database(is_gmm).Act_WDR]', [Database(is_trad).Act_WDR]'];
-boxplot(data_wdr, 'Labels', {'GMM', 'Traditional'});
-ylabel('% Wrong Direction'); title('WDR (Lower is Better)');
-grid on;
-
-%% FIGURA 4: REST TASK ANALYSIS
-% Controlla se ci sono dati di rest (non-NaN)
-if any(~isnan([Database.Rest_FPR]))
-    figure('Name', 'Rest Task Analysis', 'Color', 'w', 'Position', [100 550 1000 400]);
-
-    subplot(1, 3, 1);
-    data_rest_acc = [[Database(is_gmm).Rest_Acc]', [Database(is_trad).Rest_Acc]'];
-    boxplot(data_rest_acc, 'Labels', {'GMM', 'Traditional'});
-    ylabel('Success Rate (%)'); title('Rest Accuracy (Correct Rejection)');
-    grid on;
-
-    subplot(1, 3, 2);
-    data_fpr = [[Database(is_gmm).Rest_FPR]', [Database(is_trad).Rest_FPR]'];
-    boxplot(data_fpr, 'Labels', {'GMM', 'Traditional'});
-    ylabel('FP Rate (%)'); title('False Positives (Lower is Better)');
-    grid on;
-
-    subplot(1, 3, 3);
-    data_dev = [[Database(is_gmm).Rest_MaxDev]', [Database(is_trad).Rest_MaxDev]'];
-    boxplot(data_dev, 'Labels', {'GMM', 'Traditional'});
-    ylabel('Deviation'); title('Max Deviation from 0.5');
-    grid on;
+% 3. NO-TIMEOUT ACCURACY (Hit / (Hit + Miss))
+subplot(1, 4, 3);
+% Qui usiamo try-catch nel caso avessi dimenticato di aggiornare il Database
+try
+    [d, g] = get_d('Act_Acc_NoTo');
+    custom_boxplot(d, g, colors, 'Accuracy (%)', 'Trial Acc (No Timeouts)', [0 105]);
+catch
+    title('Dato Act_Acc_NoTo Mancante!');
 end
+
+% 4. Timeout Progress Score
+subplot(1, 4, 4);
+[d, g] = get_d('Act_Prog_Score');
+custom_boxplot(d, g, colors, 'Score (+1/-1)', 'Timeout Direction Quality', [-1.1 1.1]);
+yline(0, 'k--', 'LineWidth', 1);
+
+% FIGURA 2: ACTIVE TASK - TIME & QUALITY
+figure('Name', 'Active Task: Time & Quality', 'Color', 'w', 'Position', [100 200 800 400]);
+
+% 1. Time to Hit
+subplot(1, 2, 1);
+[d, g] = get_d('Act_Time_Hit');
+custom_boxplot(d, g, colors, 'Time (s)', 'Time to Hit', []);
+
+% 2. Timeout Progress Score (Ripetuto per confronto)
+subplot(1, 2, 2);
+[d, g] = get_d('Act_Prog_Score');
+custom_boxplot(d, g, colors, 'Avg Score', 'Timeout Goodness (+1=Close, -1=Wrong)', [-1.1 1.1]);
+yline(0, 'k--', 'LineWidth', 1);
+
+% FIGURA 3: REST TASK - SAFETY
+figure('Name', 'Rest Task: Safety', 'Color', 'w', 'Position', [150 350 1200 400]);
+
+% 1. Rest Accuracy
+subplot(1, 3, 1);
+[d, g] = get_d('Rest_Acc');
+custom_boxplot(d, g, colors, 'Accuracy (%)', 'Rest Accuracy (Correct Rejection)', [-5 105]);
+
+% 2. Safe Zone Ratio
+subplot(1, 3, 2);
+[d, g] = get_d('Rest_Safe_Zone');
+custom_boxplot(d, g, colors, '% Time', 'Time in Dead Zone (0.4-0.6)', [-5 105]);
+
+% 3. Time to Error
+subplot(1, 3, 3);
+[d, g] = get_d('Rest_Time_Err');
+custom_boxplot(d, g, colors, 'Time (s)', 'Duration of False Positives', []);
+
+
+% --- FUNZIONI DI SUPPORTO LOCALI (DEVONO ESSERE ALLA FINE) ---
+
+function [data, groups] = extract_data_nan_zero(db, idx_gmm, idx_trad, field)
+    % Verifica esistenza campo
+    if ~isfield(db, field)
+        error(['Il campo "' field '" non esiste nel Database. Rilancia i cicli di analisi!']);
+    end
+
+    d_gmm = [db(idx_gmm).(field)]';
+    d_trad = [db(idx_trad).(field)]';
+    
+    % Gestione NaN -> 0
+    d_gmm(isnan(d_gmm)) = 0;
+    d_trad(isnan(d_trad)) = 0;
+    
+    if isempty(d_gmm), d_gmm = []; end
+    if isempty(d_trad), d_trad = []; end
+    
+    data = [d_gmm; d_trad];
+    groups = [repmat({'GMM'}, length(d_gmm), 1); repmat({'Traditional'}, length(d_trad), 1)];
+end
+
+function custom_boxplot(data, groups, colors, y_label, t_title, y_lims)
+    if isempty(data)
+        text(0.5, 0.5, 'No Data', 'HorizontalAlignment', 'center');
+        title(t_title); axis off; return;
+    end
+    
+    h = boxplot(data, groups, 'Colors', 'k', 'Symbol', 'o', 'Widths', 0.5);
+    set(h, 'LineWidth', 1.2);
+    ylabel(y_label, 'FontWeight', 'bold');
+    title(t_title, 'FontSize', 10, 'FontWeight', 'normal');
+    grid on;
+    if ~isempty(y_lims), ylim(y_lims); end
+    
+    % Logica colorazione robusta
+    h_box = findobj(gca, 'Tag', 'Box');
+    idx = length(h_box);
+    if idx >= 1
+        try
+            % Se ci sono due box, il primo handle è l'ultimo dato (Traditional)
+            if idx > 1
+                patch(get(h_box(idx),'XData'), get(h_box(idx),'YData'), colors(1,:), 'FaceAlpha', 0.5); % GMM
+                patch(get(h_box(idx-1),'XData'), get(h_box(idx-1),'YData'), colors(2,:), 'FaceAlpha', 0.5); % Trad
+            else
+                % Se c'è un solo box, colora in base al gruppo
+                u_gr = unique(groups);
+                if strcmpi(u_gr{1}, 'GMM')
+                    patch(get(h_box(1),'XData'), get(h_box(1),'YData'), colors(1,:), 'FaceAlpha', 0.5);
+                else
+                    patch(get(h_box(1),'XData'), get(h_box(1),'YData'), colors(2,:), 'FaceAlpha', 0.5);
+                end
+            end
+        catch
+            % Fallback
+        end
+    end
+end
+
+
+
+
+
