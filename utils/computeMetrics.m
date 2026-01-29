@@ -31,6 +31,14 @@ dist_rest_err = [];
 l_prog_act_to = [];
 l_safe_zone_rest = [];
 
+% confidence GMM
+list_gmm_active_trials = []; 
+list_gmm_rest_trials   = []; 
+
+% confidence GMM
+list_vel_act = []; 
+list_vel_rest = [];
+
 % --- iterate over trials ---
 for i = 1:ntrials
     idx_start = cfPOS(i);
@@ -44,10 +52,19 @@ for i = 1:ntrials
     s_qda = qda_prob(idx_start:idx_end, :);
     s_gmm = gmm_prob(idx_start:idx_end, :);
     s_int = integrated_prob(idx_start:idx_end, 1); 
+
+    trial_velocity = mean(abs(diff(s_int)), 'omitnan');
     
     % --- ACTIVE TASK ---
     if cue == CODE_SX || cue == CODE_DX
         cnt_act_total = cnt_act_total + 1;
+        list_vel_act = [list_vel_act; trial_velocity];
+
+        valid = (s_art == 0);
+        if any(valid)
+             avg_conf = mean(s_gmm(valid, ic_index));
+             list_gmm_active_trials = [list_gmm_active_trials; avg_conf];
+        end
         
         % Trial Result & Time
         if res == CODE_HIT
@@ -92,6 +109,14 @@ for i = 1:ntrials
     % --- REST TASK (783) ---
     elseif cue == CODE_REST
         cnt_rest_total = cnt_rest_total + 1;
+        list_vel_rest = [list_vel_rest; trial_velocity];
+
+        % Accumula confidenza media di QUESTO trial rest
+        valid = (s_art == 0);
+        if any(valid)
+             avg_conf = mean(s_gmm(valid, ic_index));
+             list_gmm_rest_trials = [list_gmm_rest_trials; avg_conf];
+        end
 
         safe_samples = sum(s_int >= 0.4 & s_int <= 0.6);
         safe_ratio = safe_samples / length(s_int);
@@ -115,10 +140,10 @@ m.act.num.hit = cnt_act_hit;
 m.act.num.miss = cnt_act_miss;
 m.act.num.timeout = cnt_act_timeout;
 
-m.act.acc.trial = cnt_act_hit / (cnt_act_total + eps); % Trial Accuracy
-m.act.acc.no_timeout = cnt_act_hit / (cnt_act_miss + cnt_act_hit + eps);
-m.act.acc.sample_qda = samp_corr_qda / (samp_tot_qda + eps); % QDA Sample Accuracy
-m.act.gmm.high_conf_ratio = samp_gmm_high / (samp_tot_gmm + eps); % % Sample GMM > 0.5
+m.act.acc.trial = cnt_act_hit / (cnt_act_total); % Trial Accuracy
+m.act.acc.no_timeout = cnt_act_hit / (cnt_act_miss + cnt_act_hit);
+m.act.acc.sample_qda = samp_corr_qda / (samp_tot_qda); % QDA Sample Accuracy
+m.act.gmm.high_conf_ratio = samp_gmm_high / (samp_tot_gmm); % % Sample GMM > 0.5
 
 m.act.time.hit = mean(time_act_hit, 'omitnan');
 m.act.time.miss = mean(time_act_miss, 'omitnan');
@@ -131,11 +156,40 @@ m.act.prog.timeout_score = mean(l_prog_act_to, 'omitnan');
 m.rest.num.ok = cnt_rest_ok;
 m.rest.num.err = cnt_rest_err;
 
-% Trial Accuracy Rest (Successo = Timeout)
-m.rest.acc.trial = cnt_rest_ok / (cnt_rest_total + eps); 
-
-m.rest.time.err = mean(time_rest_err, 'omitnan'); % Tempo medio errori
-m.rest.dist.err = mean(dist_rest_err, 'omitnan'); % Distanza da 0.5 errori
+m.rest.acc.trial = cnt_rest_ok / (cnt_rest_total); 
+m.rest.time.err = mean(time_rest_err, 'omitnan'); 
+m.rest.dist.err = mean(dist_rest_err, 'omitnan');
 m.rest.stab.safe_time_ratio = mean(l_safe_zone_rest, 'omitnan');
+
+% --- Other Metrics ---
+% how good is the GMM output for act and rest
+m.gmm.avg_active = mean(list_gmm_active_trials, 'omitnan');
+m.gmm.avg_rest   = mean(list_gmm_rest_trials, 'omitnan');
+
+% Calcolo AUC con Ranghi (Mann-Whitney U Test). Guarda quanto il gmm da
+% valori alti in caso di task attivi e bassi in caso di rest
+if ~isempty(list_gmm_active_trials) && ~isempty(list_gmm_rest_trials)
+    labels = [ones(size(list_gmm_active_trials)); zeros(size(list_gmm_rest_trials))];
+    scores = [list_gmm_active_trials; list_gmm_rest_trials];
+    [~, ind] = sort(scores);
+    ranks = 1:length(scores);
+    ranks(ind) = ranks;
+    pos_ranks = sum(ranks(labels == 1));
+    n1 = length(list_gmm_active_trials);
+    n2 = length(list_gmm_rest_trials);
+    u1 = pos_ranks - n1*(n1+1)/2;
+    m.gmm.auc = u1 / (n1*n2);
+else
+    m.gmm.auc = NaN;
+end
+
+% Calcolo SNR
+avg_vel_act = mean(list_vel_act, 'omitnan');
+avg_vel_rest = mean(list_vel_rest, 'omitnan');
+if avg_vel_rest < 1e-6, avg_vel_rest = 1e-6; end
+m.snr.vel_active = avg_vel_act;
+m.snr.vel_rest = avg_vel_rest;
+% SNR: Rapporto tra "Quanto mi muovo quando voglio" e "Quanto tremo quando non voglio"
+m.snr.ratio = avg_vel_act / avg_vel_rest;
 
 end

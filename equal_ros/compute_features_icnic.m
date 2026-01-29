@@ -10,14 +10,8 @@ function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l
         P_right_window = mean(c_signal(o_r));
         LI = (P_right_window - P_left_window) ./ (P_right_window + P_left_window + eps);
         sparsity(1) = abs(LI);
-        sparsity(2) = log(min(P_right_window, P_left_window));
+        sparsity(2) = log(min(P_right_window, P_left_window) / (sum(c_signal) + eps));
         label_sparsity = [{'LI'}, {'minLOG'}, {'Gini'}];
-    elseif strcmp(type, 'mi')
-        % show the central lateralization --> MI
-        P_left_window  = mean(c_signal(c_l));
-        P_right_window = mean(c_signal(c_r));
-        sparsity(1) = log(min(P_right_window, P_left_window));
-        label_sparsity = [{'minLOG'}, {'Gini'}];
     else
         disp('ERROR')
     end

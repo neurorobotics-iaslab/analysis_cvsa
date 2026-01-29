@@ -685,7 +685,6 @@ else
     warning('Dati GMM (AUC/Confidenza) non trovati o incompleti. Salto Figura 4.');
 end
 
-
 % FIGURA 5: CONTROL SNR
 if isfield(Database, 'SNR_Ratio')
     figure('Name', 'Fig 5: Control Signal Quality (SNR)', 'Color', 'w', 'Position', [100 100 1000 400]);
@@ -710,54 +709,111 @@ else
 end
 
 
-% FIGURE 6: VISUALIZZAZIONE "THRESHOLD TRENDS"
+
+
+
+
+
+% FIGURE 6: VISUALIZZAZIONE "THRESHOLD TRENDS" (PERCENTAGE VERSION)
+% Asse X: Soglia.
+% Subplot 1: Safety vs Raw Accuracy.
+% Subplot 2: Precision vs Safety + TIMEOUT RATE [%] (Hardcoded 20 trials).
+
+if ~exist('Database','var'), error('Database mancante'); end
+
+% --- 1. SELEZIONE DATI (File GMM) ---
+is_gmm = strcmpi({Database.Method}, 'GMM');
 db_target = Database(is_gmm);
+
 if isempty(db_target), error('Nessun file GMM trovato nel Database'); end
-TOTAL_TRIALS = sum(ismember(cueTYP, [classes(1) classes(2)]));
+
+% --- 2. CONFIGURAZIONE ---
+TOTAL_TRIALS = 20; % <--- HARDCODED COME RICHIESTO
+
+% --- 3. ESTRAZIONE CURVE ---
 raw_rest     = cat(1, db_target.Pareto_Curve_Rest);
 raw_act      = cat(1, db_target.Pareto_Curve_Act);
 raw_act_noto = cat(1, db_target.Pareto_Curve_Act_NoTo);
 raw_timeouts = cat(1, db_target.Pareto_Num_Timeouts);
+
+% --- 4. CALCOLO MEDIE ---
+% Accuracy in %
 mean_rest     = mean(raw_rest, 1, 'omitnan') * 100;
 mean_act      = mean(raw_act, 1, 'omitnan') * 100;      
 mean_act_noto = mean(raw_act_noto, 1, 'omitnan') * 100; 
+
+% Timeout Rate in % (Normalizzato su 20 trial)
 mean_timeouts_abs = mean(raw_timeouts, 1, 'omitnan');
 mean_timeouts_perc = (mean_timeouts_abs / TOTAL_TRIALS) * 100;
+
+% --- 5. ASSE X (Soglie) ---
 x_axis = linspace(0.55, 1.0, length(mean_rest)); 
+
+% --- 6. RIFERIMENTI GMM ---
 gmm_rest_val = mean([db_target.Rest_Acc], 'omitnan');
 gmm_raw_val  = mean([db_target.Act_Trial_Acc], 'omitnan');
 gmm_noto_val = mean([db_target.Act_Acc_NoTo], 'omitnan');
 
+% PLOT
 figure('Name', 'Threshold Analysis: Trends & Percentage Costs', 'Color', 'w', 'Position', [50 100 1200 500]);
+
+% =========================================================================
+% SUBPLOT 1: RAW PERFORMANCE (La visione "Fisica")
+% =========================================================================
 subplot(1, 2, 1);
+
+% Disegno Linee
 plot(x_axis, mean_rest, 'k-o', 'LineWidth', 2, 'MarkerFaceColor', 'k', 'MarkerSize', 4); hold on;
 plot(x_axis, mean_act,  'r-s', 'LineWidth', 2, 'MarkerFaceColor', 'r', 'MarkerSize', 4);
-yline(gmm_rest_val, 'k--', 'LineWidth', 1.5, 'Label', 'GMM rest accuracy');
-yline(gmm_raw_val,  'r--', 'LineWidth', 1.5, 'Label', 'GMM active task accuracy');
-title('REST vs ACTIVE', 'FontSize', 14);
+
+% Riferimenti GMM
+yline(gmm_rest_val, 'k--', 'LineWidth', 1.5, 'Label', 'GMM Safety');
+yline(gmm_raw_val,  'r--', 'LineWidth', 1.5, 'Label', 'GMM Raw');
+
+% Estetica
+title('1. Reality: Safety vs Responsiveness', 'FontSize', 14);
 xlabel('Threshold Setting', 'FontSize', 12, 'FontWeight','bold');
 ylabel('Accuracy [%]', 'FontSize', 12, 'FontWeight','bold');
 ylim([0 105]); grid on;
-legend({'Rest accuracy', 'Active accuracy'}, 'Location', 'Best');
+legend({'Traditional Safety (Rest)', 'Traditional Raw Acc (Act)'}, 'Location', 'Best');
+subtitle('Raising threshold increases Safety but kills Responsiveness (Raw Acc drops).');
 
+
+% =========================================================================
+% SUBPLOT 2: PRECISION & THE COST (Timeout Rate %)
+% =========================================================================
 subplot(1, 2, 2);
+
+% --- ASSE DESTRO: TIMEOUT RATE [%] (Barre) ---
 yyaxis right
 b = bar(x_axis, mean_timeouts_perc, 0.6, 'FaceColor', [0.8 0.8 0.8], 'EdgeColor', 'none');
 ylabel('Timeout Rate [%]', 'FontSize', 12, 'FontWeight','bold', 'Color', [0.5 0.5 0.5]);
-ylim([0 105]);
+ylim([0 105]); % Scala 0-100% come l'asse sinistro
 ax = gca; ax.YColor = [0.5 0.5 0.5];
+
 hold on;
+
+% --- ASSE SINISTRO: PRECISION & SAFETY ---
 yyaxis left
-h_rest = plot(x_axis, mean_rest, 'k-s', 'LineWidth', 1.5, 'Color', [0 0 0 0.3]); 
-h_act = plot(x_axis, mean_act_noto, 'm-d', 'LineWidth', 2.5, 'MarkerFaceColor', 'm', 'MarkerSize', 6);
-yline(gmm_noto_val, 'm--', 'LineWidth', 2, 'Label', 'GMM accuracy no timeout');
-title('Precision vs Timeout Rate', 'FontSize', 14);
+% Safety (Nera - Contesto)
+plot(x_axis, mean_rest, 'k-', 'LineWidth', 1.5, 'Color', [0 0 0 0.3]); 
+% Precision (Magenta - Protagonista)
+plot(x_axis, mean_act_noto, 'm-d', 'LineWidth', 2.5, 'MarkerFaceColor', 'm', 'MarkerSize', 6);
+
+% Riferimento GMM Precision
+yline(gmm_noto_val, 'm--', 'LineWidth', 2, 'Label', 'GMM Precision');
+
+% Estetica
+title('2. The Cost: Precision vs Timeout Rate', 'FontSize', 14);
 xlabel('Threshold Setting', 'FontSize', 12, 'FontWeight','bold');
 ylabel('Accuracy [%]', 'FontSize', 12, 'FontWeight','bold', 'Color', 'k');
 ylim([0 105]); grid on;
 ax = gca; ax.YColor = 'k';
-legend([h_rest, h_act, b],{'Rest accuracy', 'active accuracy', 'Timeout Rate %'}, 'Location', 'NorthWest');
 
+legend({'Traditional Safety', 'Traditional Precision', 'Timeout Rate % (Bars)'}, ...
+    'Location', 'NorthWest');
+
+subtitle(sprintf('At high thresholds, high Precision implies high Timeout Rate (Fixed %d Trials).', TOTAL_TRIALS));
 
 
 
