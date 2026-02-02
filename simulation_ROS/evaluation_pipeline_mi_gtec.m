@@ -5,41 +5,61 @@ addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_bci/equal_ros')
 addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_bci/utils')
 addpath(genpath('/home/paolo/Local/Matlab/yamlmatlab'));
 
-%% ----------------------------------
-%             MY METHOD
-%  ----------------------------------
-% ----------------- inizialization -----------------
-nchannels = 16;
-classes = [769 770, 783];   
 
-[filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files My method', 'MultiSelect', 'on');
-if ischar(filenames)
-    filenames = {filenames};
+% --- inizialization ---
+nchannels = 16;
+classes = [771 773 783];   
+
+[filenames_my, pathname_my] = uigetfile('*.gdf', 'Select GDF Files My method', 'MultiSelect', 'on');
+if ischar(filenames_my)
+    filenames_my = {filenames_my};
 end
-nFiles = length(filenames);
+nFiles_my = length(filenames_my);
+
+[filenames_trad, pathname_trad] = uigetfile('*.gdf', 'Select GDF Files Traditional method', 'MultiSelect', 'on');
+if ischar(filenames_trad)
+    filenames_trad = {filenames_trad};
+end
+nFiles_trad = length(filenames_trad);
+
 Database = [];
 
-%% reasoning for one file
-for idx_file = 1:nFiles
-    fullpath_file_gdf = fullfile(pathname, filenames{idx_file});
-    disp(['File ' num2str(idx_file) '/' num2str(nFiles)]);
-    disp(['   Loading gdf file : ', filenames{idx_file}]);
+%% -------------------------------------------------------------------------------
+%                                    MY METHOD
+%  -------------------------------------------------------------------------------
+for idx_file = 1:nFiles_my
+    fullpath_file_gdf = fullfile(pathname_my, filenames_my{idx_file});
+    disp(['File ' num2str(idx_file) '/' num2str(nFiles_my)]);
+    disp(['   Loading gdf file : ', filenames_my{idx_file}]);
     [c_signal,header] = sload(fullpath_file_gdf);
     c_signal = c_signal(:,1:nchannels);
     channels_label =  {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'Fp1', 'CP1', 'CPz', 'CP2', 'Fp2'};
 
-    %% ----------------- load the file -----------------
-    disp(['   Loading parameters file: ', filenames{idx_file}(1:end-3) 'yaml'])
-    fullpath_file_parameters = [pathname(1:end-4) 'parameters/' filenames{idx_file}(1:end-3) 'yaml'];
+    %% ----------------- load the file for the my method -----------------
+    disp(['   Loading parameters file: ', filenames_my{idx_file}(1:end-3) 'yaml'])
+    fullpath_file_parameters = [pathname_my(1:end-4) 'parameters/' filenames_my{idx_file}(1:end-3) 'yaml'];
     [ringBufferCfg, artifactCfg, processingCfg, gmmCfg, qdaCfg, integratorCfg] = loadParameters(fullpath_file_parameters);
 
     disp(['   Loading GMM file: ', gmmCfg.file_name])
-    gmm_path = [pathname(1:end-4) gmmCfg.file_name];
+    gmm_path = [pathname_my(1:end-4) gmmCfg.file_name];
     [gmmCfg.model, gmmCfg.params] = loadGMM(gmm_path);
 
-    disp(['   Loading QDA file: ', qdaCfg.file_name])
-    qda_path = [pathname(1:end-4) qdaCfg.file_name];
+    disp(['   Loading QDA file (my): ', qdaCfg.file_name])
+    qda_path = [pathname_my(1:end-4) qdaCfg.file_name];
     qdaCfg.model = loadQDA(qda_path);
+
+    % --- load the qda for teh traditional method ---
+    k_gain_trad = nan(1, nFiles_trad);
+    for idx_file_t = 1:nFiles_trad
+        fullpath_file_parameters = [pathname_trad(1:end-4) 'parameters/' filenames_trad{idx_file_t}(1:end-3) 'yaml'];
+        [~, ~, ~, ~, qdaCfg_trad, integratorCfg_trad] = loadParameters(fullpath_file_parameters);
+        k_gain_trad(idx_file_t) = integratorCfg_trad.k_gain;
+    end
+    integratorCfg_trad.k_gain = mean(k_gain_trad);
+
+    disp(['   Loading QDA file (trad): ', qdaCfg_trad.file_name])
+    qda_path = [pathname_trad(1:end-4) qdaCfg_trad.file_name];
+    qdaCfg_trad.model = loadQDA(qda_path);
 
     %% ----------------- Artifact -----------------
     disp('   marking signal for artifact remotion')
@@ -129,20 +149,32 @@ for idx_file = 1:nFiles
         end
         X = [X, tmp];
     end
-    qda_prob = apply_qda_matrix(qdaCfg.model, log(X));
+    qda_prob = apply_qda_matrix(qdaCfg.model, log(X)); 
+
+    % --- qda trad ---
+    X_trad = [];
+    for idx_band=1:nbands
+        for idx_band2=1:nbands
+            if all(bands(idx_band,:) == qdaCfg_trad.model.bands(idx_band2,:))
+                chs = qdaCfg_trad.model.idchans{idx_band2};
+                tmp = signals{idx_band}(:,chs); 
+            end
+        end
+        X_trad = [X_trad, tmp];
+    end
+    qda_prob_trad = apply_qda_matrix(qdaCfg_trad.model, log(X_trad));
 
     %% ----------------- integrated prob -----------------
     event_start = 781;
     rejection_look_gmm = false;
     [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, gmm_prob, qda_prob, events, event_start, cell2mat(gmmCfg.params.classes), rejection_look_gmm);
 
-    %% ----------------- integrated prob simulation of traditional -----------------
+    % --- integrated prob simulation of traditional ---
     gmm_prob_fake = zeros(size(signals{1},1),2);
     gmm_prob_fake(:,1) = 1;
-    [integrated_prob_fake, mask_fake] = applyIntegration(integratorCfg, artifact, gmm_prob_fake, qda_prob, events, event_start, [1, 0], rejection_look_gmm);
-    [curve_rest, curve_act, curve_act_noTimeout, n_act_timeout] = calc_pareto_curve(integrated_prob_fake, events, classes, event_start);
+    [integrated_prob_fake, mask_fake] = applyIntegration(integratorCfg_trad, artifact, gmm_prob_fake, qda_prob_trad, events, event_start, [1, 0], rejection_look_gmm);
+    [curve_rest, curve_act, curve_act_noTimeout, n_act_timeout] = calc_pareto_matrix(integrated_prob_fake, events, classes, event_start);
     
-
     %% ----------------- plot prob integrated -----------------
     ic_index = find(cell2mat(gmmCfg.params.classes) == integratorCfg.ic_class_label);
     sampleRate_ros = bufferSize/chunkSize;
@@ -162,7 +194,7 @@ for idx_file = 1:nFiles
         trial_dur = size(c_power_1, 1);
 
         % for metrics r^2
-        if ismember(cueTYP(idx_trial), [769 770])
+        if ismember(cueTYP(idx_trial), [classes(1) classes(2)])
             r_square_data_all_1 = [r_square_data_all_1; c_power_1];
             r_square_data_all_2 = [r_square_data_all_2; c_power_2];
             r_square_label_all = [r_square_label_all; repmat(cueTYP(idx_trial), trial_dur, 1)];
@@ -261,10 +293,10 @@ for idx_file = 1:nFiles
     end
 
     %% take accuracy
-    [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, cell2mat(gmmCfg.params.classes), [769 770 783]);
+    [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, cell2mat(gmmCfg.params.classes), classes);
     current_method = 'gmm';
     entry = struct();
-    entry.File = filenames{idx_file};
+    entry.File = filenames_my{idx_file};
     entry.Method = current_method; 
     
     if ~exist('sampleRate_ros', 'var'), sampleRate_ros = 16; end
@@ -317,28 +349,21 @@ end
 %% -------------------------------------------------------------------------------
 %                            TRADITIONAL METHOD
 %  -------------------------------------------------------------------------------
-[filenames, pathname] = uigetfile('*.gdf', 'Select GDF Files Traditional method', 'MultiSelect', 'on');
-if ischar(filenames)
-    filenames = {filenames};
-end
-nFiles = length(filenames);
-
-%% reasoning for one file
-for idx_file = 1:nFiles
-    fullpath_file_gdf = fullfile(pathname, filenames{idx_file});
-    disp(['File ' num2str(idx_file) '/' num2str(nFiles)]);
-    disp(['   Loading gdf file : ', filenames{idx_file}]);
+for idx_file = 1:nFiles_trad
+    fullpath_file_gdf = fullfile(pathname_trad, filenames_trad{idx_file});
+    disp(['File ' num2str(idx_file) '/' num2str(nFiles_trad)]);
+    disp(['   Loading gdf file : ', filenames_trad{idx_file}]);
     [c_signal,header] = sload(fullpath_file_gdf);
     c_signal = c_signal(:,1:nchannels);
     channels_label =  {'Fz', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'C3', 'C1', 'Cz', 'C2', 'C4', 'Fp1', 'CP1', 'CPz', 'CP2', 'Fp2'};
 
     %% ----------------- load the file -----------------
-    disp(['   Loading parameters file: ', filenames{idx_file}(1:end-3) 'yaml'])
-    fullpath_file_parameters = [pathname(1:end-4) 'parameters/' filenames{idx_file}(1:end-3) 'yaml'];
+    disp(['   Loading parameters file: ', filenames_trad{idx_file}(1:end-3) 'yaml'])
+    fullpath_file_parameters = [pathname_trad(1:end-4) 'parameters/' filenames_trad{idx_file}(1:end-3) 'yaml'];
     [ringBufferCfg, artifactCfg, processingCfg, gmmCfg, qdaCfg, integratorCfg] = loadParameters(fullpath_file_parameters);
 
     disp(['   Loading QDA file: ', qdaCfg.file_name])
-    qda_path = [pathname(1:end-4) qdaCfg.file_name];
+    qda_path = [pathname_trad(1:end-4) qdaCfg.file_name];
     qdaCfg.model = loadQDA(qda_path);
 
     %% ----------------- Artifact -----------------
@@ -436,7 +461,7 @@ for idx_file = 1:nFiles
         trial_dur = size(c_power_1, 1);
 
         % for metrics r^2
-        if ismember(cueTYP(idx_trial), [769 770])
+        if ismember(cueTYP(idx_trial), [classes(1) classes(2)])
             r_square_data_all_1 = [r_square_data_all_1; c_power_1];
             r_square_data_all_2 = [r_square_data_all_2; c_power_2];
             r_square_label_all = [r_square_label_all; repmat(cueTYP(idx_trial), trial_dur, 1)];
@@ -535,11 +560,11 @@ for idx_file = 1:nFiles
     end
 
     %% take accuracy
-    [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, gmmCfg.params.classes, [769 770 783]);
+    [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, gmmCfg.params.classes, classes);
 
     current_method = 'traditional';
     entry = struct();
-    entry.File = filenames{idx_file};
+    entry.File = filenames_trad{idx_file};
     entry.Method = current_method; 
     
     if ~exist('sampleRate_ros', 'var'), sampleRate_ros = 16; end
@@ -632,7 +657,7 @@ yline(0, 'k--', 'LineWidth', 1);
 subtitle('+1 = Near Target, -1 = Wrong Side');
 
 
-% FIGURA 3: REST TASK - SAFETY (IL PUNTO FORTE)
+% FIGURA 3: REST TASK - SAFETY
 figure('Name', 'Fig 3: Rest Safety', 'Color', 'w', 'Position', [150 350 1200 400]);
 
 subplot(1, 3, 1);
@@ -713,52 +738,73 @@ end
 % FIGURE 6: VISUALIZZAZIONE "THRESHOLD TRENDS"
 db_target = Database(is_gmm);
 if isempty(db_target), error('Nessun file GMM trovato nel Database'); end
-TOTAL_TRIALS = sum(ismember(cueTYP, [classes(1) classes(2)]));
-raw_rest     = cat(1, db_target.Pareto_Curve_Rest);
-raw_act      = cat(1, db_target.Pareto_Curve_Act);
-raw_act_noto = cat(1, db_target.Pareto_Curve_Act_NoTo);
-raw_timeouts = cat(1, db_target.Pareto_Num_Timeouts);
-mean_rest     = mean(raw_rest, 1, 'omitnan') * 100;
-mean_act      = mean(raw_act, 1, 'omitnan') * 100;      
-mean_act_noto = mean(raw_act_noto, 1, 'omitnan') * 100; 
-mean_timeouts_abs = mean(raw_timeouts, 1, 'omitnan');
-mean_timeouts_perc = (mean_timeouts_abs / TOTAL_TRIALS) * 100;
-x_axis = linspace(0.55, 1.0, length(mean_rest)); 
+
+TOTAL_TRIALS = sum(ismember(cueTYP, [classes(1) classes(2)])); 
+raw_rest_3d     = cat(3, db_target.Pareto_Curve_Rest);
+raw_act_3d      = cat(3, db_target.Pareto_Curve_Act); 
+raw_act_noto_3d = cat(3, db_target.Pareto_Curve_Act_NoTo);
+raw_timeouts_3d = cat(3, db_target.Pareto_Num_Timeouts);
+mean_rest_mat     = mean(raw_rest_3d, 3, 'omitnan') * 100;
+mean_act_mat      = mean(raw_act_3d, 3, 'omitnan') * 100;      
+mean_act_noto_mat = mean(raw_act_noto_3d, 3, 'omitnan') * 100; 
+mean_timeouts_abs = mean(raw_timeouts_3d, 3, 'omitnan');
+mean_timeouts_perc_mat = (mean_timeouts_abs / TOTAL_TRIALS) * 100;
+
+gmm_act_val  = mean([db_target.Act_Trial_Acc], 'omitnan'); 
 gmm_rest_val = mean([db_target.Rest_Acc], 'omitnan');
-gmm_raw_val  = mean([db_target.Act_Trial_Acc], 'omitnan');
-gmm_noto_val = mean([db_target.Act_Acc_NoTo], 'omitnan');
+gmm_to_abs   = mean([db_target.Act_Num_Timeout], 'omitnan');
+gmm_to_perc  = (gmm_to_abs / TOTAL_TRIALS) * 100;
 
-figure('Name', 'Threshold Analysis: Trends & Percentage Costs', 'Color', 'w', 'Position', [50 100 1200 500]);
-subplot(1, 2, 1);
-plot(x_axis, mean_rest, 'k-o', 'LineWidth', 2, 'MarkerFaceColor', 'k', 'MarkerSize', 4); hold on;
-plot(x_axis, mean_act,  'r-s', 'LineWidth', 2, 'MarkerFaceColor', 'r', 'MarkerSize', 4);
-yline(gmm_rest_val, 'k--', 'LineWidth', 1.5, 'Label', 'GMM rest accuracy');
-yline(gmm_raw_val,  'r--', 'LineWidth', 1.5, 'Label', 'GMM active task accuracy');
-title('REST vs ACTIVE', 'FontSize', 14);
-xlabel('Threshold Setting', 'FontSize', 12, 'FontWeight','bold');
-ylabel('Accuracy [%]', 'FontSize', 12, 'FontWeight','bold');
-ylim([0 105]); grid on;
-legend({'Rest accuracy', 'Active accuracy'}, 'Location', 'Best');
+figure('Name', 'Analysis vs GMM', 'Color', 'w', 'Position', [50 50 1600 550]);
+x_axis = linspace(0.55, 1.0, size(mean_rest_mat, 2)); 
+thresholds = x_axis; 
 
-subplot(1, 2, 2);
-yyaxis right
-b = bar(x_axis, mean_timeouts_perc, 0.6, 'FaceColor', [0.8 0.8 0.8], 'EdgeColor', 'none');
-ylabel('Timeout Rate [%]', 'FontSize', 12, 'FontWeight','bold', 'Color', [0.5 0.5 0.5]);
-ylim([0 105]);
-ax = gca; ax.YColor = [0.5 0.5 0.5];
+subplot(1, 3, 1);
+imagesc(thresholds, thresholds, mean_act_mat); 
+axis xy; colormap(gca, 'jet'); 
+c = colorbar; c.Label.String = 'Accuracy [%]';
 hold on;
-yyaxis left
-h_rest = plot(x_axis, mean_rest, 'k-s', 'LineWidth', 1.5, 'Color', [0 0 0 0.3]); 
-h_act = plot(x_axis, mean_act_noto, 'm-d', 'LineWidth', 2.5, 'MarkerFaceColor', 'm', 'MarkerSize', 6);
-yline(gmm_noto_val, 'm--', 'LineWidth', 2, 'Label', 'GMM accuracy no timeout');
-title('Precision vs Timeout Rate', 'FontSize', 14);
-xlabel('Threshold Setting', 'FontSize', 12, 'FontWeight','bold');
-ylabel('Accuracy [%]', 'FontSize', 12, 'FontWeight','bold', 'Color', 'k');
-ylim([0 105]); grid on;
-ax = gca; ax.YColor = 'k';
-legend([h_rest, h_act, b],{'Rest accuracy', 'active accuracy', 'Timeout Rate %'}, 'Location', 'NorthWest');
+plot([min(thresholds) max(thresholds)], [min(thresholds) max(thresholds)], 'k:', 'LineWidth', 1.5);
+[~, ~] = contour(thresholds, thresholds, mean_act_mat, [gmm_act_val gmm_act_val], 'm-', 'LineWidth', 3); 
+[r_good, c_good] = find(mean_act_mat >= gmm_act_val);
+if ~isempty(r_good) && length(r_good) < 5 
+    plot(thresholds(c_good), thresholds(r_good), 'm.', 'MarkerSize', 15);
+end
+xlabel(['Threshold ' num2str(classes(1))], 'FontSize', 11, 'FontWeight','bold');
+ylabel(['Threshold ' num2str(classes(2))], 'FontSize', 11, 'FontWeight','bold');
+title({'\bf ACTIVE Accuracy', sprintf('GMM Baseline: %.1f%%', gmm_act_val)}, 'FontSize', 14);
 
+subplot(1, 3, 2);
+imagesc(thresholds, thresholds, mean_rest_mat);
+axis xy; colormap(gca, 'jet');
+c = colorbar; c.Label.String = 'Accuracy [%]';
+hold on;
+plot([min(thresholds) max(thresholds)], [min(thresholds) max(thresholds)], 'k:', 'LineWidth', 1.5);
+[~, ~] = contour(thresholds, thresholds, mean_rest_mat, [gmm_rest_val gmm_rest_val], 'm-', 'LineWidth', 3);
+[r_good, c_good] = find(mean_rest_mat >= gmm_rest_val);
+if ~isempty(r_good) && length(r_good) < 5
+    plot(thresholds(c_good), thresholds(r_good), 'm.', 'MarkerSize', 15);
+end
+xlabel(['Threshold ' num2str(classes(1))], 'FontSize', 11, 'FontWeight','bold');
+ylabel(['Threshold ' num2str(classes(2))], 'FontSize', 11, 'FontWeight','bold');
+title({'\bf REST Accuracy', sprintf('GMM Baseline: %.1f%%', gmm_rest_val)}, 'FontSize', 14);
 
+subplot(1, 3, 3);
+imagesc(thresholds, thresholds, mean_timeouts_perc_mat);
+axis xy; 
+colormap(gca, flipud(parula)); 
+c = colorbar; c.Label.String = 'Timeout Rate [%]';
+caxis([0 50]); 
+hold on;
+plot([min(thresholds) max(thresholds)], [min(thresholds) max(thresholds)], 'k:', 'LineWidth', 1.5);
+[~, ~] = contour(thresholds, thresholds, mean_timeouts_perc_mat, [gmm_to_perc gmm_to_perc], 'm-', 'LineWidth', 3); 
+[r_good, c_good] = find(mean_timeouts_perc_mat <= gmm_to_perc);
+if ~isempty(r_good) && length(r_good) < 5
+    plot(thresholds(c_good), thresholds(r_good), 'm.', 'MarkerSize', 15);
+end
+xlabel(['Threshold ' num2str(classes(1))], 'FontSize', 11, 'FontWeight','bold');
+ylabel(['Threshold ' num2str(classes(2))], 'FontSize', 11, 'FontWeight','bold');
+title({'\bf TIMEOUT Rate', sprintf('GMM Value: %.1f%%', gmm_to_perc)}, 'FontSize', 14);
 
 
 
@@ -829,25 +875,35 @@ function custom_boxplot(data, groups, colors, y_label, t_title, y_lims)
     end
 end
 
-function [curve_rest, curve_act, curve_act_noTimeout, n_act_timeout] = calc_pareto_curve(integrated_prob, events, task_classes, start_task)
+function [mat_rest, mat_act, mat_act_noTimeout, mat_act_timeout] = calc_pareto_matrix(integrated_prob, events, task_classes, start_task)
     % INPUT:
     % integrated_prob: vettore (o matrice) delle probabilità integrate. 
     %                  Assumiamo Colonna 1: 0=DX, 1=SX.
     % events: struct con .TYP, .POS, .DUR
     % task_classes: [CODE_SX, CODE_DX, CODE_REST]
     % start_task: codice evento inizio trial (es. 781)
+    
+    % Definiamo il range delle threshold (Confidenza)
+    % Nota: Questa è la "forza" della soglia. 
+    % Per SX (High) la soglia reale è val.
+    % Per DX (Low)  la soglia reale è (1 - val).
     thresholds = 0.55 : 0.05 : 1.0; 
     
     n_th = length(thresholds);
-    curve_rest = zeros(1, n_th);
-    curve_act  = zeros(1, n_th);
-    curve_act_noTimeout  = zeros(1, n_th);
-    n_act_timeout = zeros(1, n_th);
     
-    CODE_SX   = task_classes(1); % Target: 1.0 (Soglia Alta)
-    CODE_DX   = task_classes(2); % Target: 0.0 (Soglia Bassa)
-    CODE_REST = task_classes(3); % Target: Rimanere nel mezzo
+    % OUTPUT: Ora sono MATRICI (n_th x n_th)
+    % Riga (i) -> Soglia SX
+    % Colonna (j) -> Soglia DX
+    mat_rest            = zeros(n_th, n_th);
+    mat_act             = zeros(n_th, n_th);
+    mat_act_noTimeout   = zeros(n_th, n_th);
+    mat_act_timeout     = zeros(n_th, n_th);
     
+    CODE_SX   = task_classes(1); % Target: > Soglia Alta
+    CODE_DX   = task_classes(2); % Target: < Soglia Bassa
+    CODE_REST = task_classes(3); % Target: Nessun attraversamento
+    
+    % Estrazione eventi
     cfPOS = events.POS(events.TYP == start_task);
     cfDUR = events.DUR(events.TYP == start_task);
     cues = events.TYP(ismember(events.TYP, task_classes));
@@ -857,81 +913,112 @@ function [curve_rest, curve_act, curve_act_noTimeout, n_act_timeout] = calc_pare
         warning('Disallineamento Cues/Start events. Controllo indici.');
         ntrials = min(length(cues), length(cfPOS));
     end
-
-    % thresholds
-    for i_th = 1:n_th
-        th_high = thresholds(i_th);       % Es. 0.8
-        th_low  = 1.0 - thresholds(i_th); % Es. 0.2
+    
+    % --- DOPPIO LOOP PER SOGLIE INDIPENDENTI ---
+    
+    % Loop 1: Varia la soglia per SX (Soglia Alta)
+    for i_sx = 1:n_th
+        th_val_sx = thresholds(i_sx); 
+        th_high   = th_val_sx;       % Es. 0.70
         
-        cnt_act_hit = 0;
-        cnt_act_timeout = 0;
-        cnt_act_tot = 0;
-        cnt_rest_ok = 0;
-        cnt_rest_tot = 0;
-        
-        % trials
-        for i_tr = 1:ntrials
-            idx_s = cfPOS(i_tr);
-            idx_e = idx_s + cfDUR(i_tr) - 1;
-           
-            sig = integrated_prob(idx_s:idx_e, 1); 
-            current_cue = cues(i_tr);
+        % Loop 2: Varia la soglia per DX (Soglia Bassa)
+        for i_dx = 1:n_th
+            th_val_dx = thresholds(i_dx);
+            th_low    = 1.0 - th_val_dx; % Es. se val=0.60 -> th_low = 0.40
             
-            idx_cross_high = find(sig >= th_high, 1, 'first');
-            idx_cross_low  = find(sig <= th_low, 1, 'first');
+            % Contatori per questa specifica combinazione (SX=i, DX=j)
+            cnt_act_hit = 0;
+            cnt_act_timeout = 0;
+            cnt_act_tot = 0;
+            cnt_rest_ok = 0;
+            cnt_rest_tot = 0;
             
-            res_high = ~isempty(idx_cross_high);
-            res_low  = ~isempty(idx_cross_low);
-            
-            winner = 'none';
-            if res_high && ~res_low
-                winner = 'high';
-            elseif ~res_high && res_low
-                winner = 'low';
-            elseif res_high && res_low
-                if idx_cross_high < idx_cross_low
+            % Loop sui Trials
+            for i_tr = 1:ntrials
+                idx_s = cfPOS(i_tr);
+                idx_e = idx_s + cfDUR(i_tr) - 1;
+                
+                % Protezione indici array
+                if idx_e > length(integrated_prob)
+                    idx_e = length(integrated_prob);
+                end
+                
+                sig = integrated_prob(idx_s:idx_e, 1); 
+                current_cue = cues(i_tr);
+                
+                % Cerca il primo attraversamento per SX (High)
+                idx_cross_high = find(sig >= th_high, 1, 'first');
+                
+                % Cerca il primo attraversamento per DX (Low)
+                idx_cross_low  = find(sig <= th_low, 1, 'first');
+                
+                res_high = ~isempty(idx_cross_high);
+                res_low  = ~isempty(idx_cross_low);
+                
+                winner = 'none';
+                
+                % Logica per determinare chi vince
+                if res_high && ~res_low
                     winner = 'high';
-                else
+                elseif ~res_high && res_low
                     winner = 'low';
+                elseif res_high && res_low
+                    % Entrambe le soglie superate: vince chi accade prima
+                    if idx_cross_high < idx_cross_low
+                        winner = 'high';
+                    else
+                        winner = 'low';
+                    end
+                end
+                
+                % --- Valutazione Hit/Miss/Timeout ---
+                if current_cue == CODE_SX || current_cue == CODE_DX
+                    cnt_act_tot = cnt_act_tot + 1;
+                    
+                    if current_cue == CODE_SX
+                        if strcmp(winner, 'high')
+                            cnt_act_hit = cnt_act_hit + 1;
+                        end
+                    elseif current_cue == CODE_DX
+                        if strcmp(winner, 'low')
+                            cnt_act_hit = cnt_act_hit + 1;
+                        end
+                    end
+                    
+                    if strcmp(winner, 'none')
+                        cnt_act_timeout = cnt_act_timeout + 1;
+                    end
+                    
+                elseif current_cue == CODE_REST
+                    cnt_rest_tot = cnt_rest_tot + 1;
+                    
+                    if strcmp(winner, 'none')
+                        cnt_rest_ok = cnt_rest_ok + 1;
+                    end
                 end
             end
             
-            if current_cue == CODE_SX || current_cue == CODE_DX
-                cnt_act_tot = cnt_act_tot + 1;
+            % --- Assegnazione valori nella MATRICE (i_sx, i_dx) ---
+            
+            if cnt_act_tot > 0
+                mat_act(i_sx, i_dx) = cnt_act_hit / cnt_act_tot;
                 
-                if current_cue == CODE_SX
-                    if strcmp(winner, 'high')
-                        cnt_act_hit = cnt_act_hit + 1;
-                    end
-                elseif current_cue == CODE_DX
-                    if strcmp(winner, 'low')
-                        cnt_act_hit = cnt_act_hit + 1;
-                    end
-                end
-                if strcmp(winner, 'none')
-                    cnt_act_timeout = cnt_act_timeout + 1;
-                end
-
-            elseif current_cue == CODE_REST
-                cnt_rest_tot = cnt_rest_tot + 1;
-                
-                if strcmp(winner, 'none')
-                    cnt_rest_ok = cnt_rest_ok + 1;
+                den_noTime = cnt_act_tot - cnt_act_timeout;
+                if den_noTime > 0
+                    mat_act_noTimeout(i_sx, i_dx) = cnt_act_hit / den_noTime;
+                else
+                    mat_act_noTimeout(i_sx, i_dx) = 0; % O NaN, a preferenza
                 end
             end
+            
+            if cnt_rest_tot > 0
+                mat_rest(i_sx, i_dx) = cnt_rest_ok / cnt_rest_tot;
+            end
+            
+            mat_act_timeout(i_sx, i_dx) = cnt_act_timeout;
         end
-        
-        if cnt_act_tot > 0
-            curve_act(i_th) = cnt_act_hit / cnt_act_tot;
-            curve_act_noTimeout(i_th) = cnt_act_hit / (cnt_act_tot - cnt_act_timeout);
-        end
-        if cnt_rest_tot > 0
-            curve_rest(i_th) = cnt_rest_ok / cnt_rest_tot;
-        end
-        n_act_timeout(i_th) = cnt_act_timeout;
     end
 end
-
 
 
 
