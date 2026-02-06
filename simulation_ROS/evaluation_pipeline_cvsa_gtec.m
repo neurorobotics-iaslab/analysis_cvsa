@@ -8,7 +8,7 @@ addpath(genpath('/home/paolo/Local/Matlab/yamlmatlab'));
 
 % --- inizialization ---
 nchannels = 16;
-classes = [771 773 783];   
+classes = [730 731 783];   
 
 [filenames_my, pathname_my] = uigetfile('*.gdf', 'Select GDF Files My method', 'MultiSelect', 'on');
 if ischar(filenames_my)
@@ -50,6 +50,7 @@ for idx_file = 1:nFiles_my
 
     % --- load the qda for teh traditional method ---
     k_gain_trad = nan(1, nFiles_trad);
+disp('   Loading trad files to have the QDA');
     for idx_file_t = 1:nFiles_trad
         fullpath_file_parameters = [pathname_trad(1:end-4) 'parameters/' filenames_trad{idx_file_t}(1:end-3) 'yaml'];
         [~, ~, ~, ~, qdaCfg_trad, integratorCfg_trad] = loadParameters(fullpath_file_parameters);
@@ -81,14 +82,8 @@ for idx_file = 1:nFiles_my
     excl_ch = {'Fp1', 'Fp2', 'EOG'};
     [found, indices] = ismember(excl_ch, channels_label);
     excl_chs = indices(found);
-    bands = processingCfg.bands; 
-    nbands = size(bands, 1);
-    signals = cell(1, nbands);
-    for idx_band=1:nbands
-        band = bands(idx_band,:);
-        [signal_processed, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
-        signals{idx_band} = signal_processed;
-    end
+    band = processingCfg.bands; 
+    [signals, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
     
 
     %% ----------------- labels for the data -----------------
@@ -116,21 +111,17 @@ for idx_file = 1:nFiles_my
     sigma_data = cellfun(@(x) x(1), gmmCfg.params.sigma);
     c_l = cell2mat(gmmCfg.params.central_left_idx);
     c_r = cell2mat(gmmCfg.params.central_right_idx);
-    c_c = cell2mat(gmmCfg.params.central_idx);
+    o_l = cell2mat(gmmCfg.params.occipital_left_idx);
+    o_r = cell2mat(gmmCfg.params.occipital_right_idx);
     excl_chs = cell2mat(gmmCfg.params.excluded_idx);
 
     type = gmmCfg.params.type;
     nfeatures = gmmCfg.params.nfeatures;
 
     % features extraction and classification
-    sparsity = nan(size(signals{1}, 1), nfeatures);
-    for idx_sample = 1:size(signals{1},1)
-        tmp_sparsity = [];
-        for idx_band=1:nbands
-            tmp = compute_features_icnic_mi(signals{idx_band}(idx_sample,:), c_l, c_r, c_c);
-            tmp_sparsity = [tmp_sparsity, tmp];
-        end
-        sparsity(idx_sample,:) = tmp_sparsity;
+    sparsity = nan(size(signals, 1), nfeatures);
+    for idx_sample = 1:size(signals,1)
+        sparsity(idx_sample,:) = compute_features_icnic_cvsa(signals(idx_sample,:), type, o_l, o_r, c_l, c_r, nfeatures);
     end
 
     data_standardized = (sparsity - mu_data) ./ sigma_data;
@@ -140,27 +131,21 @@ for idx_file = 1:nFiles_my
     %% ----------------- QDA -----------------
     disp('   applying QDA to all the signal') 
     X = [];
-    for idx_band=1:nbands
-        for idx_band2=1:nbands
-            if all(bands(idx_band,:) == qdaCfg.model.bands(idx_band2,:))
-                chs = qdaCfg.model.idchans{idx_band2};
-                tmp = signals{idx_band}(:,chs); 
-            end
-        end
-        X = [X, tmp];
+    if all(band == qdaCfg.model.bands)
+        chs = qdaCfg.model.idchans{1};
+        X = signals(:, chs);
+    else
+        disp('ERROR in the band!')
     end
     qda_prob = apply_qda_matrix(qdaCfg.model, log(X)); 
 
     % --- qda trad ---
     X_trad = [];
-    for idx_band=1:nbands
-        for idx_band2=1:nbands
-            if all(bands(idx_band,:) == qdaCfg_trad.model.bands(idx_band2,:))
-                chs = qdaCfg_trad.model.idchans{idx_band2};
-                tmp = signals{idx_band}(:,chs); 
-            end
-        end
-        X_trad = [X_trad, tmp];
+    if all(band == qdaCfg_trad.model.bands)
+        chs = qdaCfg_trad.model.idchans{1};
+        X_trad = signals(:, chs);
+    else
+        disp('ERROR in the band!')
     end
     qda_prob_trad = apply_qda_matrix(qdaCfg_trad.model, log(X_trad));
 
@@ -170,7 +155,7 @@ for idx_file = 1:nFiles_my
     [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, gmm_prob, qda_prob, events, event_start, cell2mat(gmmCfg.params.classes), rejection_look_gmm);
 
     % --- integrated prob simulation of traditional ---
-    gmm_prob_fake = zeros(size(signals{1},1),2);
+    gmm_prob_fake = zeros(size(signals,1),2);
     gmm_prob_fake(:,1) = 1;
     [integrated_prob_fake, mask_fake] = applyIntegration(integratorCfg_trad, artifact, gmm_prob_fake, qda_prob_trad, events, event_start, [1, 0], rejection_look_gmm);
     [curve_rest, curve_act, curve_act_noTimeout, n_act_timeout] = calc_pareto_matrix(integrated_prob_fake, events, classes, event_start);
@@ -179,36 +164,33 @@ for idx_file = 1:nFiles_my
     ic_index = find(cell2mat(gmmCfg.params.classes) == integratorCfg.ic_class_label);
     sampleRate_ros = bufferSize/chunkSize;
     do_plot = false;
-    r_square_data_all_1 = []; r_square_data_all_2 = []; r_square_label_all = [];
-    r_square_data_gmm_1 = []; r_square_data_gmm_2 = []; r_square_label_gmm = [];
+    r_square_data_all = []; r_square_label_all = [];
+    r_square_data_gmm = []; r_square_label_gmm = [];
     for idx_trial = 1:ntrial
         start_trial = fixPOS(idx_trial);
         end_trial = cfPOS(idx_trial) + cfDUR(idx_trial)-1;
-        c_power_1 = log(signals{1}(start_trial:end_trial,:));
-        c_power_2 = log(signals{2}(start_trial:end_trial,:));
+        c_power = log(signals(start_trial:end_trial,:));
         c_gmm_prob = gmm_prob(start_trial:end_trial, :);
         c_artifact = artifact(start_trial:end_trial);
         c_qda_prob = qda_prob(start_trial:end_trial,:);
         c_mask = mask(start_trial:end_trial);
         c_integrated = integrated_prob(start_trial:end_trial,:);
-        trial_dur = size(c_power_1, 1);
+        trial_dur = size(c_power, 1);
 
         % for metrics r^2
         if ismember(cueTYP(idx_trial), [classes(1) classes(2)])
-            r_square_data_all_1 = [r_square_data_all_1; c_power_1];
-            r_square_data_all_2 = [r_square_data_all_2; c_power_2];
+            r_square_data_all = [r_square_data_all; c_power];
             r_square_label_all = [r_square_label_all; repmat(cueTYP(idx_trial), trial_dur, 1)];
-            tmp_c_power = c_power_1(c_gmm_prob(:,ic_index) > 0.5,:);
-            r_square_data_gmm_1 = [r_square_data_gmm_1; tmp_c_power];
-            tmp_c_power = c_power_2(c_gmm_prob(:,ic_index) > 0.5,:);
-            r_square_data_gmm_2 = [r_square_data_gmm_2; tmp_c_power];
-            r_square_label_gmm = [r_square_label_gmm; repmat(cueTYP(idx_trial), sum(c_gmm_prob(:,ic_index) > integratorCfg.ic_threshold), 1)];
+
+            tmp_c_power = c_power(c_gmm_prob(:,ic_index) > 0.5,:);
+            r_square_data_gmm = [r_square_data_gmm; tmp_c_power];
+            r_square_label_gmm = [r_square_label_gmm; repmat(cueTYP(idx_trial), sum(c_gmm_prob(:,ic_index) > 0.5), 1)];
         end
 
         if do_plot
             figure();
-            subplot(511)
-            imagesc(c_power_1')
+            subplot(411)
+            imagesc(c_power')
             hold on;
             xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
             xline(fixDUR(idx_trial), 'LineStyle','-');
@@ -217,21 +199,9 @@ for idx_file = 1:nFiles_my
             xlim([1 trial_dur])
             xticks(0:sampleRate_ros:trial_dur);
             xticklabels((0:sampleRate_ros:trial_dur)/sampleRate_ros)
-            title(['Log band power ' num2str(bands(1,1)) '-' num2str(bands(1,2))])
+            title(['Log band power ' num2str(band(1)) '-' num2str(band(2))])
 
-            subplot(512)
-            imagesc(c_power_2')
-            hold on;
-            xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
-            xline(fixDUR(idx_trial), 'LineStyle','-');
-            hold off;
-            yticks(1:nchannels); yticklabels(channels_label)
-            xlim([1 trial_dur])
-            xticks(0:sampleRate_ros:trial_dur);
-            xticklabels((0:sampleRate_ros:trial_dur)/sampleRate_ros)
-            title(['Log band power ' num2str(bands(2,1)) '-' num2str(bands(2,2))])
-
-            subplot(513)
+            subplot(412)
             plot(c_gmm_prob(:,ic_index))
             hold on;
             plot(c_artifact);
@@ -246,7 +216,7 @@ for idx_file = 1:nFiles_my
             title('artifacts and gmm probabilities')
 
 
-            subplot(514)
+            subplot(413)
             tmp_prob = c_qda_prob;
             tmp_prob(c_mask == 0,1) = nan;
             plot(c_qda_prob(:,1))
@@ -264,7 +234,7 @@ for idx_file = 1:nFiles_my
             legend('qda prob','qda not used', 'qda prob used')
             title('classifier probability')
 
-            subplot(515)
+            subplot(414)
             plot(c_integrated(:,1))
             hold on
             yline(integratorCfg.feedbackThs(1), 'LineStyle','--');
@@ -293,11 +263,9 @@ for idx_file = 1:nFiles_my
     end
 
     %% take accuracy
-    m_sig = computeMetrics_signal(gmm_prob, qda_prob, artifact, signals, events, event_start, classes, cell2mat(gmmCfg.params.classes), integratorCfg);
     [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, cell2mat(gmmCfg.params.classes), classes);
     current_method = 'gmm';
     entry = struct();
-    entry.m_sig = m_sig;
     entry.File = filenames_my{idx_file};
     entry.Method = current_method; 
     
@@ -334,10 +302,8 @@ for idx_file = 1:nFiles_my
     if ~exist('Database','var'), Database = []; end
     Database = [Database; entry];
 
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_1, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_1, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_2, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_gmm_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_2, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_gmm, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm,1)) ' | band ' num2str(band(1)) '-' num2str(band(2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_all, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all,1)) ' | band ' num2str(band(1)) '-' num2str(band(2))]);
 
 end
 
@@ -388,14 +354,8 @@ for idx_file = 1:nFiles_trad
     excl_ch = {'Fp1', 'Fp2', 'EOG'};
     [found, indices] = ismember(excl_ch, channels_label);
     excl_chs = indices(found);
-    bands = processingCfg.bands; 
-    nbands = size(bands, 1);
-    signals = cell(1, nbands);
-    for idx_band=1:nbands
-        band = bands(idx_band,:);
-        [signal_processed, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
-        signals{idx_band} = signal_processed;
-    end
+    band = processingCfg.bands;
+    [signals, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, excl_chs);
     
 
     %% ----------------- labels for the data -----------------
@@ -420,7 +380,7 @@ for idx_file = 1:nFiles_trad
     %% ----------------- GMM -----------------
     disp('   applying fake GMM to all the signal') 
 
-    gmm_prob = zeros(size(signals{1},1),2);
+    gmm_prob = zeros(size(signals,1),2);
     gmm_prob(:,1) = 1;
 
     gmmCfg.params.classes = [1, 0];
@@ -428,16 +388,13 @@ for idx_file = 1:nFiles_trad
     %% ----------------- QDA -----------------
     disp('   applying QDA to all the signal') 
     X = [];
-    for idx_band=1:nbands
-        for idx_band2=1:nbands
-            if all(bands(idx_band,:) == qdaCfg.model.bands(idx_band2,:))
-                chs = qdaCfg.model.idchans{idx_band2};
-                tmp = signals{idx_band}(:,chs); 
-            end
-        end
-        X = [X, tmp];
+    if all(band == qdaCfg.model.bands)
+        chs = qdaCfg.model.idchans{1};
+        X = signals(:, chs);
+    else
+        disp('ERROR in the band!')
     end
-    qda_prob = apply_qda_matrix(qdaCfg.model, log(X));
+    qda_prob = apply_qda_matrix(qdaCfg.model, log(X)); 
 
     %% ----------------- integrated prob -----------------
     event_start = 781;
@@ -448,36 +405,32 @@ for idx_file = 1:nFiles_trad
     ic_index = find(gmmCfg.params.classes == integratorCfg.ic_class_label);
     sampleRate_ros = bufferSize/chunkSize;
     do_plot = false;
-    r_square_data_all_1 = []; r_square_data_all_2 = []; r_square_label_all = [];
-    r_square_data_gmm_1 = []; r_square_data_gmm_2 = []; r_square_label_gmm = [];
+    r_square_data_all = []; r_square_data_all_2 = []; r_square_label_all = [];
+    r_square_data_gmm = []; r_square_data_gmm_2 = []; r_square_label_gmm = [];
     for idx_trial = 1:ntrial
         start_trial = fixPOS(idx_trial);
         end_trial = cfPOS(idx_trial) + cfDUR(idx_trial)-1;
-        c_power_1 = log(signals{1}(start_trial:end_trial,:));
-        c_power_2 = log(signals{2}(start_trial:end_trial,:));
+        c_power = log(signals(start_trial:end_trial,:));
         c_gmm_prob = gmm_prob(start_trial:end_trial, :);
         c_artifact = artifact(start_trial:end_trial);
         c_qda_prob = qda_prob(start_trial:end_trial,:);
         c_mask = mask(start_trial:end_trial);
         c_integrated = integrated_prob(start_trial:end_trial,:);
-        trial_dur = size(c_power_1, 1);
+        trial_dur = size(c_power, 1);
 
         % for metrics r^2
         if ismember(cueTYP(idx_trial), [classes(1) classes(2)])
-            r_square_data_all_1 = [r_square_data_all_1; c_power_1];
-            r_square_data_all_2 = [r_square_data_all_2; c_power_2];
+            r_square_data_all = [r_square_data_all; c_power];
             r_square_label_all = [r_square_label_all; repmat(cueTYP(idx_trial), trial_dur, 1)];
-            tmp_c_power = c_power_1(c_gmm_prob(:,ic_index) > 0.5,:);
-            r_square_data_gmm_1 = [r_square_data_gmm_1; tmp_c_power];
-            tmp_c_power = c_power_2(c_gmm_prob(:,ic_index) > 0.5,:);
-            r_square_data_gmm_2 = [r_square_data_gmm_2; tmp_c_power];
-            r_square_label_gmm = [r_square_label_gmm; repmat(cueTYP(idx_trial), sum(c_gmm_prob(:,ic_index) > integratorCfg.ic_threshold), 1)];
+            tmp_c_power = c_power(c_gmm_prob(:,ic_index) > 0.5,:);
+            r_square_data_gmm = [r_square_data_gmm; tmp_c_power];
+            r_square_label_gmm = [r_square_label_gmm; repmat(cueTYP(idx_trial), sum(c_gmm_prob(:,ic_index) > 0.5), 1)];
         end
 
         if do_plot
             figure();
-            subplot(511)
-            imagesc(c_power_1')
+            subplot(411)
+            imagesc(c_power')
             hold on;
             xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
             xline(fixDUR(idx_trial), 'LineStyle','-');
@@ -486,21 +439,9 @@ for idx_file = 1:nFiles_trad
             xlim([1 trial_dur])
             xticks(0:sampleRate_ros:trial_dur);
             xticklabels((0:sampleRate_ros:trial_dur)/sampleRate_ros)
-            title(['Log band power ' num2str(bands(1,1)) '-' num2str(bands(1,2))])
+            title(['Log band power ' num2str(band(1,1)) '-' num2str(band(1,2))])
 
-            subplot(512)
-            imagesc(c_power_2')
-            hold on;
-            xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
-            xline(fixDUR(idx_trial), 'LineStyle','-');
-            hold off;
-            yticks(1:nchannels); yticklabels(channels_label)
-            xlim([1 trial_dur])
-            xticks(0:sampleRate_ros:trial_dur);
-            xticklabels((0:sampleRate_ros:trial_dur)/sampleRate_ros)
-            title(['Log band power ' num2str(bands(2,1)) '-' num2str(bands(2,2))])
-
-            subplot(513)
+            subplot(412)
             plot(c_gmm_prob(:,ic_index))
             hold on;
             plot(c_artifact);
@@ -515,7 +456,7 @@ for idx_file = 1:nFiles_trad
             title('artifacts and gmm probabilities')
 
 
-            subplot(514)
+            subplot(413)
             tmp_prob = c_qda_prob;
             tmp_prob(c_mask == 0,1) = nan;
             plot(c_qda_prob(:,1))
@@ -533,7 +474,7 @@ for idx_file = 1:nFiles_trad
             legend('qda prob','qda not used', 'qda prob used')
             title('classifier probability')
 
-            subplot(515)
+            subplot(414)
             plot(c_integrated(:,1))
             hold on
             yline(integratorCfg.feedbackThs(1), 'LineStyle','--');
@@ -562,12 +503,10 @@ for idx_file = 1:nFiles_trad
     end
 
     %% take accuracy
-    m_sig = computeMetrics_signal(gmm_prob, qda_prob, artifact, signals, events, event_start, classes, gmmCfg.params.classes, integratorCfg);
     [m] = computeMetrics(integratorCfg, artifact, gmm_prob, qda_prob, integrated_prob, events, event_start, gmmCfg.params.classes, classes);
 
     current_method = 'traditional';
     entry = struct();
-    entry.m_sig = m_sig;
     entry.File = filenames_trad{idx_file};
     entry.Method = current_method; 
     
@@ -604,10 +543,8 @@ for idx_file = 1:nFiles_trad
     if ~exist('Database','var'), Database = []; end
     Database = [Database; entry];
 
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_1, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_1, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_1,1)) ' | band ' num2str(bands(1,1)) '-' num2str(bands(1,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_gmm_2, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_gmm_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
-    [r2_values] = calc_r2_from_data(r_square_data_all_2, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all_2,1)) ' | band ' num2str(bands(2,1)) '-' num2str(bands(2,2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_gmm, r_square_label_gmm, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | QDA data | ' num2str(size(r_square_data_gmm,1)) ' | band ' num2str(band(1)) '-' num2str(band(2))]);
+    [r2_values] = calc_r2_from_data(r_square_data_all, r_square_label_all, 'Plot', false, 'ChanLabels', channels_label, 'title_data', ['traditional | all data | ' num2str(size(r_square_data_all,1)) ' | band ' num2str(band(1)) '-' num2str(band(2))]);
 
 end
 
@@ -811,90 +748,8 @@ ylabel(['Threshold ' num2str(classes(2))], 'FontSize', 11, 'FontWeight','bold');
 title({'\bf TIMEOUT Rate', sprintf('GMM Value: %.1f%%', gmm_to_perc)}, 'FontSize', 14);
 
 
-%% FIGURE 7
-load('/home/paolo/chanlocs39.mat'); 
-master_labels = upper(strtrim({chanlocs.labels}));
-
-% 2. Trova gli indici di corrispondenza una volta sola
-% channels_label sono i tuoi 16 canali usati nel codice
-idx_map = zeros(1, length(channels_label));
-for i = 1:length(channels_label)
-    clean_label = upper(strtrim(strrep(channels_label{i}, 'EEG ', '')));
-    found = find(strcmp(master_labels, clean_label));
-    if ~isempty(found)
-        idx_map(i) = found;
-    end
-end
-
-for b = 1:size(m_sig.topo_power, 1)
-    subplot(1, size(m_sig.topo_power, 1), b);
-    full_data = zeros(1, 39);
-    current_topo_16 = squeeze(m_sig.topo_power(b, 1, :)); 
-    full_data(idx_map(idx_map > 0)) = current_topo_16(idx_map > 0);
-    
-    % CONTROLLO ROBUSTEZZA: Se i dati sono tutti zero o uguali, 
-    % aggiungiamo un epsilon infinitesimo per evitare il crash di caxis
-    if all(full_data == full_data(1))
-        full_data(1) = full_data(1) + eps;
-    end
-    
-    % Plot sulla testa completa
-    topoplot(full_data, chanlocs, 'style', 'both', 'electrodes', 'on');
-    
-    % FORZARE I LIMITI: Opzionale, ma consigliato per confrontare i bin tra loro
-    % clim([-1 1]); % Esempio: imposta una scala fissa se usi log-power
-    
-    title(sprintf('GMM Focus\n%.1f-%.1f', m_sig.bins(b), m_sig.bins(b+1)));
-end
 
 
-% FIG 8
-% Aggrega tutti i campioni di tutti i file
-global_conf = []; global_correct = [];
-for i = 1:length(db_gmm)
-    global_conf = [global_conf; db_gmm(i).m_sig.error_conf];
-    global_correct = [global_correct; db_gmm(i).m_sig.error_correct];
-end
-
-% Calcolo accuratezza per bin globale
-plot_bins = 0:0.1:1;
-bin_acc = []; bin_std = [];
-for b = 1:length(plot_bins)-1
-    idx = global_conf >= plot_bins(b) & global_conf < plot_bins(b+1);
-    if sum(idx) > 10 % Solo se abbiamo abbastanza campioni
-        bin_acc(b) = mean(global_correct(idx)) * 100;
-        bin_std(b) = std(global_correct(idx)) / sqrt(sum(idx)) * 100; % Errore standard
-    else
-        bin_acc(b) = NaN; bin_std(b) = NaN;
-    end
-end
-
-figure('Color', 'w', 'Name', 'Reliability Analysis');
-h = bar(plot_bins(1:end-1)+0.05, bin_acc, 'FaceColor', [0.4 0.4 0.4]);
-hold on;
-errorbar(plot_bins(1:end-1)+0.05, bin_acc, bin_std, 'k.', 'LineWidth', 1.5);
-yline(50, 'r--', 'Chance Level (50%)', 'LineWidth', 2);
-xlabel('GMM Focus Score (Confidence)');
-ylabel('QDA Classification Accuracy (%)');
-title('\bf Reliability Curve: Accuracy as a Function of Spatial Focus');
-grid on; ylim([45 100]);
-
-
-% Estrai accuratezza QDA (solo quando il sistema decide)
-acc_trad = [Database(strcmpi({Database.Method}, 'traditional')).Act_Sample_QDA];
-acc_gmm  = [];
-for i = 1:length(db_gmm)
-    % Calcoliamo l'accuratezza del QDA solo sui campioni dove GMM > soglia
-    conf = db_gmm(i).m_sig.error_conf;
-    corr = db_gmm(i).m_sig.error_correct;
-    acc_gmm(i) = mean(corr(conf > 0.5)) * 100; % Usiamo la soglia del gate
-end
-
-figure('Color', 'w', 'Position', [100 100 400 500]);
-boxplot([acc_trad', acc_gmm'], 'Labels', {'Traditional (All)', 'SF-Gated (High Focus)'});
-ylabel('Classification Accuracy (%)');
-title('\bf General Comparison: Gating Impact');
-grid on;
 
 
 
@@ -1105,6 +960,3 @@ function [mat_rest, mat_act, mat_act_noTimeout, mat_act_timeout] = calc_pareto_m
         end
     end
 end
-
-
-

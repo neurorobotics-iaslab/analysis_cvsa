@@ -13,6 +13,17 @@ all_results = event.TYP(ismember(event.TYP, [CODE_HIT, CODE_MISS, CODE_TIMEOUT])
 ic_index = find(gmm_classes == integratorCfg.ic_class_label);
 if isempty(ic_index), ic_index = 1; warning('Classe GMM 1 non trovata, uso colonna 1'); end
 
+m.topo.bins = [0, 0.2, 0.5, 0.8, 1.0]; 
+nbins = length(m.topo.bins)-1;
+nbands = size();
+nchannels = size(signals, 2);
+m.topo.power_accumulator = zeros(nbins, nbands, nchannels);
+m.topo.sample_count = zeros(nbins, 1);
+
+% Accumulatori per Errore vs Confidenza
+m.error_analysis.gmm_conf = []; % Confidenza GMM
+m.error_analysis.qda_correct = []; % 1 se QDA ha indovinato, 0 altrimenti
+
 % counting variables
 cnt_act_hit = 0; cnt_act_miss = 0; cnt_act_timeout = 0; cnt_act_total = 0;
 cnt_rest_ok = 0; cnt_rest_err = 0; cnt_rest_total = 0;

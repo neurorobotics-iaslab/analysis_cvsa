@@ -1,4 +1,4 @@
-function [sparsity, label_sparsity] = compute_features_icnic(c_signal, type, o_l, o_r, c_l, c_r, nsparsity)
+function [sparsity, label_sparsity] = compute_features_icnic_cvsa(c_signal, type, o_l, o_r, c_l, c_r, nsparsity)
 % signal: signal 1 x channels, according to the notion of my 39 channels
     
     sparsity = nan(nsparsity,1);
