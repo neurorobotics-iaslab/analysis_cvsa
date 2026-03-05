@@ -192,4 +192,10 @@ m.snr.vel_rest = avg_vel_rest;
 % SNR: Rapporto tra "Quanto mi muovo quando voglio" e "Quanto tremo quando non voglio"
 m.snr.ratio = avg_vel_act / avg_vel_rest;
 
+% Kappa
+pe = 0.5;
+% singolo campione (Qualità del classificatore QDA)
+m.act.kappa.sample_qda = max(0, (m.act.acc.sample_qda - pe) / (1 - pe));
+% sul trial (Affidabilità del sistema completo)
+m.act.kappa.trial = max(0, (m.act.acc.trial - pe) / (1 - pe));
 end

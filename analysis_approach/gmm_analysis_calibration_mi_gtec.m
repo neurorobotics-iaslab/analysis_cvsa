@@ -5,7 +5,7 @@ addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_bci/utils')
 
 %% Initialization
 DATAPAH = '/home/paolo/cvsa/ic_cvsa_ws/src/';
-classes = [769 770];
+classes = [771 773];
 nchannels = 16;
 nclasses = length(classes);
 filterOrder = 4;
@@ -317,27 +317,27 @@ eva_db = evalclusters(data_2D_noArtif, cluster_idx, 'DaviesBouldin');
 disp(['Davies-Bouldin Index: ' num2str(eva_db.CriterionValues)]);
 
 %% extract data for the selection of the features
-test_trials = 1:ntrial_train; % ------------------------------------------------------------------------------------------------------ here for test and train
+test_trials = ntrial_train+1:ntrial; % ------------------------------------------------------------------------------------------------------ here for test and train
 ntrial_test = length(test_trials);
-data = trial_data(minDurCue+minDurFix+1:end,:,:,test_trials); % data x bands x channels x trial
-nsamples = size(data,1);
+nsamples = min_trial_data - minDurCue - minDurFix;
 X_ic = []; X_all = []; X_nic = [];
 count_artifact = 0; count_all = 0; count_rejected = 0;
 for idx_band = 1:nbands
     tmp_X_ic = []; tmp_X_all = []; tmp_X_nic = [];
     y_ic = []; y_all = []; y_nic = [];
     trials = [];
-    for idx_trial =  1:ntrial_test
+    for i = 1:ntrial_test
+        idx_trial = test_trials(i);
         for idx_sample = 1:nsamples
             if artifacts_cf(idx_sample,idx_trial) == 0 % no artifact
-                tmp_X_all = [tmp_X_all; data(idx_sample,idx_band,:,idx_trial)];
+                tmp_X_all = [tmp_X_all; trial_data(minDurCue+minDurFix+idx_sample,idx_band,:,idx_trial)];
                 y_all = [y_all; trial_typ(idx_trial)];
                 if cluster_labels_cf(idx_sample, idx_trial) >= threshold_gmm_ic % IC state
-                    tmp_X_ic = [tmp_X_ic; data(idx_sample,idx_band,:,idx_trial)];
+                    tmp_X_ic = [tmp_X_ic; trial_data(minDurCue+minDurFix+idx_sample,idx_band,:,idx_trial)];
                     y_ic = [y_ic; trial_typ(idx_trial)];
                     trials = [trials; idx_trial];
                 else
-                    tmp_X_nic = [tmp_X_nic; data(idx_sample,idx_band,:,idx_trial)];
+                    tmp_X_nic = [tmp_X_nic; trial_data(minDurCue+minDurFix+idx_sample,idx_band,:,idx_trial)];
                     y_nic = [y_nic; trial_typ(idx_trial)];
                     count_rejected = count_rejected + 1/nbands;
                 end
@@ -422,6 +422,7 @@ grid on;
 
 
 % R^2
+r2_struct = struct();
 for idx_band = 1:nbands
     r2_ic_allch = calc_r2_from_data(squeeze(X_ic(:,idx_band,:)), y_ic, 'Plot', false, 'ChanLabels', channels_label); 
     r2_all_allch = calc_r2_from_data(squeeze(X_all(:,idx_band,:)), y_all, 'Plot', false, 'ChanLabels', channels_label);
@@ -441,6 +442,10 @@ for idx_band = 1:nbands
     xticks(1:nchannels); xticklabels(channels_label); xtickangle(45);
     yline(0, 'k-', 'LineWidth', 1);
 
+    r2_struct.ic{idx_band} = r2_ic_allch;
+    r2_struct.all{idx_band} = r2_all_allch;
+    r2_struct.nic{idx_band} = r2_nic_allch;
+
     mean_r2_ic = mean(abs(r2_ic_allch));
     mean_r2_all = mean(abs(r2_all_allch));
     mean_r2_nic = mean(abs(r2_nic_allch));
@@ -450,6 +455,7 @@ for idx_band = 1:nbands
               ['Avg R^2: IC=' num2str(mean_r2_ic,'%.3f') ' | All=' num2str(mean_r2_all,'%.3f') ' | NIC=' num2str(mean_r2_nic,'%.3f')]}, ...
               'FontSize', 10, 'Color', 'k');
 end
+
 
 %% --- TOPOPLOTS VISUALIZATION (Mean Difference) ---
 disp('Generazione Topoplot (Differenza Media)...');
@@ -532,20 +538,48 @@ for idx_band = 1:nbands
 end
 set(handles, 'CLim', [-max_val, max_val])
 
+% Save
+output_dir_metrics = fullfile(pathname(1:38), 'results_graz/fisher');
+if ~exist('subject', 'var') || isempty(subject), subject = 'Unknown'; end
+save_name_metrics = fullfile(output_dir_metrics, ['Metrics_' subject '.mat']);
+fisher_score_subj = fisher; 
+topo_diff_struct = struct();
+for idx_band = 1:nbands
+    % GMM SELECTED (IC)
+    X_c1 = squeeze(X_ic(y_ic == classes(1), idx_band, :));
+    X_c2 = squeeze(X_ic(y_ic == classes(2), idx_band, :));
+    topo_diff_struct.ic{idx_band} = mean(X_c1, 1) - mean(X_c2, 1);
+    % STANDARD (ALL)
+    X_c1 = squeeze(X_all(y_all == classes(1), idx_band, :));
+    X_c2 = squeeze(X_all(y_all == classes(2), idx_band, :));
+    topo_diff_struct.all{idx_band} = mean(X_c1, 1) - mean(X_c2, 1);
+    % REJECTED (NIC)
+    X_c1 = squeeze(X_nic(y_nic == classes(1), idx_band, :));
+    X_c2 = squeeze(X_nic(y_nic == classes(2), idx_band, :));
+    topo_diff_struct.nic{idx_band} = mean(X_c1, 1) - mean(X_c2, 1);
+end
+save(save_name_metrics, 'fisher_score_subj', 'r2_struct', 'topo_diff_struct', 'subject', 'channels_label', 'chanlocs_subset');
+disp(['[METRICS] Dati salvati per ' subject]);
+
 %% --- MULTI-FEATURE GMM VALIDATION ---
 feature_data = [];    
 prob_gmm_all = [];
+art_gmm_all = [];
 
 for tr = test_trials
     probs = cluster_labels_cf(:, tr);
+    art = artifacts_cf(:,tr);
     tmp_f = [];
     for f=1:size(sparsity,3)
         tmp_f = [tmp_f, squeeze(sparsity(minDurFix+minDurCue+1:end, tr,f))]; 
     end
 
+    art_gmm_all = [art_gmm_all; art];
     prob_gmm_all  = [prob_gmm_all; probs];
     feature_data = [feature_data; tmp_f];
 end
+prob_gmm_all(art_gmm_all == 1) = [];
+feature_data(art_gmm_all == 1,:) = [];
 
 [N,edges, bin_idx] = histcounts(prob_gmm_all,10);
 
@@ -602,14 +636,23 @@ for f = 1:size(feature_data, 2)
 end
 sgtitle('How does GMM Confidence relate to ALL Input Features?', 'FontSize', 16);
 
+res_dir = fullfile(pathname(1:38), 'results_graz/gmm');
+if ~exist(res_dir, 'dir'), mkdir(res_dir); end
+
+save_name = fullfile(res_dir, ['GMM_Validation_' subject '.mat']);
+save(save_name, 'feature_data', 'prob_gmm_all', 'subject', 'label_plot');
+
+disp(['Dati salvati per soggetto ' subject ' in: ' save_name]);
+
+
 %% --- VALIDAZIONE GMM: REST vs TASK (Le due campane) ---
 figure('Color', 'w', 'Name', 'GMM Reliability Validation', 'Position', [100, 100, 800, 500]);
 % cue
-probs_rest_cue = cluster_labels_cuecf(1:minDurCue, :);
+probs_rest_cue = cluster_labels_cuecf(1:minDurCue, test_trials);
 probs_rest_cue = probs_rest_cue(:); 
 probs_rest_cue(isnan(probs_rest_cue)) = []; 
 % cf
-probs_task_cf = cluster_labels_cuecf(minDurCue+1:end, :);
+probs_task_cf = cluster_labels_cuecf(minDurCue+1:end, test_trials);
 probs_task_cf = probs_task_cf(:); 
 probs_task_cf(isnan(probs_task_cf)) = []; 
 
