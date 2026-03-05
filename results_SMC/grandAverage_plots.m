@@ -1,4 +1,3 @@
-%% FINAL UNIFIED RESULTS PLOT WITH GRAND AVERAGE - IEEE SMC 2026
 clear all; close all; clc;
 
 % --- Loading data ---
@@ -28,7 +27,6 @@ bw = 0.10;
 gap_methods = 0.04; 
 gap_subs = 0.6;
 
-% 1. LOOP SUI SINGOLI SOGGETTI
 for s = 1:n_sub
     sub_id = subjects{s};
     center_sub = (s-1) * (6*bw + gap_methods + gap_subs);
@@ -40,8 +38,7 @@ for s = 1:n_sub
     renderBlock(center_sub, data_gmm, data_trad, bw, gap_methods, metrics, metric_colors, sub_id);
 end
 
-% 2. BLOCCO GRAND AVERAGE (AVG)
-% Posizionato dopo l'ultimo soggetto
+%% BLOCCO GRAND AVERAGE (AVG)
 center_avg = n_sub * (6*bw + gap_methods + gap_subs);
 
 all_gmm_data = FullDatabase(strcmpi({FullDatabase.Method}, 'gmm'));
@@ -50,7 +47,6 @@ all_trad_data = FullDatabase(strcmpi({FullDatabase.Method}, 'traditional'));
 % Renderizza il blocco media con asterisco per Rest Accuracy (p=0.0020)
 renderBlock(center_avg, all_gmm_data, all_trad_data, bw, gap_methods, metrics, metric_colors, 'AVG');
 
-% Legenda e Estetica
 h = []; for m=1:3, h(m) = bar(nan, nan, 'FaceColor', metric_colors(m,:)); end
 legend(h, m_labels, 'Location', 'southoutside', 'Orientation', 'horizontal', 'FontSize', 12);
 ylabel('Percentage (%)', 'FontSize', 14, 'FontWeight', 'bold');
@@ -78,7 +74,6 @@ end
 metrics_t = {'Act_Time_Hit', 'Rest_Time_Err', 'Act_Time_Miss'};
 m_labels_t = {'Active: Time to Hit', 'Rest: Time to Miss', 'Active: Time to Miss'};
 
-% Colori distinti per le dinamiche temporali
 colors_t = [0.2, 0.4, 0.6; 0.4, 0.6, 0.2; 0.8, 0.6, 0.2];
 
 figure('Color', 'w', 'Position', [50 50 1500 700]); hold on;
@@ -95,11 +90,9 @@ for s = 1:n_sub
     renderTimingBlock(center_sub, d_gmm, d_trad, bw, gap_m, metrics_t, colors_t, sub_id);
 end
 
-% Blocco Grand Average (AVG)
 center_avg_t = n_sub * (6*bw + gap_m + gap_s);
 renderTimingBlock(center_avg_t, all_gmm_data, all_trad_data, bw, gap_m, metrics_t, colors_t, 'AVG');
 
-% Estetica e Legenda
 h_t = []; for m=1:3, h_t(m) = bar(nan, nan, 'FaceColor', colors_t(m,:)); end
 legend(h_t, m_labels_t, 'Location', 'southoutside', 'Orientation', 'horizontal', 'FontSize', 12);
 ylabel('Duration (seconds)', 'FontSize', 14, 'FontWeight', 'bold');
@@ -115,15 +108,13 @@ for m = 1:3
     fprintf('%s: p-value = %.4f\n', time_metrics{m}, p);
 end
 
-%% CROSS-VALIDATION ANALYSIS - IEEE SMC 2026
+%% CROSS-VALIDATION ANALYSIS
 subjects = unique({FullDatabase.SubjectID});
 n_sub = length(subjects);
 metrics_sim = {'Act_Acc_NoTo', 'Rest_Acc', 'Act_Num_Timeout'};
 m_labels = {'Trial Accuracy (no timeout)', 'Rest Accuracy','Timeout Rate'};
 
 figure('Color', 'w', 'Position', [50 50 1400 700]); hold on;
-
-% Parametri layout (ridotti a 2 blocchi per soggetto: Real Trad vs Sim GMM)
 bw = 0.12; gap_m = 0.05; gap_s = 0.7;
 
 for s = 1:n_sub
@@ -164,7 +155,6 @@ for s = 1:n_sub
     text(center_sub, -8, sub_id, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 end
 
-% --- AGGIUNTA BLOCCO AVG (GRAND AVERAGE) ---
 center_avg = n_sub * (6*bw + gap_m + gap_s);
 db_all_trad = FullDatabase(strcmpi({FullDatabase.Method}, 'gmm'));
 
@@ -247,7 +237,6 @@ function renderTimingBlock(center, d_gmm, d_trad, bw, gap, metrics, colors, labe
     text(center, -0.8, label, 'HorizontalAlignment', 'center', 'FontWeight', 'bold', 'FontSize', 12);
 end
 
-% --- Funzione di supporto per il rendering dei blocchi ---
 function renderBlock(center, d_gmm, d_trad, bw, gap, metrics, colors, label)
     x_our = center - (3*bw + gap/2);
     x_tr  = center + gap/2;
