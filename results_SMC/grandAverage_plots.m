@@ -1,7 +1,7 @@
 clear all; close all; clc;
 
 % --- Loading data ---
-file_pattern = '/home/paolo/cvsa/ic_cvsa_ws/record_mi/results_SMC/results_*.mat';
+file_pattern = '/home/paolo/cvsa/ic_cvsa_ws/recordings/record_mi/results_SMC/results_*.mat';
 results_files = dir(file_pattern);
 if isempty(results_files), error('No files found.'); end
 

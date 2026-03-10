@@ -1,4 +1,5 @@
-% load of gmm, qda and for each trial shows the results
+% load of gmm, qda and for each trial shows the results. Save the dataset
+% for the anlisis
 clear all; % close all;
 
 addpath('/home/paolo/cvsa/ic_cvsa_ws/src/analysis_bci/equal_ros')
@@ -675,11 +676,11 @@ for idx_file = 1:nFiles_trad
 end
 
 %% --- SAVE ---
-%subject_name = filenames_my{1}(1:2); % Prende i primi due caratteri, es. 'c7'
-%save_path = ['/home/paolo/cvsa/ic_cvsa_ws/record_mi/results_SMC/results_' subject_name '.mat'];
+subject_name = filenames_my{1}(1:2); % Prende i primi due caratteri, es. 'c7'
+save_path = ['/home/paolo/cvsa/ic_cvsa_ws/record_mi/results_SMC/results_' subject_name '.mat'];
 
-%save(save_path, 'Database');
-%fprintf('   [INFO] Risultati salvati correttamente in: %s\n', save_path);
+save(save_path, 'Database');
+fprintf('   [INFO] Risultati salvati correttamente in: %s\n', save_path);
 
 
 
