@@ -10,7 +10,7 @@
 %   OUTPUT:
 %       - signal_processed: signal processed
 %       - header: modification in the POS and DUR of the gdf header
-function [signal_processed, header] = processing_onlineROS_CAR_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, eog_channels)
+function [signal_processed, header] = processing_onlineROS_CAR_hilbert(signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, eog_channels, do_hann)
 disp(['   [proc] start processing like ros for band ' num2str(band(1)) '-' num2str(band(2))]);
 
 nchunks = floor(size(signal, 1)/chunkSize);
@@ -39,14 +39,21 @@ for i=1:nchunks
 
     buffer(1:end-chunkSize,:) = buffer(chunkSize+1:end,:);
     buffer(end-chunkSize+1:end, :) = tmp_data;
-
+    
     % check
     if any(isnan(buffer))
         continue;
     end
 
+    buffer_to_process = buffer;
+    % apply the hann window
+    if do_hann
+        w = hann(size(buffer_to_process, 1));
+        buffer_to_process = buffer_to_process .* w;
+    end
+
     % apply power with hilbert
-    analytic = hilbert(buffer);
+    analytic = hilbert(buffer_to_process);
     tmp_data = abs(analytic).^2;
 
     % apply average

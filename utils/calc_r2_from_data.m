@@ -118,15 +118,15 @@ function [r2_values] = calc_r2_from_data(eeg_data, labels, varargin)
         xticklabels(chan_labels)
         
         % Stampa Top 5 in console
-        [~, idx] = sort(abs(r2_values), 'descend');
-        fprintf('\n--- TOP 5 CANALI ---\n');
-        for i = 1:min(5, n_ch)
-            ch = idx(i);
-            val = r2_values(ch);
-            if ~isempty(chan_labels), name = chan_labels{ch}; else, name = num2str(ch); end
-            dir = ''; 
-            if val > 0, dir = ['-> ' num2str(c1)]; else, dir = ['-> ' num2str(c2)]; end
-            fprintf('%d. %s : r^2 = %+.4f %s\n', i, name, val, dir);
-        end
+%         [~, idx] = sort(abs(r2_values), 'descend');
+%         fprintf('\n--- TOP 5 CANALI ---\n');
+%         for i = 1:min(5, n_ch)
+%             ch = idx(i);
+%             val = r2_values(ch);
+%             if ~isempty(chan_labels), name = chan_labels{ch}; else, name = num2str(ch); end
+%             dir = ''; 
+%             if val > 0, dir = ['-> ' num2str(c1)]; else, dir = ['-> ' num2str(c2)]; end
+%             fprintf('%d. %s : r^2 = %+.4f %s\n', i, name, val, dir);
+%         end
     end
 end
