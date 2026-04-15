@@ -1,4 +1,4 @@
-function [ringBuffer, artifact, processing, gmm, qda, integrator] = loadParameters(path_file)
+function [ringBuffer, artifact, processing, qda_mi, qda_cvsa, integrator] = loadParameters(path_file)
     param = ReadYaml(path_file);
 
     % ring buffer params
@@ -12,35 +12,33 @@ function [ringBuffer, artifact, processing, gmm, qda, integrator] = loadParamete
     processing.bands = str2num(param.processing_bci_node.filters_band);
     processing.filterOrder = param.processing_bci_node.filter_order;
     processing.chunkSize = param.processing_bci_node.chunkSize;
-
-    % gmm params
-    if isfield(param, 'gmm_node')
-        tmp = param.gmm_node.path_gmm_model;
-        [~, name, ext] = fileparts(tmp);
-        gmm.file_name = [name, ext];
-        gmm.name = 'GMM';
-    else
-        warning('Il campo param.gmm_node non è stato trovato. Uso valori di default.');
-        gmm.file_name = '';
-        gmm.name = 'UNKNOWN';
-    end
+    processing.do_hann = param.processing_bci_node.do_hann;
 
     % qda params
-    tmp = param.qda_node.path_qda_model;
-    [~, name, ext] = fileparts(tmp);
-    qda.file_name = [name, ext];
-    qda.name = 'QDA';
+    if isfield(param, 'qda_node_mi')
+        tmp = param.qda_node_mi.path_qda_model;
+        [~, name, ext] = fileparts(tmp);
+        qda_mi.file_name = [name, ext];
+        qda_mi.name = 'QDA_MI';
+    else
+        warning('No qda_node_mi founded. Default values are used.');
+        qda_mi.file_name = '';
+        qda_mi.name = 'UNKNOWN';
+    end
+    if isfield(param, 'qda_node_cvsa')
+        tmp = param.qda_node_cvsa.path_qda_model;
+        [~, name, ext] = fileparts(tmp);
+        qda_cvsa.file_name = [name, ext];
+        qda_cvsa.name = 'QDA_CVSA';
+    else
+        warning('No qda_node_mi founded. Default values are used.');
+        qda_cvsa.file_name = '';
+        qda_cvsa.name = 'UNKNOWN';
+    end 
 
     % integrator
     integrator.type = param.integrator.plugin(23:end);
-    integrator.ic_threshold = param.integrator.ic_threshold;
-    integrator.ic_class_label = param.integrator.ic_class_label;
-    if all(param.protocol.task(1:2) == 'mi')
-        integrator.feedbackThs = cell2mat(param.trainingwheel.thresholds);
-    elseif all(param.protocol.task(1:4) == 'cvsa')
-        integrator.feedbackThs = cell2mat(param.trainingCVSA_node.thresholds); 
-    end
-    
+    integrator.feedbackThs = cell2mat(param.integrator.thresholds);
     integrator.k_gain = param.integrator.k_gain;
     integrator.increment_type = param.integrator.increment;
     

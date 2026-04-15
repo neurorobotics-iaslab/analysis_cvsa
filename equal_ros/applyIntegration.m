@@ -1,11 +1,10 @@
-function [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, gmm_prob, qda_prob, event, event_start, gmm_classes, rejection_look_gmm)
+function [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, qda_prob_cvsa, qda_prob_mi, event, event_start, rejection, paradigm, fs)
 cfPOS = event.POS(event.TYP == event_start);
 cfDUR = event.DUR(event.TYP == event_start);
 ntrial = length(cfPOS);
-ic_index = find(gmm_classes == integratorCfg.ic_class_label);
 
-integrated_prob = ones(size(gmm_prob, 1), 2) .* cell2mat(integratorCfg.init_val);
-mask = zeros(size(gmm_prob, 1), 1);
+integrated_prob = ones(size(qda_prob_cvsa, 1), 2) .* cell2mat(integratorCfg.init_val);
+mask = nan(size(qda_prob_cvsa, 1), 1);
 
 if all(integratorCfg.type == 'Buffer')
     bufferSize = integratorCfg.bufferSize;
@@ -18,28 +17,37 @@ for idx_trial =1:ntrial
     end_trial = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
 
     nsamples_trial = end_trial - start_trial + 1;
-    c_gmm_prob = gmm_prob(start_trial:end_trial,:);
-    c_qda_prob = qda_prob(start_trial:end_trial,:);
+    if strcmp(paradigm, 'mi')
+        merged_prob = qda_prob_mi(start_trial:end_trial,:);
+    elseif strcmp(paradigm, 'cvsa')
+        merged_prob = qda_prob_cvsa(start_trial:end_trial,:);
+    elseif strcmp(paradigm, 'hybrid')
+        c_cvsa = qda_prob_cvsa(start_trial:end_trial,:);
+        c_mi = qda_prob_mi(start_trial:end_trial,:);
+
+        t = (0 : nsamples_trial-1)' / fs;
+        t_alpha = zeros(nsamples_trial, 1);
+        idx_decay = t <= 2.5; 
+        t_alpha(idx_decay) = 0.5 * (1.0 + cos(pi * t(idx_decay) / 2.5));
+        tempered_priors = c_cvsa .^ t_alpha;
+        tempered_priors = tempered_priors ./ sum(tempered_priors, 2);
+
+        merged_prob = c_mi .* tempered_priors;
+        merged_prob = merged_prob ./ sum(merged_prob, 2);
+    end
     c_artifact = artifact(start_trial:end_trial,:);
     c_mask = [];
-
-
     c_integrated = ones(nsamples_trial + 1, 2) .* cell2mat(integratorCfg.init_val);
+
     for idx_sample = 1:nsamples_trial
-        if rejection_look_gmm
-            withrejection = c_gmm_prob(idx_sample,ic_index) >= integratorCfg.ic_threshold && c_artifact(idx_sample) == 0;
-        else
-            withrejection = c_artifact(idx_sample) == 0;
-        end
-        if withrejection
+        if c_artifact(idx_sample) == 0 % no artifact
             % integration
             if all(integratorCfg.type == 'Buffer')
-                merged_prob = (1-c_gmm_prob(idx_sample,ic_index)) * 0.5 + c_gmm_prob(idx_sample,ic_index) * c_qda_prob(idx_sample, :);
-                if merged_prob(1) >= 0.5 
+                if merged_prob(idx_sample, 1) >= rejection 
                     if integratorCfg.increment_type == 0 % HARDINCREMENT
                         inc = 1/bufferSize;
-                    elseif integratorCfg.increment_type == 1 % softincrement
-                        vel = (merged_prob(1) - 0.5) * 2.0 * integratorCfg.k_gain;
+                    elseif integratorCfg.increment_type == 1 % SOFTINCREMENT
+                        vel = (merged_prob(idx_sample, 1) - 0.5) * 2.0 * integratorCfg.k_gain;
                         vel = min(vel, 1);
                         inc = 1/bufferSize * vel;
                     end
@@ -50,7 +58,7 @@ for idx_trial =1:ntrial
                     if integratorCfg.increment_type == 0
                         inc = -1/bufferSize;
                     elseif integratorCfg.increment_type == 1
-                        vel = (merged_prob(2) - 0.5) * 2.0 * integratorCfg.k_gain;
+                        vel = (merged_prob(idx_sample, 2) - 0.5) * 2.0 * integratorCfg.k_gain;
                         vel = min(vel, 1);
                         inc = -1/bufferSize * vel;
                     end
@@ -58,7 +66,7 @@ for idx_trial =1:ntrial
                     c_integrated(idx_sample+1, 2)=max(c_integrated(idx_sample, 2) - inc,0);
                 end
             elseif all(integratorCfg.type == 'Exponential')
-                if c_qda_prob(idx_sample, 1) >= 0.5
+                if c_qda_prob(idx_sample, 1) >= rejection
                     tmp = [1 0];
                 else
                     tmp = [0 1];
