@@ -17,30 +17,6 @@ if ischar(filenames)
     filenames = {filenames};
 end
 nFiles = length(filenames);
-paradigm = filenames{1}(31:33);
-if strcmp(paradigm, 'mi')
-    classes = [769, 770];
-    datapath = './src/qda_bci/';
-    yaml_QDA_path_mi = [datapath 'cfg/mi/qda_test_mi.yaml'];
-    disp('Loading QDA MI...');
-    qda_mi = loadQDA(yaml_QDA_path_mi);
-elseif strcmp(paradigm, 'cvsa')
-    classes = [730, 731];
-    datapath = './src/qda_bci/';
-    yaml_QDA_path_cvsa = [datapath 'cfg/cvsa/qda_test_cvsa.yaml'];
-    disp('Loading QDA CVSA...');
-    qda_cvsa = loadQDA(yaml_QDA_path_cvsa);
-elseif strcmp(paradigm, 'hybrid')
-    classes = [750 751];
-    datapath = './src/qda_bci/';
-    yaml_QDA_path_mi = [datapath 'cfg/mi/qda_test_mi.yaml'];
-    yaml_QDA_path_cvsa = [datapath 'cfg/cvsa/qda_test_cvsa.yaml'];
-    disp('Loading QDA MI...');
-    qda_mi = loadQDA(yaml_QDA_path_mi);
-    disp('Loading QDA CVSA...');
-    qda_cvsa = loadQDA(yaml_QDA_path_cvsa);
-end
-nclasses = length(classes);
 
 
 %% reasoning for one file
@@ -50,20 +26,30 @@ for idx_file = 1:nFiles
     disp(['   Loading gdf file : ', filenames{idx_file}]);
     [c_signal,header] = sload(fullpath_file_gdf);
     c_signal = c_signal(:,1:nchannels);
-    channels_label = header.Label;
+    channels_label = header.Label(1:nchannels);
 
     %% ----------------- load the file -----------------
     disp(['   Loading parameters file: ', filenames{idx_file}(1:end-3) 'yaml'])
     fullpath_file_parameters = [pathname(1:end-4) 'parameters/' filenames{idx_file}(1:end-3) 'yaml'];
-    [ringBufferCfg, artifactCfg, processingCfg, qda_mi, qda_cvsa, integratorCfg] = loadParameters(fullpath_file_parameters);
+    [ringBufferCfg, artifactCfg, processingCfg, qda_mi, qda_cvsa, integratorCfg, paradigm] = loadParameters(fullpath_file_parameters);
 
-    disp(['   Loading QDA mi file: ', qda_mi.file_name])
-    gmm_path = [pathname(1:end-4) qda_mi.file_name];
-    [qda_mi.model, qda_mi.params] = loadGMM(gmm_path);
+    if strcmp(paradigm, 'mi_lhrh') || strcmp(paradigm, 'hybrid')
+        disp(['   Loading QDA mi file: ', qda_mi.file_name])
+        qda_path = qda_mi.path_to_model;
+        qda_mi.model = loadQDA(qda_path);
+        classes = qda_mi.model.classes;
+    end
 
-    disp(['   Loading QDA cvsa file: ', qda_cvsa.file_name])
-    qda_path = [pathname(1:end-4) qda_cvsa.file_name];
-    qda_cvsa.model = loadQDA(qda_path);
+    if strcmp(paradigm, 'cvsa_blbr') || strcmp(paradigm, 'hybrid')
+        disp(['   Loading QDA cvsa file: ', qda_cvsa.file_name])
+        qda_path = qda_cvsa.path_to_model;
+        qda_cvsa.model = loadQDA(qda_path);
+        classes = qda_cvsa.model.classes;
+    end
+
+    if strcmp(paradigm, 'hybrid')
+        classes = [750 751];
+    end
 
     %% ----------------- Artifact -----------------
     disp('   marking signal for artifact remotion')
@@ -81,10 +67,18 @@ for idx_file = 1:nFiles
 
     %% ----------------- data processing -----------------
     disp('   processing EEG data') 
+    [~, indici] = ismember(eog.label, channels_label);
+    eog_channels = indici(indici > 0);
     filterOrder = processingCfg.filterOrder;
-    band = processingCfg.bands; % i knwo we are using one band
+    bands = processingCfg.bands; % i knwo we are using one band
+    nbands = size(bands, 1);
     do_hann = processingCfg.do_hann;
-    [signal_processed, header_processed] = processing_onlineROS_CSD_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, band, chunkSize, do_hann);
+    signals = cell(nbands, 1);
+    for idx_bands = 1:nbands
+        c_band = bands(idx_bands,:);
+        [signal_processed, header_processed] = processing_onlineROS_CAR_hilbert(c_signal, header, nchannels, bufferSize, filterOrder, c_band, chunkSize, eog_channels, do_hann);
+        signals{idx_bands} = signal_processed;
+    end
 
     %% ----------------- labels for the data -----------------
     disp('   extracting labels trials') 
@@ -106,20 +100,32 @@ for idx_file = 1:nFiles
     ntrial = length(fixDUR);
 
     %% ----------------- QDA CVSA -----------------
-    if strcmp(paradigm, 'hybrid') || strcmp(paradigm, 'cvsa')
+    if strcmp(paradigm, 'hybrid') || strcmp(paradigm, 'cvsa_blbr')
         disp('   applying QDA cvsa to all the signal') 
-        qda_prob_cvsa = apply_qda_matrix(qda_cvsa.model, log(signal_processed(:,qda_cvsa.model.idchans{1})));
+        X = [];
+        bands = qda_cvsa.model.bands;
+        nbands = qda_cvsa.model.nbands;
+        for idx_band=1:nbands
+            for idx_band2=1:nbands
+                if all(bands(idx_band,:) == qda_cvsa.model.bands(idx_band2,:))
+                    chs = qda_cvsa.model.idchans{idx_band2};
+                    tmp = signals{idx_band}(:,chs);
+                end
+            end
+            X = [X, tmp];
+        end
+        qda_prob_cvsa = apply_qda_matrix(qda_cvsa.model, log(X));
     end
 
     %% ----------------- QDA MI -----------------
-    if strcmp(paradigm, 'hybrid') || strcmp(paradigm, 'mi')
+    if strcmp(paradigm, 'hybrid') || strcmp(paradigm, 'mi_lhrh')
         disp('   applying QDA mi to all the signal')
         X = [];
-        bands = qda_mi.bands;
-        nbands = qda_mi.nbands;
+        bands = qda_mi.model.bands;
+        nbands = qda_mi.model.nbands;
         for idx_band=1:nbands
             for idx_band2=1:nbands
-                if all(bands(idx_band,:) == qdaCfg.model.bands(idx_band2,:))
+                if all(bands(idx_band,:) == qda_mi.model.bands(idx_band2,:))
                     chs = qda_mi.model.idchans{idx_band2};
                     tmp = signals{idx_band}(:,chs);
                 end
@@ -132,12 +138,13 @@ for idx_file = 1:nFiles
     %% ----------------- integrated prob -----------------
     event_start = 781;
     rejection = 0.5;
+    fs_processed = sampleRate / chunkSize;
     if strcmp(paradigm, 'hybrid') 
-        [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, qda_prob_cvsa, qda_prob_mi, event, event_start, rejection, paradigm, sampleRate);
-    elseif strcmp(paradigm, 'mi')
-        [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, [], qda_prob_mi, event, event_start, rejection, paradigm, sampleRate);
-    elseif strcmp(paradigm, 'cvsa')
-        [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, qda_prob_cvsa, [], event, event_start, rejection, paradigm, sampleRate);
+        [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, qda_prob_cvsa, qda_prob_mi, header_processed.EVENT, event_start, rejection, paradigm, fs_processed);
+    elseif strcmp(paradigm, 'mi_lhrh')
+        [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, [], qda_prob_mi, header_processed.EVENT, event_start, rejection, paradigm, fs_processed);
+    elseif strcmp(paradigm, 'cvsa_blbr')
+        [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, qda_prob_cvsa, [], header_processed.EVENT, event_start, rejection, paradigm, fs_processed);
     end
     
     %% ----------------- plot prob integrated -----------------
@@ -153,22 +160,27 @@ for idx_file = 1:nFiles
         end_trial = cfPOS(idx_trial) + cfDUR(idx_trial);
         trial_dur = end_trial - start_trial;
         c_power = log(signal_processed(start_trial:end_trial,:));
-        c_qda_prob_mi = qda_prob_mi(start_trial:end_trial, :);
         c_artifact = artifact(start_trial:end_trial);
-        c_qda_prob_cvsa = qda_prob_cvsa(start_trial:end_trial,:);
         c_mask = mask(start_trial:end_trial);
         c_integrated = integrated_prob(start_trial:end_trial,:);
+
+        if strcmp(paradigm, 'mi_lhrh') || strcmp(paradigm, 'hybrid')
+            c_qda_prob_mi = qda_prob_mi(start_trial:end_trial, :);
+        end
+        if strcmp(paradigm, 'cvsa_blbr') || strcmp(paradigm, 'hybrid')
+            c_qda_prob_cvsa = qda_prob_cvsa(start_trial:end_trial,:);
+        end
 
         % for metrics r^2
         r_square_data = [r_square_data; c_power];
         r_square_label = [r_square_label; repmat(cueTYP(idx_trial), trial_dur, 1)];
 
         if boom(idx_trial) == 897
-            time_hit = [time_hit; size(c_power, 1) / sampleRate];
+            time_hit = [time_hit; size(c_power, 1) / fs_processed];
         elseif boom(idx_trial) == 898
-            time_miss = [time_miss; size(c_power, 1) / sampleRate];
+            time_miss = [time_miss; size(c_power, 1) / fs_processed];
         elseif boom(idx_trial) == 899
-            time_tout = [time_tout; size(c_power, 1) / sampleRate];
+            time_tout = [time_tout; size(c_power, 1) / fs_processed];
         end
 
         if do_plot
@@ -184,25 +196,47 @@ for idx_file = 1:nFiles
 
 
             subplot(312)
-            tmp_prob_mi = c_qda_prob_mi;
-            tmp_prob_mi(c_mask == 0,1) = nan;
-            tmp_prob_cvsa = c_qda_prob_cvsa;
-            tmp_prob_cvsa(c_mask == 0,1) = nan;
-            plot(c_qda_prob_mi(:,1))
-            hold on
-            plot(c_qda_prob_cvsa(:,1))
+            if strcmp(paradigm, 'cvsa_blbr')
+                tmp_prob_cvsa = c_qda_prob_cvsa;
+                tmp_prob_cvsa(c_mask == 0,1) = nan;
+                plot(c_qda_prob_cvsa(:,1))
+                hold on
+            elseif strcmp(paradigm, 'mi_lhrh')
+                tmp_prob_mi = c_qda_prob_mi;
+                tmp_prob_mi(c_mask == 0,1) = nan;
+                plot(c_qda_prob_mi(:,1))
+                hold on
+            elseif strcmp(paradigm, 'hybrid')
+                tmp_prob_cvsa = c_qda_prob_cvsa;
+                tmp_prob_cvsa(c_mask == 0,1) = nan;
+                plot(c_qda_prob_cvsa(:,1))
+                hold on
+                tmp_prob_mi = c_qda_prob_mi;
+                tmp_prob_mi(c_mask == 0,1) = nan;
+                plot(c_qda_prob_mi(:,1))
+            end
             plot(c_artifact);
-            scatter(1:size(c_qda_prob_mi, 1), c_qda_prob_mi(:,1), 15, 'black', 'filled')
-            scatter(1:size(c_qda_prob_mi, 1), tmp_prob_mi(:,1), 15, 'green', 'filled')
-            scatter(1:size(c_qda_prob_cvsa, 1), c_qda_prob_cvsa(:,1), 15, 'black', 'filled')
-            scatter(1:size(c_qda_prob_cvsa, 1), tmp_prob_cvsa(:,1), 15, 'green', 'filled')
+            if strcmp(paradigm, 'mi_lhrh') || strcmp(paradigm, 'hybrid')
+                scatter(1:size(c_qda_prob_mi, 1), c_qda_prob_mi(:,1), 15, 'black', 'filled')
+                scatter(1:size(c_qda_prob_mi, 1), tmp_prob_mi(:,1), 15, 'green', 'filled')
+            end
+            if strcmp(paradigm, 'cvsa_blbr') || strcmp(paradigm, 'hybrid')
+                scatter(1:size(c_qda_prob_cvsa, 1), c_qda_prob_cvsa(:,1), 15, 'black', 'filled')
+                scatter(1:size(c_qda_prob_cvsa, 1), tmp_prob_cvsa(:,1), 15, 'green', 'filled')
+            end
             yline(0.5, 'LineStyle','--');
             xline(cueDUR(idx_trial)+fixDUR(idx_trial), 'LineStyle','-');
             xline(fixDUR(idx_trial), 'LineStyle','-');
             hold off
             ylim([0 1])
             xlim([1 trial_dur])
-            legend('qda prob mi', 'qda prob cvsa','artifact','qda mi not used', 'qda mi prob used', 'qda cvsa not used', 'qda cvsa prob used')
+            if strcmp(paradigm, 'hybrid')
+                legend('qda prob cvsa', 'qda prob mi','artifact','qda mi not used', 'qda mi prob used', 'qda cvsa not used', 'qda cvsa prob used')
+            elseif strcmp(paradigm, 'cvsa_blbr')
+                legend('qda prob cvsa','artifact', 'qda cvsa not used', 'qda cvsa prob used')
+            elseif strcmp(paradigm, 'mi_lhrh')
+                legend('qda prob mi', 'artifact','qda mi not used', 'qda mi prob used')
+            end
             title('classifier probability')
 
             subplot(313)

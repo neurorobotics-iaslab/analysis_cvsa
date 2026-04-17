@@ -1,4 +1,4 @@
-function [ringBuffer, artifact, processing, qda_mi, qda_cvsa, integrator] = loadParameters(path_file)
+function [ringBuffer, artifact, processing, qda_mi, qda_cvsa, integrator, paradigm] = loadParameters(path_file)
     param = ReadYaml(path_file);
 
     % ring buffer params
@@ -9,10 +9,10 @@ function [ringBuffer, artifact, processing, qda_mi, qda_cvsa, integrator] = load
     artifact = param.ArtifactCfg.params;
 
     % processing params
-    processing.bands = str2num(param.processing_bci_node.filters_band);
-    processing.filterOrder = param.processing_bci_node.filter_order;
-    processing.chunkSize = param.processing_bci_node.chunkSize;
-    processing.do_hann = param.processing_bci_node.do_hann;
+    processing.bands = str2num(param.processing_power_node.filters_band);
+    processing.filterOrder = param.processing_power_node.filter_order;
+    processing.chunkSize = param.processing_power_node.chunkSize;
+    processing.do_hann = param.processing_power_node.do_hann;
 
     % qda params
     if isfield(param, 'qda_node_mi')
@@ -20,9 +20,12 @@ function [ringBuffer, artifact, processing, qda_mi, qda_cvsa, integrator] = load
         [~, name, ext] = fileparts(tmp);
         qda_mi.file_name = [name, ext];
         qda_mi.name = 'QDA_MI';
+        qda_mi.path_to_model = tmp;
+        paradigm = 'mi_lhrh';
     else
         warning('No qda_node_mi founded. Default values are used.');
         qda_mi.file_name = '';
+        qda_mi.path_to_model = '';
         qda_mi.name = 'UNKNOWN';
     end
     if isfield(param, 'qda_node_cvsa')
@@ -30,11 +33,19 @@ function [ringBuffer, artifact, processing, qda_mi, qda_cvsa, integrator] = load
         [~, name, ext] = fileparts(tmp);
         qda_cvsa.file_name = [name, ext];
         qda_cvsa.name = 'QDA_CVSA';
+        qda_cvsa.path_to_model = tmp;
+        paradigm = 'cvsa_blbr';
     else
         warning('No qda_node_mi founded. Default values are used.');
         qda_cvsa.file_name = '';
         qda_cvsa.name = 'UNKNOWN';
-    end 
+    end
+
+    if isfield(param, 'qda_node_mi') && isfield(param, 'qda_node_cvsa')
+        paradigm = 'hybrid';
+    end
+
+
 
     % integrator
     integrator.type = param.integrator.plugin(23:end);

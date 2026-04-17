@@ -1,10 +1,15 @@
-function [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, qda_prob_cvsa, qda_prob_mi, event, event_start, rejection, paradigm, fs)
-cfPOS = event.POS(event.TYP == event_start);
-cfDUR = event.DUR(event.TYP == event_start);
+function [integrated_prob, mask] = applyIntegration(integratorCfg, artifact, qda_prob_cvsa, qda_prob_mi, events, event_start, rejection, paradigm, fs)
+cfPOS = events.POS(events.TYP == event_start);
+cfDUR = events.DUR(events.TYP == event_start);
 ntrial = length(cfPOS);
 
-integrated_prob = ones(size(qda_prob_cvsa, 1), 2) .* cell2mat(integratorCfg.init_val);
-mask = nan(size(qda_prob_cvsa, 1), 1);
+if strcmp(paradigm, 'cvsa_blbr') || strcmp(paradigm, 'hybrid')
+    integrated_prob = ones(size(qda_prob_cvsa, 1), 2) .* cell2mat(integratorCfg.init_val);
+    mask = zeros(size(qda_prob_cvsa, 1), 1);
+elseif strcmp(paradigm, 'mi_lhrh')
+    integrated_prob = ones(size(qda_prob_mi, 1), 2) .* cell2mat(integratorCfg.init_val);
+    mask = zeros(size(qda_prob_mi, 1), 1);
+end
 
 if all(integratorCfg.type == 'Buffer')
     bufferSize = integratorCfg.bufferSize;
@@ -17,9 +22,9 @@ for idx_trial =1:ntrial
     end_trial = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
 
     nsamples_trial = end_trial - start_trial + 1;
-    if strcmp(paradigm, 'mi')
+    if strcmp(paradigm, 'mi_lhrh')
         merged_prob = qda_prob_mi(start_trial:end_trial,:);
-    elseif strcmp(paradigm, 'cvsa')
+    elseif strcmp(paradigm, 'cvsa_blbr')
         merged_prob = qda_prob_cvsa(start_trial:end_trial,:);
     elseif strcmp(paradigm, 'hybrid')
         c_cvsa = qda_prob_cvsa(start_trial:end_trial,:);
