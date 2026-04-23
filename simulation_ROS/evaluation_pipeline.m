@@ -157,7 +157,7 @@ for idx_file = 1:nFiles
     
     for idx_trial = 1:ntrial
         start_trial = fixPOS(idx_trial);
-        end_trial = cfPOS(idx_trial) + cfDUR(idx_trial);
+        end_trial = cfPOS(idx_trial) + cfDUR(idx_trial) - 1;
         trial_dur = end_trial - start_trial;
         c_power = log(signal_processed(start_trial:end_trial,:));
         c_artifact = artifact(start_trial:end_trial);
@@ -173,7 +173,7 @@ for idx_file = 1:nFiles
 
         % for metrics r^2
         r_square_data = [r_square_data; c_power];
-        r_square_label = [r_square_label; repmat(cueTYP(idx_trial), trial_dur, 1)];
+        r_square_label = [r_square_label; repmat(cueTYP(idx_trial), trial_dur + 1, 1)];
 
         if boom(idx_trial) == 897
             time_hit = [time_hit; size(c_power, 1) / fs_processed];
@@ -271,6 +271,6 @@ for idx_file = 1:nFiles
     disp(['      time mean hit: ' num2str(mean(time_hit)) 's'])
     disp(['      time mean miss: ' num2str(mean(time_miss)) 's'])
     disp(['      time mean tout: ' num2str(mean(time_tout)) 's'])
-    [r2_values] = calc_r2_from_data(r_square_data, r_square_label, 'Plot', true, 'ChanLabels', channels_label, 'title_data', 'all data');
+    [r2_values] = calc_r2_from_data(r_square_data, r_square_label, 'Plot', true, 'ChanLabels', channels_label, 'title_data', paradigm);
 
 end
