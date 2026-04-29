@@ -313,7 +313,7 @@ win_size = round((1000 / (times(2) - times(1))) * 0.5);
 pow_tc_cls1_sm = movmean(pow_tc_cls1, win_size, 2);
 pow_tc_cls2_sm = movmean(pow_tc_cls2, win_size, 2);
 
-h_tc_all = figure('Name', sprintf('Time-Course ERD/ERS (%d-%d Hz)', mu_band(1), mu_band(2)), 'Color', 'w', 'Visible', 'off');
+h_tc_all = figure('Name', sprintf('Time-Course ERD/ERS (%d-%d Hz)', mu_band(1), mu_band(2)), 'Color', 'w', 'Visible', 'on');
 set(h_tc_all, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
 
 num_cols = ceil(sqrt(EEG_ep.nbchan));
@@ -338,7 +338,7 @@ end
 
 save_path_tc = fullfile(output_dir, sprintf('TimeCourse_AllChans_%d_%dHz.png', mu_band(1), mu_band(2)));
 saveas(h_tc_all, save_path_tc);
-fprintf('Graph saved in: %s\n', save_path_tc);
+fprintf('Grafico salvato in: %s\n', save_path_tc);
 
 
 %% --- 12. ERSP DIFF ---
@@ -348,16 +348,20 @@ num_bands = size(bands, 1);
 num_interv = size(intervals, 1);
 num_chans = EEG_ep.nbchan;
 
-ERSP_Map_Cls = zeros(length(class_lbl), num_chans, num_bands, num_interv);
+% Matrice per i risultati (es. Classe 1)
+% Dimensioni: [Canali x Bande x Intervalli]
+ERSP_Map_Cls1 = zeros(num_chans, num_bands, num_interv);
+ERSP_Map_Cls2 = zeros(num_chans, num_bands, num_interv);
 
 for ch = 1:num_chans
-    for c = 1:2
-
+    for c = 1:2 % Ciclo sulle due classi
+        % Chiamata a newtimef solo per i trial della classe specifica
         [ersp, ~, ~, times_tf, freqs_tf, ~, ~, ~] = newtimef(EEG_ep.data(ch, :, class_idx{c}), ...
             EEG_ep.pnts, [EEG_ep.times(1) EEG_ep.times(end)], EEG_ep.srate, 0, ...
-            'baseline', 0, 'freqs', [4 30], 'winsize', 128, 'plotersp', 'off', 'plotitc', 'off', 'verbose', 'off');
+            'baseline', [-2000 0], ... % Baseline sottratta internamente
+            'freqs', [4 30], 'winsize', 128, 'plotersp', 'off', 'plotitc', 'off', 'verbose', 'off');
         
-        ersp = ersp <= 0;
+        % Convertiamo l'ERSP medio della classe in percentuale
         P_percent = (10.^(ersp/10)-1)*100; 
         
         for idx_b = 1:num_bands
@@ -365,30 +369,29 @@ for ch = 1:num_chans
             for idx_t = 1:num_interv
                 t_idx = find(times_tf >= intervals(idx_t,1)*1000 & times_tf < intervals(idx_t,2)*1000);
                 
+                % Media della potenza ERSP (%) nella banda e nell'intervallo[cite: 2]
                 val = mean(mean(P_percent(f_idx, t_idx), 1), 2);
                 
-                ERSP_Map_Cls(c, ch, idx_b, idx_t) = val;
+                if c == 1, ERSP_Map_Cls1(ch, idx_b, idx_t) = val;
+                else, ERSP_Map_Cls2(ch, idx_b, idx_t) = val; end
             end
         end
     end
     if mod(ch,10)==0, fprintf('Processing ch %d...\n', ch); end
 end
 
-h_ersp_heat = figure('Name', 'Analisi Reattività ERSP %', 'Color', 'w', 'Visible','off');
+h_ersp_heat = figure('Name', 'Analisi Reattività ERSP %', 'Color', 'w');
 set(h_ersp_heat, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
 tlo = tiledlayout(2,ceil(num_interv/2),  'TileSpacing', 'compact');
 
 for i = 1:num_interv
     nexttile;
-    imagesc(squeeze(abs(ERSP_Map_Cls(1,:,:,i) - ERSP_Map_Cls(2,:,:,i)))); 
+    % Visualizziamo la differenza tra le classi o solo una classe
+    % In questo esempio: (Classe 1 - Classe 2) per vedere il contrasto
+    imagesc(ERSP_Map_Cls1(:,:,i) - ERSP_Map_Cls2(:,:,i)); 
     
-    colormap(jet); colorbar; clim([0 25]); 
-    title(titles_cols{i});
+    colormap(jet); colorbar; clim([-50 50]); % Range tipico per variazioni %[cite: 2]
+    title([titles_cols{i} ' (Diff Cls1-Cls2 %)']);
     set(gca, 'XTick', 1:num_bands, 'XTickLabel', band_names);
     set(gca, 'YTick', 1:num_chans, 'YTickLabel', {EEG_ep.chanlocs.labels});
 end
-sgtitle('ERSP ABS DIFF')
-
-save_path_tc = fullfile(output_dir, sprintf('diff_ERSP_%s_%s.png', class_lbl{1}, class_lbl{2}));
-saveas(h_ersp_heat, save_path_tc);
-fprintf('Grafico salvato in: %s\n', save_path_tc);
