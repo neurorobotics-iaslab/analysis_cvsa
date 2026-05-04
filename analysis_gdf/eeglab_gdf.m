@@ -348,7 +348,7 @@ num_bands = size(bands, 1);
 num_interv = size(intervals, 1);
 num_chans = EEG_ep.nbchan;
 
-ERSP_Map_Cls = zeros(length(class_lbl), num_chans, num_bands, num_interv);
+ERSP_mean_Cls = zeros(length(class_lbl), num_chans, num_bands, num_interv);
 
 for ch = 1:num_chans
     for c = 1:2
@@ -357,7 +357,7 @@ for ch = 1:num_chans
             EEG_ep.pnts, [EEG_ep.times(1) EEG_ep.times(end)], EEG_ep.srate, 0, ...
             'baseline', 0, 'freqs', [4 30], 'winsize', 128, 'plotersp', 'off', 'plotitc', 'off', 'verbose', 'off');
         
-        ersp = ersp <= 0;
+        %ersp = ersp <= 0;
         P_percent = (10.^(ersp/10)-1)*100; 
         
         for idx_b = 1:num_bands
@@ -365,9 +365,9 @@ for ch = 1:num_chans
             for idx_t = 1:num_interv
                 t_idx = find(times_tf >= intervals(idx_t,1)*1000 & times_tf < intervals(idx_t,2)*1000);
                 
-                val = mean(mean(P_percent(f_idx, t_idx), 1), 2);
+                val_mean = mean(mean(P_percent(f_idx, t_idx), 1), 2);
                 
-                ERSP_Map_Cls(c, ch, idx_b, idx_t) = val;
+                ERSP_mean_Cls(c, ch, idx_b, idx_t) = val_mean;
             end
         end
     end
@@ -378,17 +378,112 @@ h_ersp_heat = figure('Name', 'Analisi Reattività ERSP %', 'Color', 'w', 'Visibl
 set(h_ersp_heat, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
 tlo = tiledlayout(2,ceil(num_interv/2),  'TileSpacing', 'compact');
 
+handles = []; max_val = 0;
 for i = 1:num_interv
     nexttile;
-    imagesc(squeeze(abs(ERSP_Map_Cls(1,:,:,i) - ERSP_Map_Cls(2,:,:,i)))); 
+    imagesc(squeeze(abs(ERSP_mean_Cls(1,:,:,i) - ERSP_mean_Cls(2,:,:,i)))); 
+
+    max_val = max([max_val, max(squeeze(abs(ERSP_mean_Cls(1,:,:,i) - ERSP_mean_Cls(2,:,:,i))))]);
     
-    colormap(jet); colorbar; clim([0 25]); 
+    colormap(jet); colorbar;
     title(titles_cols{i});
     set(gca, 'XTick', 1:num_bands, 'XTickLabel', band_names);
     set(gca, 'YTick', 1:num_chans, 'YTickLabel', {EEG_ep.chanlocs.labels});
+    handles = [handles, gca];
 end
+set(handles, 'clim', [0 max_val]);
 sgtitle('ERSP ABS DIFF')
 
 save_path_tc = fullfile(output_dir, sprintf('diff_ERSP_%s_%s.png', class_lbl{1}, class_lbl{2}));
 saveas(h_ersp_heat, save_path_tc);
 fprintf('Grafico salvato in: %s\n', save_path_tc);
+
+%% --- 13. FISHER SCORE HEATMAP ---
+fprintf('\n--- COMPUTING FISHER SCORE ---\n');
+
+Fisher_Matrix = zeros(num_chans, num_bands, num_interv);
+
+for ch = 1:num_chans
+    [~, ~, ~, times_tf, freqs_tf, ~, ~, tfdata] = newtimef(EEG_ep.data(ch, :, [idx_left, idx_right]), ...
+        EEG_ep.pnts, [EEG_ep.times(1) EEG_ep.times(end)], EEG_ep.srate, 0, ...
+        'baseline', 0, 'freqs', [4 30], 'winsize', 128, 'plotersp', 'off', 'plotitc', 'off', 'verbose', 'off');
+    
+    P_trial = abs(tfdata).^2; 
+    
+    base_idx = find(times_tf >= -2000 & times_tf <= 0);
+    for tr = 1:size(P_trial, 3)
+        mean_base = mean(P_trial(:, base_idx, tr), 2);
+        P_trial(:, :, tr) = ((P_trial(:, :, tr) ./ mean_base) - 1) * 100;
+    end
+    
+    trials_cls1 = P_trial(:, :, 1:length(idx_left));
+    trials_cls2 = P_trial(:, :, length(idx_left)+1:end);
+
+    for idx_b = 1:num_bands
+        f_idx = find(freqs_tf >= bands(idx_b,1) & freqs_tf <= bands(idx_b,2));
+        for idx_t = 1:num_interv
+            t_idx = find(times_tf >= intervals(idx_t,1)*1000 & times_tf < intervals(idx_t,2)*1000);
+            
+            m_trials_1 = squeeze(mean(mean(trials_cls1(f_idx, t_idx, :), 1), 2));
+            m_trials_2 = squeeze(mean(mean(trials_cls2(f_idx, t_idx, :), 1), 2));
+            
+            mean1 = mean(m_trials_1); mean2 = mean(m_trials_2);
+            var1 = var(m_trials_1);   var2 = var(m_trials_2);
+            
+            Fisher_Matrix(ch, idx_b, idx_t) = (mean1 - mean2)^2 / (var1 + var2 + eps);
+        end
+    end
+    if mod(ch,10)==0, fprintf('Fisher Score: ch %d processed\n', ch); end
+end
+
+h_fisher = figure('Name', 'Fisher Score Analysis', 'Color', 'w', 'Visible','off');
+set(h_fisher, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
+tlo = tiledlayout(2, ceil(num_interv/2), 'TileSpacing', 'compact');
+
+for i = 1:num_interv
+    nexttile;
+    imagesc(Fisher_Matrix(:, :, i)); 
+    colormap(jet); colorbar; 
+    title(titles_cols{i});
+    set(gca, 'XTick', 1:num_bands, 'XTickLabel', band_names);
+    set(gca, 'YTick', 1:num_chans, 'YTickLabel', {EEG_ep.chanlocs.labels});
+end
+sgtitle('Fisher Score Heatmap (Feature Importance)');
+saveas(h_fisher, fullfile(output_dir, 'Fisher_Score_Heatmap.png'));
+
+% --- TOPOPLOT FISHER SCORE ---
+fprintf('\n--- GENERATING FISHER SCORE TOPOPLOTS ---\n');
+
+for idx_b = 1:num_bands
+    b_name = band_names{idx_b};
+    
+    h_topo_fish = figure('Name', sprintf('Fisher Topo: %s', b_name), 'Color', 'w', 'Visible', 'off');
+    set(h_topo_fish, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
+    tlo_f = tiledlayout(1, num_interv, 'TileSpacing', 'compact', 'Padding', 'tight');
+    
+    max_fish_band = max(max(Fisher_Matrix(:, idx_b, :)));
+    
+    for idx_t = 1:num_interv
+        nexttile;
+        data_topo = Fisher_Matrix(:, idx_b, idx_t);
+        
+        topoplot(data_topo, EEG_ep.chanlocs, 'style', 'both', ...
+            'maplimits', [0 max_fish_band + eps], 'electrodes', 'labels', 'whitebk', 'on');
+        
+        title(titles_cols{idx_t}, 'FontSize', 10);
+        
+        if idx_t == num_interv
+            cb = colorbar;
+            ylabel(cb, 'Fisher Score');
+        end
+    end
+    
+    sgtitle(sprintf('Fisher Score Topographic Map - Band: %s Hz', strrep(b_name, '_', '-')), ...
+        'FontSize', 14, 'FontWeight', 'bold');
+    
+    save_topo_name = sprintf('Fisher_Score_topo_%s.png', b_name);
+    saveas(h_topo_fish, fullfile(output_dir, save_topo_name));
+    close(h_topo_fish);
+    
+    fprintf('Saved Fisher Topoplot for band %s: %s\n', b_name, save_topo_name);
+end
