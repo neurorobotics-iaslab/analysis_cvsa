@@ -71,16 +71,21 @@ eeglab redraw;
 fprintf('Visualization dataset: %s\n', EEG.setname);
 pop_eegplot(EEG, 1, 1, 1);
 
-%% --- 6. ANALISI PSD PRE-PROCESAMENTO (Dati Continui) ---
+
+%% --- 6. ANALISI PSD PRE-PROCESAMENTO ---
 fprintf('\n--- STARTING PSD ---\n');
 freq_range = [2 30]; 
 figure('Name', 'PSD 1: Data Pre-ICA and CAR', 'Color', 'w');
 pop_spectopo(EEG, 1, [0  EEG.pnts], 'EEG' ,  'freq', [8 12 14], 'freqrange', freq_range, 'electrodes', 'on');
 
-%% --- 6.5 ICA ---
-fprintf('\n--- COMPUTING ICA ON ALL CONTINUOUS DATA ---\n');
-EEG = pop_runica(EEG, 'icatype', 'runica');
-[ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, CURRENTSET);
+%% --- 6.5 ICA --
+do_ica = false;
+if do_ica
+    fprintf('\n--- COMPUTING ICA ON ALL CONTINUOUS DATA ---\n');
+    EEG = pop_runica(EEG, 'icatype', 'runica'); % 
+    [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, CURRENTSET);
+end
+
 
 %% --- 7. EPOCHING ---
 if any([contains(files{1}, 'cvsa_blbr'), contains(files{1}, 'cvsa_lbrb')])
@@ -101,48 +106,41 @@ epoch_limits = [-2  5];
 EEG_ep = pop_epoch(EEG, event_types, epoch_limits, 'newname', [EEG.setname '_epoched'], 'epochinfo', 'yes');
 EEG_ep = pop_rmbase(EEG_ep, [-2000 0]);
 
+
 %% --- 8. ISPEZIONE E RIMOZIONE ICA INTERATTIVA (Sulle Epoche) ---
-fprintf('\n--- APPLY ICA ---\n');
-EEG_ep = iclabel(EEG_ep);
-
-thresh = [NaN NaN; 0.75 1; 0.75 1; 0.75 1; NaN NaN; 0.75 1; 0.75 1];
-EEG_ep = pop_icflag(EEG_ep, thresh);
-
-bad_comps = find(EEG_ep.reject.gcompreject);
-if ~isempty(bad_comps)
-    fprintf('ICLabel SUGGEST remotion of %d components: [%s]\n', length(bad_comps), num2str(bad_comps));
-end
-
-assignin('base', 'EEG', EEG_ep);
-[ALLEEG, EEG_ep, CURRENTSET] = eeg_store(ALLEEG, EEG_ep, 0);
-
-% Apre l'interfaccia
-pop_selectcomps(EEG_ep, 1:size(EEG_ep.icaweights,1));
-
-h_gui = gcf; 
-
-if isgraphics(h_gui, 'figure')
-    uiwait(h_gui);
-end
-
-EEG_ep = evalin('base', 'EEG');
-final_bad_comps = find(EEG_ep.reject.gcompreject);
-
-if ~isempty(final_bad_comps)
-    fprintf('\nRemotion components: [%s]...\n', num2str(final_bad_comps));
-    EEG_ep = pop_subcomp(EEG_ep, final_bad_comps, 0);
+if do_ica
+    fprintf('\n--- APPLYING ICA CLEANING ---\n');
+    EEG_ep = iclabel(EEG_ep);
+    
+    thresh = [NaN NaN; 0.75 1; 0.75 1; 0.75 1; NaN NaN; 0.75 1; 0.75 1];
+    EEG_ep = pop_icflag(EEG_ep, thresh);
+    
+    bad_comps = find(EEG_ep.reject.gcompreject);
+    if ~isempty(bad_comps)
+        fprintf('ICLabel SUGGEST remotion of %d components: [%s]\n', length(bad_comps), num2str(bad_comps));
+    end
     
     assignin('base', 'EEG', EEG_ep);
-    [ALLEEG, EEG_ep, CURRENTSET] = eeg_store(ALLEEG, EEG_ep, CURRENTSET);
+    pop_selectcomps(EEG_ep, 1:size(EEG_ep.icaweights,1));
     
-    fprintf('Remotion ended.\n');
+    h_gui = gcf; 
+    if isgraphics(h_gui, 'figure'), uiwait(h_gui); end
+    
+    EEG_ep = evalin('base', 'EEG');
+    final_bad_comps = find(EEG_ep.reject.gcompreject);
+    
+    if ~isempty(final_bad_comps)
+        fprintf('\nRemoving components: [%s]...\n', num2str(final_bad_comps));
+        EEG_ep = pop_subcomp(EEG_ep, final_bad_comps, 0);
+    end
+    
+    % PSD Post-ICA
+    figure('Name', 'PSD 2: After ICA', 'Color', 'w');
+    pop_spectopo(EEG_ep, 1, [EEG_ep.times(1) EEG_ep.times(end)], 'EEG' ,  'freq', [8 12 14], 'freqrange', freq_range, 'electrodes', 'on');
 else
-    fprintf('\nNothing removed.\n');
+    fprintf('\n--- ICA SKIPPED PER USER SETTING ---\n');
 end
 
-%% --- 8.5 ANALISI PSD POST-ICA ---
-figure('Name', 'PSD 2: After ICA', 'Color', 'w');
-pop_spectopo(EEG_ep, 1, [EEG_ep.times(1) EEG_ep.times(end)], 'EEG' ,  'freq', [8 12 14], 'freqrange', freq_range, 'electrodes', 'on');
 
 %% --- 9. APPLICAZIONE CAR (Common Average Reference) ---
 fprintf('\n--- APPLY CAR ---\n');
