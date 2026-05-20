@@ -31,7 +31,14 @@ function probs = apply_slda(features, slda, csp_bands)
     Xlog  = log(X);
 
     score = Xlog * slda.weights(:) + slda.intercept;     % [n_valid x 1]
-    p2    = 1 ./ (1 + exp(-score));                      % P(class 2)
+    
+    % Apply Platt calibration parameters (defaulting to standard sigmoid: a=1.0, b=0.0)
+    platt_a = 1.0;
+    platt_b = 0.0;
+    if isfield(slda, 'platt_a'), platt_a = slda.platt_a; end
+    if isfield(slda, 'platt_b'), platt_b = slda.platt_b; end
+    
+    p2    = 1 ./ (1 + exp(-(platt_a * score + platt_b)));  % P(class 2)
     p1    = 1 - p2;                                      % P(class 1)
 
     probs(valid, :) = [p1, p2];

@@ -59,9 +59,17 @@ end
 
 bufsize_proc = double(params.RingBufferCfg.params.size);
 bufsize_art  = double(params.RingBufferCfgArtifact.params.size);
-proc_node    = ['processing_fbcsp_', first_paradigm_key(paradigm)];
-do_car       = logical(params.(proc_node).do_car);
 eog_names    = to_strcell(params.CarCfg.params.EOG_ch_names);
+
+% Dynamically resolve do_car for each stream
+do_car_mi = true;
+if isfield(params, 'processing_fbcsp_mi')
+    do_car_mi = logical(params.processing_fbcsp_mi.do_car);
+end
+do_car_cvsa = true;
+if isfield(params, 'processing_fbcsp_cvsa')
+    do_car_cvsa = logical(params.processing_fbcsp_cvsa.do_car);
+end
 
 log_step('main_simulate: paradigm=%s, fs=%g, framerate=%g, chunk=%d, bufproc=%d, bufart=%d', ...
          paradigm, fs, framerate, chunk_size, bufsize_proc, bufsize_art);
@@ -81,18 +89,20 @@ if use_cvsa
 end
 
 % --- 4) Apply processing (one stream per paradigm) ----------------------
-proc_cfg = struct('samplerate', fs, 'chunk_size', chunk_size, ...
-                  'bufsize', bufsize_proc, 'filter_order', 4, ...
-                  'do_car', do_car, 'eog_names', {eog_names});
-
 features_mi = []; header_mi = [];
 features_cv = []; header_cv = [];
 info_proc   = [];
 if use_mi
-    [features_mi, header_mi, info_proc] = apply_processing(signal, header, csp_mi, proc_cfg);
+    proc_cfg_mi = struct('samplerate', fs, 'chunk_size', chunk_size, ...
+                         'bufsize', bufsize_proc, 'filter_order', 4, ...
+                         'do_car', do_car_mi, 'eog_names', {eog_names});
+    [features_mi, header_mi, info_proc] = apply_processing(signal, header, csp_mi, proc_cfg_mi);
 end
 if use_cvsa
-    [features_cv, header_cv, info2] = apply_processing(signal, header, csp_cvsa, proc_cfg);
+    proc_cfg_cvsa = struct('samplerate', fs, 'chunk_size', chunk_size, ...
+                           'bufsize', bufsize_proc, 'filter_order', 4, ...
+                           'do_car', do_car_cvsa, 'eog_names', {eog_names});
+    [features_cv, header_cv, info2] = apply_processing(signal, header, csp_cvsa, proc_cfg_cvsa);
     if isempty(info_proc), info_proc = info2; end
 end
 

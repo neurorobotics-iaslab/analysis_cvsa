@@ -36,7 +36,21 @@ function slda = load_slda(params, paradigm_key)
     slda.n_components = numel(to_vec(p.selected_components_indices));
     slda.n_features   = numel(slda.weights);
 
-    log_step('load_slda[%s]: %d features (%d comp x %d bands), classes=[%s]', ...
+    % Safe parsing of Platt calibration parameters (default to standard sigmoid: a=1.0, b=0.0)
+    if isfield(p, 'slda_calibrated_weights') && ~isempty(p.slda_calibrated_weights)
+        slda.platt_a = to_vec(p.slda_calibrated_weights);
+        slda.platt_a = slda.platt_a(1);
+    else
+        slda.platt_a = 1.0;
+    end
+    if isfield(p, 'slda_calibrated_intercept') && ~isempty(p.slda_calibrated_intercept)
+        slda.platt_b = to_vec(p.slda_calibrated_intercept);
+        slda.platt_b = slda.platt_b(1);
+    else
+        slda.platt_b = 0.0;
+    end
+
+    log_step('load_slda[%s]: %d features (%d comp x %d bands), classes=[%s], platt_a=%.3f, platt_b=%.3f', ...
              paradigm_key, slda.n_features, slda.n_components, ...
-             size(slda.bands, 1), num2str(slda.classes));
+             size(slda.bands, 1), num2str(slda.classes), slda.platt_a, slda.platt_b);
 end
