@@ -30,6 +30,13 @@ function probs = apply_slda(features, slda, csp_bands)
     X     = features(valid, col_idx);
     Xlog  = log(X);
 
+    % Apply MIBIF/mRMR feature selection mask (no-op when empty).
+    % selected_feature_indices are 1-based and index into the band-major
+    % flat vector produced by col_idx reordering (same layout as slda.py).
+    if isfield(slda, 'selected_feature_indices') && ~isempty(slda.selected_feature_indices)
+        Xlog = Xlog(:, slda.selected_feature_indices);
+    end
+
     score = Xlog * slda.weights(:) + slda.intercept;     % [n_valid x 1]
     
     % Apply Platt calibration parameters (defaulting to standard sigmoid: a=1.0, b=0.0)

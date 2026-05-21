@@ -50,7 +50,24 @@ function slda = load_slda(params, paradigm_key)
         slda.platt_b = 0.0;
     end
 
-    log_step('load_slda[%s]: %d features (%d comp x %d bands), classes=[%s], platt_a=%.3f, platt_b=%.3f', ...
-             paradigm_key, slda.n_features, slda.n_components, ...
-             size(slda.bands, 1), num2str(slda.classes), slda.platt_a, slda.platt_b);
+    % Feature selection mask (optional). YAML stores 0-based Python indices;
+    % convert to 1-based MATLAB indices. slda.weights is already sized to
+    % len(selected_feature_indices) when feature selection is active.
+    if isfield(p, 'selected_feature_indices') && ~isempty(p.selected_feature_indices)
+        sel = to_vec(p.selected_feature_indices);   % handles cell or numeric
+        slda.selected_feature_indices = sel + 1;    % 0-based → 1-based
+    else
+        slda.selected_feature_indices = [];
+    end
+
+    n_fs = numel(slda.selected_feature_indices);
+    if n_fs > 0
+        log_step('load_slda[%s]: %d features (%d comp x %d bands), FS=%d kept, classes=[%s], platt_a=%.3f, platt_b=%.3f', ...
+                 paradigm_key, slda.n_features, slda.n_components, ...
+                 size(slda.bands, 1), n_fs, num2str(slda.classes), slda.platt_a, slda.platt_b);
+    else
+        log_step('load_slda[%s]: %d features (%d comp x %d bands), no FS, classes=[%s], platt_a=%.3f, platt_b=%.3f', ...
+                 paradigm_key, slda.n_features, slda.n_components, ...
+                 size(slda.bands, 1), num2str(slda.classes), slda.platt_a, slda.platt_b);
+    end
 end
