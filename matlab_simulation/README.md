@@ -29,29 +29,64 @@ in spirit.
 
 ## 1. How to run
 
+Three entry points, all self-contained (pick GDFs via file dialogs):
+
+### `main_simulate` — single-file, visual inspection
+
 ```matlab
 cd /home/paolo/bci_vr_ws/src/analysis_bci/matlab_simulation
 main_simulate
 ```
 
-`main_simulate.m` will:
+Single GDF → companion YAML → full pipeline → one figure with all CF trials.
+Use this to inspect a specific recording in detail.
 
-1. Open a file picker (`uigetfile`) on `test_node_data/test_evaluation/recorded/`
-   (or `recordings/` if that folder doesn't exist) — you pick a `.gdf`.
-2. Load the companion `.yaml` automatically (same basename, same folder).
-   This is the `rosparam dump` that `bag_bci` writes next to every GDF,
-   so it has every node's parameters.
-3. Run the full chunk-by-chunk pipeline.
-4. Pop up the per-trial plot.
+### `main_batch_evaluate` — multi-file metrics
 
-Requirements:
+```matlab
+main_batch_evaluate
+```
+
+Multi-select GDFs (all with the same paradigm). For each file, replays the
+pipeline and computes:
+
+| Metric | Description |
+|---|---|
+| `trial_acc` | Hit rate — % of CF trials where normalised target ≥ 1.0 |
+| `trial_acc_no_reject` | Hit rate excluding trials where ≥ 30 % of CF frames had artifact |
+| `mean_tth` | Mean time-to-hit (s) over HIT trials only |
+| `mean_sample_acc` | Frame-level accuracy: argmax(raw P) vs target class (%) |
+| `mean_confidence` | Mean P(target class) over valid CF frames (%) |
+| `mean_art_rate` | Fraction of CF frames where the artifact gate fired (%) |
+| `mean_peak_norm` | Mean max normalised probability reached for target class |
+| Per-class: `hit_rate`, `precision`, `recall`, `mean_tth`, `confidence`, `peak_norm` | Same metrics split by trial onset class |
+
+Prints a per-file report and a cross-file aggregate (mean ± std). If
+`show_all_trials = true` (top of script), it also opens two figures per file
+— one figure per class, showing every CF trial for that class in the
+standard P(c1) view.
+
+Results are saved to `eval_<paradigm>_<basename>.mat` alongside the GDFs.
+
+### `main_compare_paradigms` — cross-paradigm comparison
+
+```matlab
+main_compare_paradigms
+```
+
+Loads three `.mat` files (MI → CVSA → Hybrid, one dialog each), then:
+- Prints a side-by-side metric table (mean ± std)
+- Figure 1 — bar charts for all scalar metrics (with error bars)
+- Figure 2 — grouped bar: per-class hit rate by paradigm
+- Figure 3 — precision vs recall scatter with error crosses
+
+Requirements (all three entry points):
 - MATLAB R2019+ with the **Signal Processing Toolbox** (`butter`, `filter`)
 - **yamlmatlab** on the path — https://github.com/jiri-cigler/yamlmatlab
 - **BIOSIG** (`sload`) on the path — https://biosig.sourceforge.io
 
-Works automatically for `paradigm = "mi" | "cvsa" | "hybrid"` — the
-paradigm is read from `integrator.paradigm` in the YAML, and the right
-sLDA/CSP/fusion paths are selected.
+Works automatically for `paradigm = "mi" | "cvsa" | "hybrid"` — read from
+`integrator.paradigm` in the YAML.
 
 ---
 
@@ -87,7 +122,9 @@ aligned by chunk index.
 
 ```
 matlab_simulation/
-├── main_simulate.m            # entry point: GUI + orchestration
+├── main_simulate.m            # single-file: GUI → pipeline → per-trial plot
+├── main_batch_evaluate.m      # multi-file: metrics per file + aggregate + optional plots
+├── main_compare_paradigms.m   # loads three eval .mat files (MI/CVSA/Hybrid) → comparison
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename
 │   ├── load_params_yaml.m     # full rosparam-dump struct sibling to the GDF
@@ -101,7 +138,7 @@ matlab_simulation/
 │   └── apply_slda.m           # log + sigmoid on every valid feature row
 ├── integrator/
 │   ├── integrate_signal.m     # per-trial integration around each event 781
-│   └── bayesian_fuse.m        # hybrid prior fusion
+│   └── bayesian_fuse.m        # hybrid prior fusion (LOP + agreement gate)
 ├── plotting/
 │   └── plot_trials.m          # one panel per trial, P(c1) view
 └── utils/
@@ -236,8 +273,9 @@ Per CF chunk `c = start_chunk + j − 1`:
    - `mi`:    `p_in = p_mi(c, 1)` (sLDA P(class 1))
    - `cvsa`:  `p_in = p_cvsa(c, 1)`
    - `hybrid`: Bayesian fusion of MI and CVSA with cosine-annealed prior
-     `alpha = 0.5 * (1 + cos(pi * min(t, 2.5) / 2.5))`, where
-     `t = frame_count / framerate`. `p_in = fused(1)`.
+     `alpha = 0.5 * (1 + cos(pi * min(t, H) / H))`, where
+     `t = frame_count / framerate` and `H = int_cfg.cvsa_influence` (default 2.5 s).
+     See `bayesian_fuse.m` for LOP + agreement-gate details. `p_in = fused(1)`.
 2. **Leaky binary integrator step**
    (this is `step_integrator` from the validated test, which in turn is
    equivalent to the C++ `Buffer` plugin for the binary case with init=0.5):
@@ -402,7 +440,7 @@ The names below are reused consistently across all stages.
 - GDF events delivered to the integrator on the chunk that contains them,
   so event 781 resets the leaky buffer and the hybrid CVSA-prior timer at
   exactly the right sample.
-- Bayesian fusion `alpha(t) = 0.5 * (1 + cos(pi * min(t, 2.5) / 2.5))`.
+- Bayesian fusion `alpha(t) = 0.5 * (1 + cos(pi * min(t, H) / H))` where `H = int_cfg.cvsa_influence` (default 2.5 s, read from the YAML).
 - Leaky binary WTA equivalent to the n-class `Buffer` plugin for the
   symmetric binary case with `init = [0.5, 0.5]`.
 - Per-class linear-stretch normalisation, line-by-line port of

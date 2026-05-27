@@ -26,7 +26,10 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
 %   .pass        bool           target hit normalized >= 1.0 within trial
 
     CF_CODE   = 781;
-    HALF_LIFE = 2.5;
+    HALF_LIFE = 2.5;    % default; overridden by int_cfg.cvsa_influence if present
+    if isfield(int_cfg, 'cvsa_influence')
+        HALF_LIFE = double(int_cfg.cvsa_influence);
+    end
 
     classes   = to_vec(int_cfg.classes);
     n_cls     = numel(classes);
