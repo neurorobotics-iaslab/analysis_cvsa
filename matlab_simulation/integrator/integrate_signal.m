@@ -23,12 +23,16 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
 %   .integrated  [DUR x 2]      buffer state (= init_val at frame 1)
 %   .normalized  [DUR x 2]      per-class linear stretch into [0, 1]
 %   .artifact    [DUR x 1]      logical
-%   .pass        bool           target hit normalized >= 1.0 within trial
+%   .pass        bool           integrated/raw[target_class] >= thresholds[target_class] within CF window
 
     CF_CODE   = 781;
-    HALF_LIFE = 2.5;    % default; overridden by int_cfg.cvsa_influence if present
+    HALF_LIFE = 3.0;    % default decay duration; overridden by int_cfg.cvsa_influence
+    HOLD      = 1.0;    % default plateau duration; overridden by int_cfg.cvsa_hold
     if isfield(int_cfg, 'cvsa_influence')
         HALF_LIFE = double(int_cfg.cvsa_influence);
+    end
+    if isfield(int_cfg, 'cvsa_hold')
+        HOLD = double(int_cfg.cvsa_hold);
     end
 
     classes   = to_vec(int_cfg.classes);
@@ -39,6 +43,26 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
     thresholds = to_vec(int_cfg.thresholds);
     bsize     = double(int_cfg.buffer_size);
     k_gain    = double(int_cfg.k_gain);
+
+    % Increment mode: 0=HARD (step=1/bsize constant), 1=SOFT (velocity-scaled).
+    % Matches Buffer.cpp INCREMENT_HARD / INCREMENT_SOFT enum.
+    % Default SOFT to preserve backward-compatibility with old YAMLs that lack this field.
+    incr_mode = 1;
+    if isfield(int_cfg, 'increment')
+        incr_mode = double(int_cfg.increment);
+    end
+
+    % Rejection threshold: Buffer.cpp only integrates when the dominant class
+    % probability exceeds its per-class threshold (default 1/n_cls = 0.5).
+    rej_thr = repmat(1.0 / n_cls, 1, n_cls);
+    if isfield(int_cfg, 'thresholds_rejection') && ~isempty(int_cfg.thresholds_rejection)
+        rt = to_vec(int_cfg.thresholds_rejection)';
+        if numel(rt) == n_cls
+            rej_thr = rt;
+        else
+            rej_thr = repmat(rt(1), 1, n_cls);   % broadcast scalar
+        end
+    end
 
     framerate = header_chunks.framerate;     % set by caller (main_simulate)
 
@@ -74,10 +98,12 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
         % chunks). The CF spans [POS, POS+DUR] inclusive; we run the
         % integrator for those n_cf chunks. The last chunk may not exist
         % if the recording ends mid-trial; n_cf already accounts for that.
-        n_total     = N_PRE + n_cf;
-        raw_trial   = NaN(n_total, 2);
-        integrated  = zeros(n_total, 2);
-        art_trial   = false(n_total, 1);
+        n_total      = N_PRE + n_cf;
+        raw_trial    = NaN(n_total, 2);
+        p_mi_trial   = NaN(n_total, 2);   % raw MI classifier output (hybrid only)
+        p_cvsa_trial = NaN(n_total, 2);   % raw CVSA classifier output (hybrid only)
+        integrated   = zeros(n_total, 2);
+        art_trial    = false(n_total, 1);
 
         % --- N_PRE reset frame(s): the value ROS publishes when 781 fires,
         %     before any integration. No input consumed.
@@ -111,8 +137,10 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
                         p_in = NaN;
                         raw_trial(k, :) = [NaN, NaN];
                     else
+                        p_mi_trial(k, :)   = p_mi(c, :);
+                        p_cvsa_trial(k, :) = p_cvsa(c, :);
                         t_sec  = frame_count / framerate;
-                        p_fus  = bayesian_fuse(p_mi(c, :), p_cvsa(c, :), t_sec, HALF_LIFE);
+                        p_fus  = bayesian_fuse(p_mi(c, :), p_cvsa(c, :), t_sec, HOLD, HALF_LIFE);
                         p_in   = p_fus(1);
                         raw_trial(k, :) = p_fus;
                     end
@@ -122,12 +150,19 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
 
             frame_count = frame_count + 1;
 
-            % --- leaky binary integrator step (matches step_integrator) ---
+            % --- leaky binary integrator step (matches Buffer.cpp::apply) ---
             if ~art && ~isnan(p_in)
-                p_max = max(p_in, 1 - p_in);
-                vel   = min(abs(p_max - 0.5) * 2 * k_gain, 1);
-                step  = vel / bsize;
-                p_prev = max(0, min(1, p_prev + sign(p_in - 0.5) * step));
+                p_max_val = max(p_in, 1 - p_in);          % dominant class probability
+                win_idx   = 1 + (p_in < 0.5);             % 1=class1 wins, 2=class2 wins
+                if p_max_val > rej_thr(win_idx)            % rejection gate (Buffer.cpp)
+                    if incr_mode == 0                      % HARD: constant step
+                        step = 1.0 / bsize;
+                    else                                   % SOFT: velocity-scaled step
+                        vel  = min((p_max_val - 0.5) * 2 * k_gain, 1);
+                        step = vel / bsize;
+                    end
+                    p_prev = max(0, min(1, p_prev + sign(p_in - 0.5) * step));
+                end
             end
             integrated(k, :) = [p_prev, 1 - p_prev];
         end
@@ -158,10 +193,14 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
 
         % PASS check is only over the CF window (frames N_PRE+1 .. n_total),
         % not the reset frame.
+        % Matches Training.cpp (evaluation mode): is_target_hit checks
+        %   integrated/raw[target_class] >= thresholds[target_class]
+        % This is equivalent to normalized >= 1.0 but uses the same
+        % raw-vs-threshold comparison as the ROS node.
         cf_range = (N_PRE + 1):n_total;
         pass = false;
         if ~isnan(target_class) && ~isempty(cf_range)
-            pass = any(normalized(cf_range, target_class) >= 1.0);
+            pass = any(integrated(cf_range, target_class) >= thresholds(target_class));
         end
 
         trials(end+1).start_chunk    = start_chunk; %#ok<AGROW>
@@ -170,6 +209,8 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
         trials(end).onset_code       = onset_code;
         trials(end).target_class     = target_class;
         trials(end).raw              = raw_trial;
+        trials(end).p_mi             = p_mi_trial;       % raw MI classifier P(c) (hybrid only)
+        trials(end).p_cvsa           = p_cvsa_trial;     % raw CVSA classifier P(c) (hybrid only)
         trials(end).integrated       = integrated;
         trials(end).normalized       = normalized;       % per-class (ROS style)
         trials(end).normalized_pc1   = normalized_pc1;   % P(c1) view (both thresholds)

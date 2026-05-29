@@ -12,7 +12,8 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename)
 %     - dotted line at p_rest = init_val(1)
 %     - light-grey shading where the artifact gate fired
 %
-%   Title: PASS / miss for the trial's target class.
+%   Title: PASS if integrated/raw[target_class] >= thresholds[target_class] within CF window
+%          (matches Training.cpp evaluation mode: is_target_hit checks raw >= threshold).
 
     if isempty(trials)
         log_step('plot_trials: no trials -> nothing to plot');
@@ -75,6 +76,14 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename)
         xline(ax, cf_end_t, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off');
 
         % --- traces (all P(class 1) only) ---
+        is_hybrid = strcmp(paradigm, 'hybrid');
+        has_sub = is_hybrid && isfield(tr, 'p_mi') && ~all(isnan(tr.p_mi(:, 1)));
+        if has_sub
+            scatter(ax, time_s, tr.p_mi(:, 1),   12, [0.20 0.60 0.90], 'filled', ...
+                    'MarkerFaceAlpha', 0.50, 'MarkerEdgeColor', 'none');
+            scatter(ax, time_s, tr.p_cvsa(:, 1), 12, [0.85 0.20 0.70], 'filled', ...
+                    'MarkerFaceAlpha', 0.50, 'MarkerEdgeColor', 'none');
+        end
         scatter(ax, time_s, tr.raw(:, 1),       18, [0.85 0.40 0.10], 'filled', ...
                 'MarkerFaceAlpha', 0.55, 'MarkerEdgeColor', 'none');
         plot   (ax, time_s, tr.integrated(:, 1),   '-',  'LineWidth', 2.0, ...
@@ -96,8 +105,13 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename)
         end
 
         if t == 1
-            legend(ax, {'sLDA P(c1)', 'integrated raw', 'integrated norm'}, ...
-                   'Location', 'best', 'Box', 'off');
+            if has_sub
+                legend(ax, {'MI P(c1)', 'CVSA P(c1)', 'fused P(c1)', 'integrated raw', 'integrated norm'}, ...
+                       'Location', 'best', 'Box', 'off');
+            else
+                legend(ax, {'sLDA P(c1)', 'integrated raw', 'integrated norm'}, ...
+                       'Location', 'best', 'Box', 'off');
+            end
         end
     end
 

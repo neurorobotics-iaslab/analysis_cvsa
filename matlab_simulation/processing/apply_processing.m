@@ -1,4 +1,4 @@
-function [features, header_out, info] = apply_processing(signal, header, csp, cfg)
+function [features, header_out, info, features_pre] = apply_processing(signal, header, csp, cfg)
 % APPLY_PROCESSING  FBCSP pipeline, identical to the validated reference in
 %   src/slda_bci/test/test_slda.m (GDF mode, MAE vs ROS < 1e-6):
 %
@@ -23,6 +23,9 @@ function [features, header_out, info] = apply_processing(signal, header, csp, cf
 %   header_out  header with EVENT.POS/.DUR in chunk-timeline units
 %   info        .first_valid_chunk, .n_chunks, .chunk_size, .bufsize,
 %               .feature_dim, .n_bands, .n_components
+%   features_pre  [n_chunks x (n_sel_ch*n_bands)]  pre-CSP per-channel mean
+%               power, band-major layout [b0_ch0, b0_ch1, ..., b1_ch0, ...]
+%               NaN before ring buffer is full. Optional 4th output.
 
     [N, C] = size(signal);
     chunk_size = cfg.chunk_size;
@@ -30,10 +33,12 @@ function [features, header_out, info] = apply_processing(signal, header, csp, cf
 
     n_bands  = csp.n_bands;
     n_comp   = csp.n_components;
-    feat_dim = n_comp * n_bands;
-    features = NaN(n_chunks, feat_dim);
+    feat_dim     = n_comp * n_bands;
+    features     = NaN(n_chunks, feat_dim);
+    features_pre = NaN(n_chunks, n_sel_ch * n_bands);
 
-    csp_ch  = resolve_channels(csp.selected_channels, header.Label);
+    csp_ch   = resolve_channels(csp.selected_channels, header.Label);
+    n_sel_ch = numel(csp_ch);
     if cfg.do_car
         eog_idx = resolve_channels(cfg.eog_names, header.Label);
     else
@@ -82,13 +87,16 @@ function [features, header_out, info] = apply_processing(signal, header, csp, cf
 
         if any(isnan(bufs(:))), continue; end
 
-        csp_feats = zeros(n_comp, n_bands);
+        csp_feats     = zeros(n_comp,    n_bands);
+        pre_csp_feats = zeros(n_sel_ch,  n_bands);
         for b = 1:n_bands
-            buf_sel        = bufs(:, csp_ch, b);
-            csp_out        = buf_sel * csp.csp_matrices{b}.';
-            csp_feats(:,b) = sum(csp_out .^ 2, 1).' / bufsize;
+            buf_sel            = bufs(:, csp_ch, b);
+            csp_out            = buf_sel * csp.csp_matrices{b}.';
+            csp_feats(:, b)    = sum(csp_out  .^ 2, 1).' / bufsize;
+            pre_csp_feats(:,b) = sum(buf_sel  .^ 2, 1).' / bufsize;
         end
-        features(k, :) = reshape(csp_feats, 1, []);
+        features(k, :)     = reshape(csp_feats,     1, []);
+        features_pre(k, :) = reshape(pre_csp_feats.', 1, []);  % band-major
 
         if mod(k, 500) == 0
             log_step('apply_processing: chunk %d/%d', k, n_chunks);

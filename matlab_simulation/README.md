@@ -20,7 +20,7 @@ The core stage functions (`apply_processing`, `detect_artifacts`,
 | FBCSP (CAR + BP + ringbuf + CSP + power) | [`src/slda_bci/test/test_slda.m`](../../slda_bci/test/test_slda.m) (GDF mode) | < 1e-6 |
 | sLDA (log + sigmoid) | [`src/slda_bci/test/test_slda.m`](../../slda_bci/test/test_slda.m) | < 1e-6 |
 | Integrator (leaky WTA + fusion + normalize) | [`src/test_pipeline/src/test_full_pipeline.m`](../../test_pipeline/src/test_full_pipeline.m) | full-pipeline validated |
-| Per-class normalisation | [`src/rosneuro_integrator/src/Integrator.cpp`](../../rosneuro_integrator/src/Integrator.cpp) `normalize_input` | exact port |
+| Per-class normalisation | [`src/feedback_bci_vr/src/Training.cpp`](../../feedback_bci_vr/src/Training.cpp) `normalize_input` | exact port |
 
 So this simulator is meant to behave like ROS to numerical noise, not just
 in spirit.
@@ -52,7 +52,7 @@ pipeline and computes:
 
 | Metric | Description |
 |---|---|
-| `trial_acc` | Hit rate — % of CF trials where normalised target ≥ 1.0 |
+| `trial_acc` | Hit rate — % of CF trials where integrated raw ≥ threshold for target class |
 | `trial_acc_no_reject` | Hit rate excluding trials where ≥ 30 % of CF frames had artifact |
 | `mean_tth` | Mean time-to-hit (s) over HIT trials only |
 | `mean_sample_acc` | Frame-level accuracy: argmax(raw P) vs target class (%) |
@@ -138,7 +138,7 @@ matlab_simulation/
 │   └── apply_slda.m           # log + sigmoid on every valid feature row
 ├── integrator/
 │   ├── integrate_signal.m     # per-trial integration around each event 781
-│   └── bayesian_fuse.m        # hybrid prior fusion (LOP + agreement gate)
+│   └── bayesian_fuse.m        # hybrid prior fusion (cosine-annealed LOP)
 ├── plotting/
 │   └── plot_trials.m          # one panel per trial, P(c1) view
 └── utils/
@@ -274,8 +274,8 @@ Per CF chunk `c = start_chunk + j − 1`:
    - `cvsa`:  `p_in = p_cvsa(c, 1)`
    - `hybrid`: Bayesian fusion of MI and CVSA with cosine-annealed prior
      `alpha = 0.5 * (1 + cos(pi * min(t, H) / H))`, where
-     `t = frame_count / framerate` and `H = int_cfg.cvsa_influence` (default 2.5 s).
-     See `bayesian_fuse.m` for LOP + agreement-gate details. `p_in = fused(1)`.
+     `t = frame_count / framerate` and `H = int_cfg.cvsa_influence` (default 3.0 s).
+     See `bayesian_fuse.m` for plateau + cosine LOP details. `p_in = fused(1)`.
 2. **Leaky binary integrator step**
    (this is `step_integrator` from the validated test, which in turn is
    equivalent to the C++ `Buffer` plugin for the binary case with init=0.5):
@@ -301,8 +301,8 @@ integration step happens at `t = (n_cf − 1) / framerate` (chunk `POS + DUR`).
 
 #### ROS-style normalisation
 
-The C++ node ([`Integrator.cpp::normalize_input`](../../rosneuro_integrator/src/Integrator.cpp))
-normalises **each class independently** with its own threshold:
+`training_node` ([`feedback_bci_vr/src/Training.cpp`](../../feedback_bci_vr/src/Training.cpp))
+normalises **each class independently** with its own threshold after receiving `integrated/raw`:
 
 ```
 for each class i with threshold thr_i > p_rest:
@@ -311,7 +311,9 @@ for each class i with threshold thr_i > p_rest:
 ```
 
 So `normalized(:, target_class) >= 1.0` ⇔ `integrated(:, target_class) >= thr(target_class)`.
-This is the PASS condition.
+PASS is checked directly as `integrated(:, target_class) >= thresholds(target_class)`,
+matching Training.cpp evaluation mode (`is_target_hit`: `raw[i] >= thresholds[i]`).
+The `normalized >= 1.0` form is mathematically equivalent but the raw comparison is canonical.
 
 `integrate_signal` exposes two normalised outputs:
 
@@ -421,7 +423,7 @@ The names below are reused consistently across all stages.
 | `normalized` | `[n x 2]` | per-class ROS-style normalisation |
 | `normalized_pc1` | `[n x 1]` | P(c1) view using both thresholds piecewise |
 | `artifact` | `[n x 1]` logical | whether the integrator was frozen on this frame |
-| `pass` | logical | `normalized(:, target_class) >= 1.0` somewhere inside the CF window |
+| `pass` | logical | `integrated(:, target_class) >= thresholds(target_class)` somewhere inside the CF window |
 
 `n = n_pre + n_cf = 1 + (DUR + 1)`. Frame `1` is the reset publish at
 `t = −1/framerate`; frames `2 … n` are the CF chunks at
@@ -440,7 +442,7 @@ The names below are reused consistently across all stages.
 - GDF events delivered to the integrator on the chunk that contains them,
   so event 781 resets the leaky buffer and the hybrid CVSA-prior timer at
   exactly the right sample.
-- Bayesian fusion `alpha(t) = 0.5 * (1 + cos(pi * min(t, H) / H))` where `H = int_cfg.cvsa_influence` (default 2.5 s, read from the YAML).
+- Bayesian fusion with plateau + cosine decay: `alpha = 1` for `t ≤ cvsa_hold`, then cosine decay to 0 over `cvsa_influence` seconds. Both read from the YAML (`int_cfg.cvsa_hold` default 1.0 s, `int_cfg.cvsa_influence` default 3.0 s). Fusion is pure LOP: symmetric disagreement naturally yields uniform; at α=0 output equals pure MI.
 - Leaky binary WTA equivalent to the n-class `Buffer` plugin for the
   symmetric binary case with `init = [0.5, 0.5]`.
 - Per-class linear-stretch normalisation, line-by-line port of

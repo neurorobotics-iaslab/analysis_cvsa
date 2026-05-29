@@ -1,4 +1,4 @@
-%% MAIN_EVALUATE_METRICS  Offline simulator and detailed performance metric evaluator of the ROS BCI pipeline.
+%% MAIN_EVALUATE_METRICS  Offline replay of the ROS BCI pipeline with detailed per-trial and sample-level metrics.
 %
 %   This script:
 %   1. Prompts the user to select a GDF recording (or uses a predefined path).

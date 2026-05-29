@@ -136,6 +136,7 @@ int_cfg = params.integrator;
 if ~isfield(int_cfg, 'increment'),               int_cfg.increment = 1; end
 if ~isfield(int_cfg, 'thresholds_rejection'),    int_cfg.thresholds_rejection = []; end
 if ~isfield(int_cfg, 'cvsa_influence'),          int_cfg.cvsa_influence = 2.5; end
+if ~isfield(int_cfg, 'thresholds'),              int_cfg.thresholds = params.training_node.thresholds; end
 
 % header_chunks for trial extents (use whichever paradigm produced a header)
 if use_mi,   header_chunks = header_mi;
