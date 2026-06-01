@@ -22,6 +22,8 @@ The core stage functions (`apply_processing`, `detect_artifacts`,
 | Integrator (leaky WTA + fusion + normalize) | [`src/test_pipeline/src/test_full_pipeline.m`](../../test_pipeline/src/test_full_pipeline.m) | full-pipeline validated |
 | Per-class normalisation | [`src/feedback_bci_vr/src/Training.cpp`](../../feedback_bci_vr/src/Training.cpp) `normalize_input` | exact port |
 
+`apply_processing.m` is also used by [`src/slda_bci/create_slda/validate_features.m`](../../slda_bci/create_slda/validate_features.m), which runs a stage-by-stage comparison of the calibration notebook (Python) vs the MATLAB implementation. Because `apply_processing` has been validated against ROS at ~1e-7 MAE, any discrepancy found by `validate_features` is attributed to the Python side.
+
 So this simulator is meant to behave like ROS to numerical noise, not just
 in spirit.
 
@@ -41,46 +43,51 @@ main_simulate
 Single GDF → companion YAML → full pipeline → one figure with all CF trials.
 Use this to inspect a specific recording in detail.
 
-### `main_batch_evaluate` — multi-file metrics
+### `main_evaluate_single` — per-file detailed analysis
 
 ```matlab
-main_batch_evaluate
+main_evaluate_single
 ```
 
-Multi-select GDFs (all with the same paradigm). For each file, replays the
-pipeline and computes:
+Multi-select GDFs. For each file runs the full pipeline and produces **4 SVG figures** saved to `<gdf_dir>/results/<basename>/` and one `eval_single_<paradigm>_<basename>.mat`:
+
+| Figure | Content |
+|---|---|
+| `01_trials.svg` | All CF trials in one window (identical to `main_simulate`) |
+| `02_metrics.svg` | 2×3 panels: trial accuracy (simulated / events 897-898 / no-artifact-reject), per-class hit rate, frame-level sample accuracy (total + mean/trial), time-to-hit per class, time of peak output on miss trials, artifact rate |
+| `03_erd_ers.svg` | Band-power heatmap `[time × selected channel]` averaged across trials — one row per band × two columns (class 1 / class 2) |
+| `04_topoplots.svg` | Toposcatter maps of mean band power — one subplot per band × class, using standard 10-20 positions with `scatteredInterpolant` background |
+
+The saved mat contains a `results` struct (all scalar metrics, `topo_mean [n_cls × n_sel_ch × n_bands]`, ERD/ERS time series `erd_mean [n_cls × n_cf_min × n_sel_ch × n_bands]`, channel/band metadata) plus the full `trials` array. It is the input for `main_compare_sessions`.
+
+**Computed metrics:**
 
 | Metric | Description |
 |---|---|
-| `trial_acc` | Hit rate — % of CF trials where integrated raw ≥ threshold for target class |
-| `trial_acc_no_reject` | Hit rate excluding trials where ≥ 30 % of CF frames had artifact |
-| `mean_tth` | Mean time-to-hit (s) over HIT trials only |
-| `mean_sample_acc` | Frame-level accuracy: argmax(raw P) vs target class (%) |
-| `mean_confidence` | Mean P(target class) over valid CF frames (%) |
-| `mean_art_rate` | Fraction of CF frames where the artifact gate fired (%) |
-| `mean_peak_norm` | Mean max normalised probability reached for target class |
-| Per-class: `hit_rate`, `precision`, `recall`, `mean_tth`, `confidence`, `peak_norm` | Same metrics split by trial onset class |
+| `trial_acc` | Simulation hit rate: integrated ≥ threshold within CF window |
+| `trial_acc_events` | Event-based: count(897) / (count(897) + count(898)) from GDF |
+| `trial_acc_no_rej` | Simulation hit rate excluding trials with > 30 % artifact frames |
+| `sample_acc_total` | Pooled frame-level accuracy: argmax(raw P) == target class |
+| `sample_acc_mean_trial` | Per-trial frame accuracy averaged across trials |
+| `tth_per_class` | Mean time-to-hit (s from CF onset), per class, over PASS trials |
+| `t_miss_peak_cls` | Mean time at which integrated peaked, per class, over FAIL trials |
+| `art_rate` | Mean fraction of CF frames where the artifact gate fired |
+| `hit_rate_cls`, `confidence_cls`, `peak_norm_cls` | Per-class hit rate, mean raw P(target), mean max normalised |
 
-Prints a per-file report and a cross-file aggregate (mean ± std). If
-`show_all_trials = true` (top of script), it also opens two figures per file
-— one figure per class, showing every CF trial for that class in the
-standard P(c1) view.
-
-Results are saved to `eval_<paradigm>_<basename>.mat` alongside the GDFs.
-
-### `main_compare_paradigms` — cross-paradigm comparison
+### `main_compare_sessions` — cross-session comparison
 
 ```matlab
-main_compare_paradigms
+main_compare_sessions          % GUI folder picker
+main_compare_sessions('/path') % programmatic
 ```
 
-Loads three `.mat` files (MI → CVSA → Hybrid, one dialog each), then:
-- Prints a side-by-side metric table (mean ± std)
-- Figure 1 — bar charts for all scalar metrics (with error bars)
-- Figure 2 — grouped bar: per-class hit rate by paradigm
-- Figure 3 — precision vs recall scatter with error crosses
+Selects a root folder, recursively finds all `eval_single_*.mat` files produced by `main_evaluate_single`, groups by paradigm (`mi` / `cvsa` / `hybrid`):
 
-Requirements (all three entry points):
+1. **Per-file table** — basename, paradigm, trial acc (%), event-based acc (%), sample acc (%), TTH per class.
+2. **Per-paradigm aggregate** — mean ± std for every scalar metric.
+3. **One summary figure per paradigm** — bar charts per session for trial accuracy, frame accuracy, and time-to-hit.
+
+Requirements (all entry points):
 - MATLAB R2019+ with the **Signal Processing Toolbox** (`butter`, `filter`)
 - **yamlmatlab** on the path — https://github.com/jiri-cigler/yamlmatlab
 - **BIOSIG** (`sload`) on the path — https://biosig.sourceforge.io
@@ -123,8 +130,8 @@ aligned by chunk index.
 ```
 matlab_simulation/
 ├── main_simulate.m            # single-file: GUI → pipeline → per-trial plot
-├── main_batch_evaluate.m      # multi-file: metrics per file + aggregate + optional plots
-├── main_compare_paradigms.m   # loads three eval .mat files (MI/CVSA/Hybrid) → comparison
+├── main_evaluate_single.m     # multi-GDF: pipeline + metrics + ERD/ERS + topoplots, saves SVG + mat
+├── main_compare_sessions.m    # recursive mat search → per-paradigm aggregate + bar charts
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename
 │   ├── load_params_yaml.m     # full rosparam-dump struct sibling to the GDF
@@ -147,6 +154,7 @@ matlab_simulation/
     ├── to_vec.m, to_mat.m, to_strcell.m   # coerce yamlmatlab output
     ├── parse_filters_band.m   # "8.0 10.0; 10.0 12.0; ..." -> [n_bands x 2]
     ├── resolve_channels.m     # case-insensitive name -> index lookup against header.Label
+    ├── topo_scatter.m         # scalp map at 10-20 positions: scatteredInterpolant bg + head outline
     └── align_streams.m        # (unused at runtime — kept as a reference helper)
 ```
 
@@ -202,8 +210,11 @@ For every chunk (`chunk_size = round(samplerate / framerate)` samples):
 1. **CAR** on the chunk if `do_car`: subtract the per-sample mean over all
    channels except the ones in `CarCfg.params.EOG_ch_names`.
 2. **Per band**: stateful causal Butterworth low-pass at `band(hi)`, then
-   high-pass at `band(lo)`, both order 4. Filter state (`zi`) is carried
-   across chunks; ICs start at zero — same as ROS `rtfilter`.
+   high-pass at `band(lo)`, both order 4, using **MATLAB `butter` ba-form +
+   `filter`** (identical to ROS `rtfilter`). Filter state (`zi`) is carried
+   across chunks; ICs start at zero. The Python calibration notebook
+   (`create_slda.ipynb` Cell 4) must also use `lfilter` ba-form (not
+   `sosfilt` SOS) to match this implementation — see `slda_bci/README.md §5`.
 3. **Ring buffer push**: NaN-initialised buffer of size `RingBufferCfg.params.size`
    (= `samplerate` = 1 s). New chunk samples replace the oldest. `isfull()`
    ⇔ no NaN anywhere — matches `rosneuro::RingBuffer`.

@@ -33,12 +33,12 @@ function [features, header_out, info, features_pre] = apply_processing(signal, h
 
     n_bands  = csp.n_bands;
     n_comp   = csp.n_components;
-    feat_dim     = n_comp * n_bands;
-    features     = NaN(n_chunks, feat_dim);
-    features_pre = NaN(n_chunks, n_sel_ch * n_bands);
+    feat_dim = n_comp * n_bands;
+    features = NaN(n_chunks, feat_dim);
 
     csp_ch   = resolve_channels(csp.selected_channels, header.Label);
     n_sel_ch = numel(csp_ch);
+    features_pre = NaN(n_chunks, n_sel_ch * n_bands);
     if cfg.do_car
         eog_idx = resolve_channels(cfg.eog_names, header.Label);
     else
@@ -96,7 +96,7 @@ function [features, header_out, info, features_pre] = apply_processing(signal, h
             pre_csp_feats(:,b) = sum(buf_sel  .^ 2, 1).' / bufsize;
         end
         features(k, :)     = reshape(csp_feats,     1, []);
-        features_pre(k, :) = reshape(pre_csp_feats.', 1, []);  % band-major
+        features_pre(k, :) = reshape(pre_csp_feats, 1, []);  % band-major: rows=ch cols=band, col-major → [ch1_b1..chM_b1, ch1_b2..]
 
         if mod(k, 500) == 0
             log_step('apply_processing: chunk %d/%d', k, n_chunks);

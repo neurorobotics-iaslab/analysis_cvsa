@@ -1,12 +1,20 @@
 function [params, yaml_path] = load_params_yaml(gdf_path)
 % LOAD_PARAMS_YAML  Locate and load the rosparam-dump YAML that the
-%   bag_bci recorder writes next to every GDF. Same directory, same
-%   basename, .yaml extension.
+%   bag_bci recorder writes next to every GDF. Searches in order:
+%   1. Same directory as the GDF (evaluation recordings)
+%   2. Sibling 'parameters/' folder (calibration recordings: gdf/ + parameters/)
     [dir_, base, ~] = fileparts(gdf_path);
     yaml_path = fullfile(dir_, [base, '.yaml']);
     if ~exist(yaml_path, 'file')
-        error('load_params_yaml:notfound', ...
-              'Companion YAML not found:\n  %s', yaml_path);
+        % Calibration layout: recordings/<subj>/calibration/{gdf,parameters}/
+        parent_dir = fileparts(dir_);
+        yaml_path2 = fullfile(parent_dir, 'parameters', [base, '.yaml']);
+        if exist(yaml_path2, 'file')
+            yaml_path = yaml_path2;
+        else
+            error('load_params_yaml:notfound', ...
+                  'Companion YAML not found:\n  %s\n  %s', yaml_path, yaml_path2);
+        end
     end
     log_step('load_params_yaml: loading "%s"', yaml_path);
     params = read_yaml(yaml_path);
