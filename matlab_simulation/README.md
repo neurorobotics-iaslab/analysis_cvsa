@@ -83,9 +83,43 @@ main_compare_sessions('/path') % programmatic
 
 Selects a root folder, recursively finds all `eval_single_*.mat` files produced by `main_evaluate_single`, groups by paradigm (`mi` / `cvsa` / `hybrid`):
 
-1. **Per-file table** — basename, paradigm, trial acc (%), event-based acc (%), sample acc (%), TTH per class.
+1. **Per-file table** — basename, paradigm, trial acc (%), event-based acc (%), sample acc (%), TTH per class, `miss_max_fused` (mean max integrator on miss trials).
 2. **Per-paradigm aggregate** — mean ± std for every scalar metric.
 3. **One summary figure per paradigm** — bar charts per session for trial accuracy, frame accuracy, and time-to-hit.
+
+---
+
+### `main_hybrid_advantage` — offline evidence for hybrid BCI benefit
+
+```matlab
+main_hybrid_advantage          % GUI file picker (one or more GDF files)
+```
+
+Designed to answer: **does the hybrid fusion actually help compared to MI alone or CVSA alone?**
+
+For each **hybrid** GDF the same EEG is replayed in three conditions using `integrate_signal` with different paradigm strings — giving an exact matched-trial comparison free of session-to-session variability:
+
+| Condition | Description |
+|---|---|
+| Hybrid | LOP fusion with cosine-annealed CVSA prior |
+| MI-only (sim) | Leaky integrator driven by P_MI alone |
+| CVSA-only (sim) | Leaky integrator driven by P_CVSA alone |
+
+For **single-modality** GDF (mi or cvsa) the native condition is shown as a baseline.
+
+**Five figures per file:**
+
+| Figure | Content | Available for |
+|---|---|---|
+| `01_temporal_dynamics` | Mean P_MI and P_CVSA (or native output) over CF time per class, with ±std band. For hybrid: both classifiers + fused output plotted. Vertical lines at α=0.5 (T/2) and α=0 (T) mark the fusion schedule. | All paradigms |
+| `02_buffer_trajectories` | Mean ± std of the target-class buffer over CF time for HIT trials (left) and MISS trials (right), all conditions overlaid. Shows whether hybrid reaches threshold faster. | All paradigms |
+| `03_performance` | Hit rate barplot + mean TTH per class + CDF of time-to-hit. | All paradigms |
+| `04_trial_analysis` | **Hybrid**: saved-trial breakdown (both HIT / saved / MI wins / both MISS) + boxplot of early P_CVSA and early P_MI for saved vs other trials. **Single-modality**: classifier output distribution for HIT vs MISS (boxplot + per-trial scatter + onset confidence). | All paradigms |
+| `05_correlation` | Per-trial histogram of ρ(P_MI, P_CVSA), CDF, and frame-level scatter P_MI vs P_CVSA. Low ρ validates the LOP independence assumption. | Hybrid only |
+
+**Multi-file overview (Fig 6)** if > 1 GDF is selected: bar chart of hit rates by condition, Δ(hybrid − MI) per file, and ρ per file.
+
+**Saved files:** `advantage_<paradigm>_<basename>.mat` per GDF (contains `res` struct + `trials_hyb/mi/cvsa`) + SVG figures in `<gdf_dir>/hybrid_advantage/`.
 
 Requirements (all entry points):
 - MATLAB R2019+ with the **Signal Processing Toolbox** (`butter`, `filter`)
@@ -132,6 +166,7 @@ matlab_simulation/
 ├── main_simulate.m            # single-file: GUI → pipeline → per-trial plot
 ├── main_evaluate_single.m     # multi-GDF: pipeline + metrics + ERD/ERS + topoplots, saves SVG + mat
 ├── main_compare_sessions.m    # recursive mat search → per-paradigm aggregate + bar charts
+├── main_hybrid_advantage.m    # hybrid vs MI-only vs CVSA-only matched comparison + saved-trial analysis
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename
 │   ├── load_params_yaml.m     # full rosparam-dump struct sibling to the GDF
@@ -286,7 +321,7 @@ Per CF chunk `c = start_chunk + j − 1`:
    - `hybrid`: Bayesian fusion of MI and CVSA with cosine-annealed prior
      `alpha = 0.5 * (1 + cos(pi * min(t, H) / H))`, where
      `t = frame_count / framerate` and `H = int_cfg.cvsa_influence` (default 3.0 s).
-     See `bayesian_fuse.m` for plateau + cosine LOP details. `p_in = fused(1)`.
+     See `bayesian_fuse.m` for cosine-annealed LOP details. `p_in = fused(1)`.
 2. **Leaky binary integrator step**
    (this is `step_integrator` from the validated test, which in turn is
    equivalent to the C++ `Buffer` plugin for the binary case with init=0.5):
@@ -453,7 +488,7 @@ The names below are reused consistently across all stages.
 - GDF events delivered to the integrator on the chunk that contains them,
   so event 781 resets the leaky buffer and the hybrid CVSA-prior timer at
   exactly the right sample.
-- Bayesian fusion with plateau + cosine decay: `alpha = 1` for `t ≤ cvsa_hold`, then cosine decay to 0 over `cvsa_influence` seconds. Both read from the YAML (`int_cfg.cvsa_hold` default 1.0 s, `int_cfg.cvsa_influence` default 3.0 s). Fusion is pure LOP: symmetric disagreement naturally yields uniform; at α=0 output equals pure MI.
+- Bayesian fusion: cosine-annealed LOP with `alpha = 0.5*(1+cos(pi*t/T))` where `T = int_cfg.cvsa_influence` (default 3.0 s). α(0)=1 (full CVSA), α(T/2)=0.5 (equal weight), α(T)=0 (pure MI). No plateau. Symmetric disagreement naturally yields near-uniform output; at α=0 output equals pure MI.
 - Leaky binary WTA equivalent to the n-class `Buffer` plugin for the
   symmetric binary case with `init = [0.5, 0.5]`.
 - Per-class linear-stretch normalisation, line-by-line port of

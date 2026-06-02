@@ -67,10 +67,10 @@ for pi = 1:numel(paradigms)
 
     fprintf('══  %s  (%d session(s))  ══════════════════════════════════\n', upper(par), n);
 
-    scalar_fields  = {'trial_acc','trial_acc_events','trial_acc_no_rej', ...
-                      'sample_acc_total','sample_acc_mean_trial','art_rate'};
-    scalar_labels  = {'trial acc','acc events (897/898)','acc no-art-rej', ...
-                      'sample acc total','sample acc mean/trial','artifact rate'};
+    scalar_fields  = {'trial_acc','trial_acc_events','trial_acc_no_timeout', ...
+                      'trial_acc_no_rej','sample_acc_total','sample_acc_mean_trial','art_rate'};
+    scalar_labels  = {'trial acc (sim)','acc events 897/(+898+899)','acc no-timeout 897/(+898)', ...
+                      'acc no-art-rej','sample acc total','sample acc mean/trial','artifact rate'};
     for f = 1:numel(scalar_fields)
         if ~isfield(sub(1), scalar_fields{f}), continue; end
         vals = 100 * [sub.(scalar_fields{f})];
@@ -80,13 +80,15 @@ for pi = 1:numel(paradigms)
 
     n_cls = numel(sub(1).tth_per_class);
     for c = 1:n_cls
-        tth_v  = arrayfun(@(r) safe_val(r.tth_per_class,   c), sub);
-        hr_v   = arrayfun(@(r) safe_val(r.hit_rate_cls,    c), sub) * 100;
-        miss_v = arrayfun(@(r) safe_val(r.t_miss_peak_cls, c), sub);
-        fprintf('  class %d  hit=%.1f±%.1f%%  tth=%.2f±%.2fs  t_miss_peak=%.2f±%.2fs\n', ...
+        tth_v    = arrayfun(@(r) safe_val(r.tth_per_class,   c), sub);
+        hr_v     = arrayfun(@(r) safe_val(r.hit_rate_cls,    c), sub) * 100;
+        miss_v   = arrayfun(@(r) safe_val(r.t_miss_peak_cls, c), sub);
+        mmf_v    = arrayfun(@(r) safe_field(r,'miss_max_fused',c), sub);
+        fprintf('  class %d  hit=%.1f±%.1f%%  tth=%.2f±%.2fs  t_miss=%.2f±%.2fs  miss_max_int=%.2f±%.2f\n', ...
                 c, mean(hr_v,'omitnan'),   std(hr_v,'omitnan'), ...
                    mean(tth_v,'omitnan'),  std(tth_v,'omitnan'), ...
-                   mean(miss_v,'omitnan'), std(miss_v,'omitnan'));
+                   mean(miss_v,'omitnan'), std(miss_v,'omitnan'), ...
+                   mean(mmf_v,'omitnan'),  std(mmf_v,'omitnan'));
     end
     fprintf('\n');
 
@@ -124,7 +126,11 @@ for pi = 1:numel(paradigms)
     sgtitle(fig, sprintf('%s — %d session(s)', upper(par), n), 'FontSize',11);
 end
 
-% ── Local helper ──────────────────────────────────────────────────────────────
+% ── Local helpers ─────────────────────────────────────────────────────────────
 function v = safe_val(arr, idx)
     if idx <= numel(arr), v = arr(idx); else, v = NaN; end
+end
+
+function v = safe_field(s, fname, idx)
+    if isfield(s, fname), v = safe_val(s.(fname), idx); else, v = NaN; end
 end

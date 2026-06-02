@@ -12,8 +12,8 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
 %           p_new = p_prev + sign(p_in - 0.5) * step
 %           step  = min(|p_max - 0.5| * 2 * k_gain, 1) / buffer_size
 %       artifact-flagged chunks freeze p_prev (p_new = p_prev).
-%     - Hybrid: per-frame Bayesian fusion of MI and CVSA, with the CVSA
-%       prior decaying via alpha(t) over half_life = 2.5 s.
+%     - Hybrid: per-frame Bayesian fusion of MI and CVSA. CVSA prior decays
+%       via alpha(t) = 0.5*(1+cos(pi*t/T)), T = int_cfg.cvsa_influence (default 3 s).
 %
 % Output: trials struct array, one entry per 781 event:
 %   .start_chunk, .dur_chunks   trial extent (chunk units)
@@ -26,13 +26,9 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
 %   .pass        bool           integrated/raw[target_class] >= thresholds[target_class] within CF window
 
     CF_CODE   = 781;
-    HALF_LIFE = 3.0;    % default decay duration; overridden by int_cfg.cvsa_influence
-    HOLD      = 1.0;    % default plateau duration; overridden by int_cfg.cvsa_hold
+    HALF_LIFE = 3.0;    % total cosine decay duration; overridden by int_cfg.cvsa_influence
     if isfield(int_cfg, 'cvsa_influence')
         HALF_LIFE = double(int_cfg.cvsa_influence);
-    end
-    if isfield(int_cfg, 'cvsa_hold')
-        HOLD = double(int_cfg.cvsa_hold);
     end
 
     classes   = to_vec(int_cfg.classes);
@@ -140,7 +136,7 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
                         p_mi_trial(k, :)   = p_mi(c, :);
                         p_cvsa_trial(k, :) = p_cvsa(c, :);
                         t_sec  = frame_count / framerate;
-                        p_fus  = bayesian_fuse(p_mi(c, :), p_cvsa(c, :), t_sec, HOLD, HALF_LIFE);
+                        p_fus  = bayesian_fuse(p_mi(c, :), p_cvsa(c, :), t_sec, HALF_LIFE);
                         p_in   = p_fus(1);
                         raw_trial(k, :) = p_fus;
                     end
