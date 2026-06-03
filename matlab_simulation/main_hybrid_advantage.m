@@ -49,6 +49,7 @@ out_dir = fullfile(gdf_dir, 'hybrid_advantage');
 if ~isfolder(out_dir), mkdir(out_dir); end
 
 all_res_cell = {};   % cell array — avoids dissimilar-struct issues
+par_count    = struct('mi',0,'cvsa',0,'hybrid',0);  % counter for short labels
 
 %% ═════════════════════════════════════════════════════════════════════════════
 %  PER-FILE PROCESSING LOOP
@@ -137,6 +138,49 @@ for fi = 1:n_files
 
     n_trials = numel(trials_hyb);
     if n_trials == 0, fprintf('  [warn] no trials\n'); continue; end
+
+    % ── Short label (mi_1, mi_2, cvsa_1, hybrid_1 …) ─────────────────────────
+    par_count.(paradigm) = par_count.(paradigm) + 1;
+    file_label = sprintf('%s_%d', paradigm, par_count.(paradigm));
+
+    % ── Event-based accuracy from actual GDF outcomes (897/898/899) ───────────
+    HIT_CODE     = 897;  MISS_CODE = 898;  TIMEOUT_CODE = 899;  CF_CODE = 781;
+    POS_ev = header.EVENT.POS;  TYP_ev = header.EVENT.TYP;
+    cf_samp = POS_ev(TYP_ev == CF_CODE);
+    trial_outcome_ev = zeros(1, n_trials);
+    for t = 1:min(n_trials, numel(cf_samp))
+        after = POS_ev > cf_samp(t);
+        idx   = find((TYP_ev==HIT_CODE|TYP_ev==MISS_CODE|TYP_ev==TIMEOUT_CODE)&after, 1);
+        if ~isempty(idx), trial_outcome_ev(t) = TYP_ev(idx); end
+    end
+    n_hits_ev    = sum(trial_outcome_ev == HIT_CODE);
+    n_misses_ev  = sum(trial_outcome_ev == MISS_CODE);
+    n_timeout_ev = sum(trial_outcome_ev == TIMEOUT_CODE);
+    n_total_ev   = max(1, n_hits_ev + n_misses_ev + n_timeout_ev);
+    hit_rate_ev       = n_hits_ev / n_total_ev;
+    hit_rate_no_to    = n_hits_ev / max(1, n_hits_ev + n_misses_ev);
+    timeout_rate      = n_timeout_ev / n_total_ev;
+
+    % ── Real TTH from GDF: time from CF onset (781) to first 897 event ───────
+    % Only computed for trials that actually produced event 897 online.
+    real_tth_cls      = nan(1, max(2, numel(to_vec(params.integrator.classes))));
+    real_tth_cls_vals = cell(size(real_tth_cls));
+    for c_tmp = 1:numel(real_tth_cls)
+        tth_v_real = [];
+        for t = 1:min(n_trials, numel(cf_samp))
+            if trial_outcome_ev(t) ~= HIT_CODE, continue; end
+            tr_cls = trials_hyb(t).target_class;
+            if isnan(tr_cls) || tr_cls ~= c_tmp, continue; end
+            % First 897 after this CF onset
+            mask897 = POS_ev > cf_samp(t) & TYP_ev == HIT_CODE;
+            if any(mask897)
+                tth_v_real(end+1) = (min(POS_ev(mask897)) - cf_samp(t)) / fs; %#ok<AGROW>
+            end
+        end
+        real_tth_cls_vals{c_tmp} = tth_v_real;
+        if ~isempty(tth_v_real), real_tth_cls(c_tmp) = mean(tth_v_real); end
+    end
+    real_tth_all = [real_tth_cls_vals{:}];  % all hits, pooled across classes
 
     % Condition labels and handles (only show conditions available)
     cond_trials  = {};
@@ -302,6 +346,7 @@ for fi = 1:n_files
         saved_mask = ~[trials_mi.pass] & [trials_hyb.pass];
         for t = 1:n_trials
             c = trials_hyb(t).target_class; if isnan(c), continue; end
+        end
 
         % Saved trials and early classifier values
         saved_mask = ~[trials_mi.pass] & [trials_hyb.pass];
@@ -431,52 +476,143 @@ for fi = 1:n_files
             'FontSize',12,'Interpreter','none');
     saveas(fig2, fullfile(out_dir,sprintf('%s_02_buffer_trajectories.svg',basename)),'svg');
 
-    % ── Fig 3: Hit rate + TTH + CDF ──────────────────────────────────────────
+    % ── Fig 3: Hit rate (real + sim) + TTH + CDF ─────────────────────────────
     fig3 = figure('Name',sprintf('Performance — %s',basename), ...
-                  'Color','w','NumberTitle','off','Position',[60 60 1050 380]);
+                  'Color','w','NumberTitle','off','Position',[60 60 1100 420]);
 
-    ax1 = subplot(1,3,1);
-    bh = bar(ax1, 1:n_cond, hit_rate*100,'FaceColor','flat');
-    for ic = 1:n_cond, bh.CData(ic,:) = cond_colors(ic,:); end
-    set(ax1,'XTick',1:n_cond,'XTickLabel',cond_labels,'XTickLabelRotation',15,'YLim',[0,108]);
-    yline(ax1,50,'--k','chance','FontSize',7); grid(ax1,'on'); ylabel('%');
-    title(ax1,'Hit rate','FontSize',10);
-    for ic = 1:n_cond
-        text(ax1,ic,hit_rate(ic)*100+2.5,sprintf('%.0f%%',hit_rate(ic)*100), ...
-             'HorizontalAlignment','center','FontSize',9,'FontWeight','bold');
+    ax1 = subplot(1,3,1); hold(ax1,'on');
+
+    % Real event-based bars (solid, thick outline)
+    real_labels = {'897/(897+898+899)','897/(897+898)'};
+    real_vals   = [hit_rate_ev, hit_rate_no_to]*100;
+    real_cols   = [0.18 0.45 0.75; 0.20 0.65 0.25];
+    for k = 1:2
+        bar(ax1, k, real_vals(k), 0.45, 'FaceColor',real_cols(k,:), ...
+            'EdgeColor',[0 0 0],'LineWidth',1.5,'DisplayName',real_labels{k});
+        text(ax1, k, real_vals(k)+2, sprintf('%.0f%%\n(H=%d M=%d T=%d)', ...
+             real_vals(k), n_hits_ev, n_misses_ev, n_timeout_ev), ...
+             'HorizontalAlignment','center','FontSize',7.5,'FontWeight','bold');
     end
 
-    ax2 = subplot(1,3,2);
-    tth_mat = cellfun(@(v) nanmean_safe(v), tth_cls);  % [n_cls x n_cond]
-    tth_plot = tth_mat; tth_plot(isnan(tth_plot)) = 0;  % NaN → 0 avoids GraphicsPlaceholder
-    % tth_mat is [n_cls x n_cond]: plot n_cls groups, n_cond bars each
-    bh2 = bar(ax2, tth_plot, 'grouped');
-    for ic = 1:min(numel(bh2), n_cond)
-        bh2(ic).FaceColor = cond_colors(ic,:);
+    % ── Hybrid: add MI-sim and CVSA-sim bars (NOT Hybrid-sim) ────────────────
+    % Non-hybrid files: only the two real bars above.
+    if is_hybrid
+        % ic=2 → MI-sim, ic=3 → CVSA-sim  (ic=1 = hybrid is the native → use real values)
+        sim_ic   = 2:n_cond;   % indices of non-native simulations
+        sim_cols_h = cond_colors(sim_ic,:);
+        sim_lbl_h  = cond_labels(sim_ic);   % {'MI-only','CVSA-only'}
+        for k = 1:numel(sim_ic)
+            ic  = sim_ic(k);
+            val = hit_rate(ic)*100;
+            bar(ax1, 2+k, val, 0.45, ...
+                'FaceColor',sim_cols_h(k,:),'FaceAlpha',0.55, ...
+                'EdgeColor',sim_cols_h(k,:),'LineWidth',1.2,'LineStyle','--', ...
+                'DisplayName',[sim_lbl_h{k} ' (sim)']);
+            text(ax1, 2+k, val+2, sprintf('%.0f%%',val), ...
+                 'HorizontalAlignment','center','FontSize',7.5,'Color',[0.4 0.4 0.4]);
+        end
+        xline(ax1, 2.5, '--', 'Color',[0.6 0.6 0.6],'LineWidth',0.8, ...
+              'Label','real | sim','LabelHorizontalAlignment','center', ...
+              'FontSize',7,'HandleVisibility','off');
+        x_ticks  = 1:(2+numel(sim_ic));
+        x_labels = [real_labels, cellfun(@(l)[l ' (sim)'],sim_lbl_h,'un',0)];
+        title(ax1,{'Hit rate'; 'solid = real (GDF events)   dashed = offline sim'},'FontSize',9);
+    else
+        x_ticks  = 1:2;
+        x_labels = real_labels;
+        title(ax1,'Hit rate — real GDF events (897/898/899)','FontSize',10);
     end
-    legend(ax2, cond_labels, 'FontSize',8,'Location','north');
-    set(ax2,'XTick',1:n_cls,'XTickLabel',cls_names,'XTickLabelRotation',15);
+
+    legend(ax1,'FontSize',7,'Location','north');
+    yline(ax1,50,'--k','FontSize',7,'HandleVisibility','off');
+    set(ax1,'XTick',x_ticks,'XTickLabel',x_labels,'XTickLabelRotation',20,'YLim',[0,112]);
+    ylabel('%'); grid(ax1,'on');
+
+    % ── TTH: real (always) + MI-sim/CVSA-sim (hybrid only) ──────────────────
+    ax2 = subplot(1,3,2); hold(ax2,'on');
+    tth_sim_mat = cellfun(@(v) nanmean_safe(v), tth_cls);   % [n_cls x n_cond]
+    tth_real    = real_tth_cls(1:n_cls);
+
+    if is_hybrid
+        sim_ic_tth = 2:n_cond;   % MI-sim and CVSA-sim only
+        n_bars_grp = 1 + numel(sim_ic_tth);
+    else
+        sim_ic_tth = [];
+        n_bars_grp = 1;
+    end
+    grp_w  = 0.7;
+    bar_w  = grp_w / n_bars_grp;
+    offs   = linspace(-grp_w/2+bar_w/2, grp_w/2-bar_w/2, n_bars_grp);
+
+    for c = 1:n_cls
+        % Real bar (black solid)
+        if ~isnan(tth_real(c))
+            bar(ax2, c+offs(1), tth_real(c), bar_w*0.9, ...
+                'FaceColor',[0.15 0.15 0.15],'EdgeColor','k','LineWidth',1.5, ...
+                'DisplayName','Real (GDF 897)');
+            text(ax2, c+offs(1), tth_real(c)+0.12, sprintf('%.1fs',tth_real(c)), ...
+                 'HorizontalAlignment','center','FontSize',7,'FontWeight','bold');
+        end
+        % Simulated bars (hybrid only: MI-sim, CVSA-sim)
+        for k = 1:numel(sim_ic_tth)
+            ic  = sim_ic_tth(k);
+            val = tth_sim_mat(c, ic);
+            if ~isnan(val) && val > 0
+                bar(ax2, c+offs(1+k), val, bar_w*0.9, ...
+                    'FaceColor',cond_colors(ic,:),'FaceAlpha',0.55, ...
+                    'EdgeColor',cond_colors(ic,:),'LineWidth',1.2,'LineStyle','--', ...
+                    'DisplayName',[cond_labels{ic} ' (sim)']);
+                text(ax2, c+offs(1+k), val+0.12, sprintf('%.1fs',val), ...
+                     'HorizontalAlignment','center','FontSize',6.5,'Color',[0.4 0.4 0.4]);
+            end
+        end
+    end
+    if is_hybrid
+        lbl_tth = [{'Real (GDF 897)'}, cellfun(@(l)[l ' (sim)'],cond_labels(2:n_cond),'un',0)];
+        title(ax2,{'Mean TTH — HIT trials only'; 'black = real online   dashed = offline sim'},'FontSize',9);
+    else
+        lbl_tth = {'Real (GDF 897)'};
+        title(ax2,'Mean TTH — HIT trials only (real GDF events)','FontSize',10);
+    end
+    legend(ax2, lbl_tth,'FontSize',7,'Location','north');
+    set(ax2,'XTick',1:n_cls,'XTickLabel',cls_names,'XTickLabelRotation',15,'YLim',[0,inf]);
     ylabel('s'); grid(ax2,'on');
-    title(ax2,'Mean time to hit per class','FontSize',10);
 
+    % ── CDF of TTH ─────────────────────────────────────────────────────────
     ax3 = subplot(1,3,3); hold(ax3,'on');
-    for ic = 1:n_cond
+    % Real TTH: thick black (always)
+    if ~isempty(real_tth_all)
+        xs=sort(real_tth_all); ys=(1:numel(xs))/numel(xs)*100;
+        stairs(ax3,xs,ys,'k-','LineWidth',3,'DisplayName','Real (GDF 897)');
+    end
+    % Simulated: MI-sim and CVSA-sim (hybrid only)
+    for k = 1:numel(sim_ic_tth)
+        ic = sim_ic_tth(k);
         all_tth = [];
         for c = 1:n_cls
-            if ~isempty(tth_cls{c,ic}), all_tth = [all_tth, tth_cls{c,ic}]; end %#ok<AGROW>
+            if ~isempty(tth_cls{c,ic}), all_tth=[all_tth,tth_cls{c,ic}]; end %#ok<AGROW>
         end
         if ~isempty(all_tth)
-            xs = sort(all_tth); ys = (1:numel(xs))/numel(xs)*100;
-            stairs(ax3,xs,ys,'Color',cond_colors(ic,:),'LineWidth',2.5, ...
-                   'DisplayName',cond_labels{ic});
+            xs=sort(all_tth); ys=(1:numel(xs))/numel(xs)*100;
+            stairs(ax3,xs,ys,'Color',cond_colors(ic,:),'LineWidth',2,'LineStyle','--', ...
+                   'DisplayName',[cond_labels{ic} ' (sim)']);
         end
     end
     legend(ax3,'FontSize',8,'Location','best'); grid(ax3,'on');
     xlabel(ax3,'Time to hit (s)'); ylabel(ax3,'Cumulative % HIT trials');
-    title(ax3,'CDF of time-to-hit','FontSize',10);
+    if is_hybrid
+        title(ax3,{'CDF — time to hit'; 'black = real online   dashed = offline sim'},'FontSize',9);
+    else
+        title(ax3,'CDF — time to hit (real GDF events)','FontSize',10);
+    end
 
-    sgtitle(fig3,sprintf('Performance comparison — %s  [%s]',basename,upper(paradigm)), ...
-            'FontSize',12,'Interpreter','none');
+    if is_hybrid
+        sgtitle(fig3,sprintf('Performance — %s  [%s]   |  solid border = real GDF events  |  dashed = offline simulation', ...
+                basename,upper(paradigm)),'FontSize',10,'Interpreter','none');
+    else
+        sgtitle(fig3,sprintf('Performance — %s  [%s]   |  accuracy from real GDF events (897/898/899)', ...
+                basename,upper(paradigm)),'FontSize',10,'Interpreter','none');
+    end
     saveas(fig3, fullfile(out_dir,sprintf('%s_03_performance.svg',basename)),'svg');
 
     % ── Fig 4: Saved trials (hybrid) or Hit/Miss output distribution (single) ───
@@ -658,10 +794,19 @@ for fi = 1:n_files
 
     % ── Save per-file mat ─────────────────────────────────────────────────────
     res = struct( ...
+        'file_label',     file_label, ...
         'basename',       basename, ...
         'paradigm',       paradigm, ...
         'n_trials',       n_trials, ...
-        'hit_rate',       hit_rate, ...
+        'hit_rate',       hit_rate, ...          % simulated (offline integrator)
+        'hit_rate_ev',    hit_rate_ev, ...       % event-based: 897/(897+898+899)
+        'hit_rate_no_to', hit_rate_no_to, ...    % event-based: 897/(897+898)
+        'timeout_rate',   timeout_rate, ...      % event-based: 899/(897+898+899)
+        'n_hits_ev',      n_hits_ev, ...
+        'n_misses_ev',    n_misses_ev, ...
+        'n_timeout_ev',   n_timeout_ev, ...
+        'real_tth_cls',   real_tth_cls, ...      % real TTH per class (from 897 events)
+        'real_tth_all',   real_tth_all, ...      % pooled real TTH (all HIT trials)
         'cond_labels',    {cond_labels}, ...
         'tth_cls',        {tth_cls}, ...
         'n_saved',        sum(saved_mask), ...
@@ -690,64 +835,103 @@ end
 %  FIG 6: Multi-file overview (if more than one file)
 %  ═════════════════════════════════════════════════════════════════════════════
 if numel(all_res_cell) > 1
-    n_f         = numel(all_res_cell);
-    base_labels = cellfun(@(r) r.basename, all_res_cell, 'UniformOutput',false);
-    fig6 = figure('Name','Multi-File Overview','Color','w','NumberTitle','off', ...
-                  'Position',[90 90 1200 480]);
+    n_f        = numel(all_res_cell);
+    file_lbls  = cellfun(@(r) r.file_label, all_res_cell, 'UniformOutput',false);
 
-    ax1 = subplot(1,3,1); hold(ax1,'on');
-    hr_mat = nan(n_f,3);  % columns: hybrid / mi / cvsa
+    fig6 = figure('Name','Multi-File Overview','Color','w','NumberTitle','off', ...
+                  'Position',[90 90 1400 480]);
+
+    % ── Panel 1: event-based accuracy per file (3 bars) ──────────────────────
+    % Data from actual GDF outcomes (897/898/899), not from offline simulation.
+    ax1 = subplot(1,3,1);
+    ev_mat = nan(n_f,3);  % [hit_rate_ev, hit_rate_no_to, timeout_rate] per file
     for i = 1:n_f
         r = all_res_cell{i};
-        for ic = 1:r.n_cond
-            lbl = r.cond_labels{ic};
-            if strcmp(lbl,'Hybrid'),    hr_mat(i,1) = r.hit_rate(ic); end
-            if strcmp(lbl,'MI-only'),   hr_mat(i,2) = r.hit_rate(ic); end
-            if strcmp(lbl,'CVSA-only'), hr_mat(i,3) = r.hit_rate(ic); end
+        ev_mat(i,:) = [r.hit_rate_ev, r.hit_rate_no_to, r.timeout_rate];
+    end
+    ev_plot = ev_mat*100; ev_plot(isnan(ev_plot)) = 0;
+    bev = bar(ax1, ev_plot, 'grouped');
+    ev_colors = [0.18 0.45 0.75; 0.20 0.65 0.25; 0.85 0.30 0.10];
+    for k = 1:3
+        if isa(bev(k),'matlab.graphics.chart.primitive.Bar')
+            bev(k).FaceColor = ev_colors(k,:);
         end
     end
-    col3 = [0.18 0.45 0.75; 0.85 0.30 0.10; 0.10 0.60 0.30];
-    hr_plot = hr_mat*100; hr_plot(isnan(hr_plot)) = 0;
-    bar3 = bar(ax1, hr_plot, 'grouped');
-    for k = 1:min(numel(bar3),3)
-        if isa(bar3(k),'matlab.graphics.chart.primitive.Bar')
-            bar3(k).FaceColor = col3(k,:);
-        end
+    legend(ax1,{'897/(897+898+899)','897/(897+898)','timeout 899/total'}, ...
+           'FontSize',7,'Location','north');
+    set(ax1,'XTick',1:n_f,'XTickLabel',file_lbls,'XTickLabelRotation',25,'YLim',[0,108]);
+    yline(ax1,50,'--k','FontSize',7); ylabel('%'); grid(ax1,'on');
+    % Annotate hit count above each bar group
+    for i = 1:n_f
+        r = all_res_cell{i};
+        text(ax1,i,max(ev_plot(i,:))+3, ...
+             sprintf('H=%d M=%d T=%d',r.n_hits_ev,r.n_misses_ev,r.n_timeout_ev), ...
+             'HorizontalAlignment','center','FontSize',6.5,'Color',[0.3 0.3 0.3]);
     end
-    legend(ax1,{'Hybrid','MI-only','CVSA-only'},'FontSize',8,'Location','north');
-    set(ax1,'XTick',1:n_f,'XTickLabel',base_labels,'XTickLabelRotation',20,'YLim',[0,110]);
-    yline(ax1,50,'--k'); ylabel('%'); grid(ax1,'on');
-    title(ax1,'Hit rate per file and condition','FontSize',10);
+    title(ax1,'Event-based accuracy (actual GDF outcomes)','FontSize',10);
 
+    % ── Panel 2: per-paradigm summary (mean ± std across files) ──────────────
     ax2 = subplot(1,3,2);
-    delta = hr_mat(:,1) - hr_mat(:,2);
-    delta_plot = delta*100; delta_plot(isnan(delta_plot)) = 0;
-    bh6 = bar(ax2, delta_plot, 'FaceColor','flat');
-    if isa(bh6,'matlab.graphics.chart.primitive.Bar')
-        for i = 1:n_f
-            if isnan(delta(i)),    bh6.CData(i,:) = [0.7 0.7 0.7];
-            elseif delta(i) >= 0,  bh6.CData(i,:) = [0.2 0.5 0.8];
-            else,                   bh6.CData(i,:) = [0.8 0.2 0.1];
+    paradigms_found = unique(cellfun(@(r) r.paradigm, all_res_cell, 'UniformOutput',false));
+    par_colors = struct('mi',[0.85 0.30 0.10],'cvsa',[0.10 0.60 0.30],'hybrid',[0.18 0.45 0.75]);
+    hold(ax2,'on');
+    for pi = 1:numel(paradigms_found)
+        par = paradigms_found{pi};
+        vals = cellfun(@(r) r.hit_rate_ev*100, all_res_cell(strcmp(cellfun(@(r)r.paradigm,all_res_cell,'un',0),par)));
+        col_p = par_colors.(par);
+        xp = pi;
+        bar(ax2, xp, mean(vals,'omitnan'), 0.5, 'FaceColor',col_p,'FaceAlpha',0.65,'EdgeColor',col_p);
+        errorbar(ax2, xp, mean(vals,'omitnan'), std(vals,'omitnan'), 'k.','LineWidth',1.5,'CapSize',8);
+        scatter(ax2, xp + randn(numel(vals),1)*0.07, vals, 40, col_p, 'filled', ...
+                'MarkerEdgeColor','k','LineWidth',0.5);
+    end
+    set(ax2,'XTick',1:numel(paradigms_found),'XTickLabel',upper(paradigms_found), ...
+            'XTickLabelRotation',15,'YLim',[0,108]);
+    yline(ax2,50,'--k','FontSize',7); ylabel('%'); grid(ax2,'on');
+    title(ax2,'Hit rate by paradigm  (mean ± std + dots)','FontSize',10);
+
+    % ── Panel 3: within-hybrid advantage (LOP vs MI-sim, hybrid files only) ──
+    ax3 = subplot(1,3,3);
+    hold(ax3,'on');
+    hyb_idx = find(strcmp(cellfun(@(r)r.paradigm,all_res_cell,'un',0),'hybrid'));
+    if ~isempty(hyb_idx)
+        delta_h = nan(numel(hyb_idx),1);
+        lbl_h   = cell(numel(hyb_idx),1);
+        for k = 1:numel(hyb_idx)
+            r = all_res_cell{hyb_idx(k)};
+            % hit_rate: [Hybrid, MI-sim, CVSA-sim]
+            if numel(r.hit_rate) >= 2
+                delta_h(k) = (r.hit_rate(1) - r.hit_rate(2)) * 100;
+            end
+            lbl_h{k} = r.file_label;
+        end
+        bh3 = bar(ax3, delta_h, 'FaceColor','flat');
+        if isa(bh3,'matlab.graphics.chart.primitive.Bar')
+            for k = 1:numel(hyb_idx)
+                if isnan(delta_h(k)),   bh3.CData(k,:) = [0.7 0.7 0.7];
+                elseif delta_h(k) >= 0, bh3.CData(k,:) = [0.18 0.55 0.25];
+                else,                    bh3.CData(k,:) = [0.80 0.20 0.10];
+                end
             end
         end
+        set(ax3,'XTick',1:numel(hyb_idx),'XTickLabel',lbl_h,'XTickLabelRotation',20);
+        yline(ax3,0,'k-','LineWidth',1.2);
+        for k = 1:numel(hyb_idx)
+            if ~isnan(delta_h(k))
+                text(ax3,k,delta_h(k)+sign(delta_h(k))*1.5,sprintf('%.0f%%',delta_h(k)), ...
+                     'HorizontalAlignment','center','FontSize',8,'FontWeight','bold');
+            end
+        end
+    else
+        text(ax3,0.5,0.5,'No hybrid files loaded','Units','normalized', ...
+             'HorizontalAlignment','center','FontSize',10,'Color',[0.5 0.5 0.5]);
+        axis(ax3,'off');
     end
-    set(ax2,'XTick',1:n_f,'XTickLabel',base_labels,'XTickLabelRotation',20);
-    yline(ax2,0,'k-','LineWidth',1.2); grid(ax2,'on');
-    ylabel('Δ hit rate  hybrid − MI (%)');
-    title(ax2,'Hybrid advantage over MI-only','FontSize',10);
+    grid(ax3,'on'); ylabel('Δ hit rate  hybrid − MI-only (%)','FontSize',9);
+    title(ax3,'Within-hybrid advantage  (same EEG, LOP vs MI alone)','FontSize',10);
+    subtitle(ax3,'green = fusion helped, red = fusion hurt','FontSize',8);
 
-    ax3 = subplot(1,3,3);
-    rho_m = cellfun(@(r) r.rho_mean, all_res_cell);
-    rho_s = cellfun(@(r) r.rho_std,  all_res_cell);
-    errorbar(ax3, 1:n_f, rho_m, rho_s, 'o-', 'Color',[0.3 0.4 0.8], ...
-             'MarkerFaceColor',[0.5 0.6 0.9],'LineWidth',1.5,'CapSize',8);
-    yline(ax3,0,'k--');
-    yline(ax3,0.3,'--','Color',[0.7 0.4 0.1],'Label','ρ=0.3','FontSize',7);
-    set(ax3,'XTick',1:n_f,'XTickLabel',base_labels,'XTickLabelRotation',20,'YLim',[-0.5,1]);
-    grid(ax3,'on'); ylabel('ρ(P_{MI}, P_{CVSA})  mean ± std');
-    title(ax3,'Classifier independence per file','FontSize',10);
-
-    sgtitle(fig6,'Multi-file hybrid advantage overview','FontSize',13);
+    sgtitle(fig6,'Multi-file overview — hybrid BCI advantage','FontSize',13);
     saveas(fig6, fullfile(out_dir,'00_multifile_overview.svg'),'svg');
 end
 

@@ -147,10 +147,28 @@ header_chunks.framerate = framerate;
 trials = integrate_signal(p_mi_aligned, p_cvsa_aligned, art_flags, ...
                           header_chunks, int_cfg, paradigm);
 
-% --- 9) Plot per-trial panels -------------------------------------------
-plot_trials(trials, int_cfg, framerate, paradigm, basename);
+% --- 9) Read REAL outcomes from GDF events (897=HIT, 898=MISS, 899=TIMEOUT)
+%        These reflect what the online ROS system actually decided.
+%        The simulation (trials.pass) may differ because of timing / parameter
+%        differences between offline replay and real-time execution.
+HIT_CODE_SIM = 897;  MISS_CODE_SIM = 898;  TIMEOUT_CODE_SIM = 899;  CF_CODE_SIM = 781;
+POS_ev = header.EVENT.POS;  TYP_ev = header.EVENT.TYP;
+cf_samp = POS_ev(TYP_ev == CF_CODE_SIM);
+n_trials = numel(trials);
+trial_outcome_real = zeros(1, n_trials);   % 0 = not found
+for t = 1:min(n_trials, numel(cf_samp))
+    after = POS_ev > cf_samp(t);
+    idx   = find((TYP_ev==HIT_CODE_SIM | TYP_ev==MISS_CODE_SIM | TYP_ev==TIMEOUT_CODE_SIM) & after, 1);
+    if ~isempty(idx), trial_outcome_real(t) = TYP_ev(idx); end
+end
+n_hit_real  = sum(trial_outcome_real == HIT_CODE_SIM);
+n_miss_real = sum(trial_outcome_real == MISS_CODE_SIM);
+n_to_real   = sum(trial_outcome_real == TIMEOUT_CODE_SIM);
+log_step('main_simulate: GDF outcomes -> HIT=%d  MISS=%d  TIMEOUT=%d  (sim PASS=%d)', ...
+         n_hit_real, n_miss_real, n_to_real, sum([trials.pass]));
 
-log_step('main_simulate: done -> %d/%d trials PASS', sum([trials.pass]), numel(trials));
+% --- 10) Plot per-trial panels -------------------------------------------
+plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real);
 
 
 

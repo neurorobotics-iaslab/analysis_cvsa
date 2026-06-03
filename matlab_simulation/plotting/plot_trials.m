@@ -1,4 +1,4 @@
-function plot_trials(trials, int_cfg, framerate, paradigm, basename)
+function plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real)
 % PLOT_TRIALS  One panel per 781 trial. All curves are in the P(class 1)
 %   reference frame (= the first class returned by sLDA, which is the only
 %   probability the integrator consumes). Each panel shows:
@@ -12,8 +12,16 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename)
 %     - dotted line at p_rest = init_val(1)
 %     - light-grey shading where the artifact gate fired
 %
-%   Title: PASS if integrated/raw[target_class] >= thresholds[target_class] within CF window
-%          (matches Training.cpp evaluation mode: is_target_hit checks raw >= threshold).
+%   trial_outcome_real (optional): vector of actual GDF outcomes per trial
+%     897=HIT, 898=MISS, 899=TIMEOUT, 0=unknown.
+%     When provided, titles show REAL outcome; simulated pass/fail shown in brackets.
+%
+%   Title: REAL outcome (HIT/MISS/TIMEOUT) from GDF + [sim PASS/miss] in brackets.
+
+    if nargin < 6 || isempty(trial_outcome_real)
+        trial_outcome_real = zeros(1, numel(trials));
+    end
+    HIT_EV = 897;  MISS_EV = 898;  TO_EV = 899;
 
     if isempty(trials)
         log_step('plot_trials: no trials -> nothing to plot');
@@ -28,8 +36,14 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename)
     init_val   = to_vec(int_cfg.init_val);
     p_rest     = init_val(1);
     thresholds = to_vec(int_cfg.thresholds);
-    thr_up     = thresholds(1);            % class-1 win threshold in P(c1) space
-    thr_dn     = 1 - thresholds(2);        % class-2 win threshold in P(c1) space
+    thr_up     = thresholds(1);
+    thr_dn     = 1 - thresholds(2);
+
+    % Count real outcomes for the super-title
+    n_hit_r  = sum(trial_outcome_real == HIT_EV);
+    n_miss_r = sum(trial_outcome_real == MISS_EV);
+    n_to_r   = sum(trial_outcome_real == TO_EV);
+    has_real = any(trial_outcome_real ~= 0);
 
     fig_name = sprintf('Continuous feedback [%s] %s', paradigm, basename);
     figure('Name', fig_name, 'Color', 'w', 'NumberTitle', 'off');
@@ -97,11 +111,22 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename)
         ylabel(ax, sprintf('P(class %d)', classes(1)));
 
         if isnan(tr.target_class)
-            title(ax, sprintf('trial %d  (no onset)', t));
+            title(ax, sprintf('Trial %d  —  no onset event', t), 'FontSize',8);
         else
-            title(ax, sprintf('trial %d  target=c%d (%d)  %s', ...
-                              t, tr.target_class, classes(tr.target_class), ...
-                              ternary(tr.pass, 'PASS', 'miss')));
+            real_ev = trial_outcome_real(t);
+            if real_ev == HIT_EV
+                outcome_str = 'HIT';    bg_col = [0.88 1.00 0.88];
+            elseif real_ev == MISS_EV
+                outcome_str = 'MISS';   bg_col = [1.00 0.88 0.88];
+            elseif real_ev == TO_EV
+                outcome_str = 'TIMEOUT'; bg_col = [1.00 0.96 0.82];
+            else
+                outcome_str = '???';    bg_col = [0.96 0.96 0.96];
+            end
+            set(ax,'Color',bg_col);
+            title(ax, sprintf('Trial %d  |  class %d (%d)  |  %s', ...
+                              t, tr.target_class, classes(tr.target_class), outcome_str), ...
+                  'FontSize', 8, 'FontWeight','bold', 'Interpreter','none');
         end
 
         if t == 1
@@ -115,8 +140,14 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename)
         end
     end
 
-    sgtitle(sprintf('%s — continuous-feedback trials  (%d PASS / %d trials)', ...
-                    paradigm, sum([trials.pass]), n_trials));
+    if has_real
+        sgtitle(sprintf('%s — %s  |  REAL: %d HIT  %d MISS  %d TIMEOUT  (sim: %d PASS / %d)', ...
+                        paradigm, basename, n_hit_r, n_miss_r, n_to_r, ...
+                        sum([trials.pass]), n_trials), 'Interpreter','none');
+    else
+        sgtitle(sprintf('%s — %s  |  sim: %d PASS / %d trials', ...
+                        paradigm, basename, sum([trials.pass]), n_trials), 'Interpreter','none');
+    end
 end
 
 
