@@ -12,19 +12,22 @@ analysis_bci/
 
 ## matlab_simulation
 
-Full offline re-implementation of every ROS processing node (FBCSP, artifact detector, sLDA, integrator), validated against ROS at MAE < 1e-6. Three entry points:
+Full offline re-implementation of every ROS processing node (FBCSP, artifact detector, sLDA, integrator), validated against ROS at MAE < 1e-6. Five entry points:
 
 | Script | Purpose |
 |---|---|
 | `main_simulate` | Single GDF → full pipeline → per-trial P(c1) plot |
-| `main_batch_evaluate` | Multi-file metrics (accuracy, time-to-hit, confidence, artifact rate, …) + optional per-class trial figures. Saves `eval_<paradigm>_<basename>.mat`. |
-| `main_compare_paradigms` | Loads three eval `.mat` files (MI / CVSA / Hybrid) → side-by-side table + bar charts + precision/recall scatter |
+| `main_session_overview` | One or more GDFs → metrics + ERD/ERS heatmaps + topoplots. Saves SVG and `eval_single_<paradigm>_<basename>.mat`. |
+| `main_compare_sessions` (deprecated name: `main_compare_paradigms`) | Loads `eval_single_*.mat` files recursively → per-paradigm aggregate table + bar charts |
+| `main_hybrid_advantage` | Matched hybrid-vs-MI-vs-CVSA comparison + saved-trial breakdown |
+| `main_browse_gdf` | Interactive scrollable viewer: classifier probabilities + integrator signal |
 
 ```matlab
 cd /home/paolo/bci_vr_ws/src/analysis_bci/matlab_simulation
 main_simulate
-main_batch_evaluate
-main_compare_paradigms
+main_session_overview
+main_hybrid_advantage
+main_browse_gdf
 ```
 
 The companion YAML (rosparam dump saved by `bag_bci` alongside each GDF) is loaded automatically. For calibration recordings the YAML lives in `../parameters/` relative to the GDF; `load_params_yaml` searches there as a fallback.

@@ -6,15 +6,8 @@ function [params, yaml_path] = load_params_yaml(gdf_path)
     [dir_, base, ~] = fileparts(gdf_path);
     yaml_path = fullfile(dir_, [base, '.yaml']);
     if ~exist(yaml_path, 'file')
-        % Calibration layout: recordings/<subj>/calibration/{gdf,parameters}/
-        parent_dir = fileparts(dir_);
-        yaml_path2 = fullfile(parent_dir, 'parameters', [base, '.yaml']);
-        if exist(yaml_path2, 'file')
-            yaml_path = yaml_path2;
-        else
-            error('load_params_yaml:notfound', ...
+        error('load_params_yaml:notfound', ...
                   'Companion YAML not found:\n  %s\n  %s', yaml_path, yaml_path2);
-        end
     end
     log_step('load_params_yaml: loading "%s"', yaml_path);
     params = read_yaml(yaml_path);

@@ -10,7 +10,7 @@
 %        raw EEG -> artifact detector                          -> flags
 %        features -> sLDA log + sigmoid                        -> P(c)
 %        P(c)    -> leaky-WTA integrator (resets at every 781) -> integrated
-%   4. Plot one panel per continuous-feedback trial (event 781..781+DUR-1).
+%   4. Plot one panel per continuous-feedback trial (USE_LAUNCH_PARAMSevent 781..781+DUR-1).
 %
 %   Works for paradigm = 'mi' | 'cvsa' | 'hybrid' automatically — the
 %   paradigm is read from the YAML.
@@ -18,7 +18,7 @@
 clear; clc; close all;
 
 % --- Make every subfolder visible to the simulator -----------------------
-this_dir = fileparts(mfilename('fullpath'));
+this_dir = '/home/paolo/bci_vr_ws/src/analysis_bci/matlab_simulation';
 addpath(this_dir);
 addpath(fullfile(this_dir, 'io'));
 addpath(fullfile(this_dir, 'processing'));
@@ -29,10 +29,8 @@ addpath(fullfile(this_dir, 'plotting'));
 addpath(fullfile(this_dir, 'utils'));
 
 % --- GUI: pick the GDF; everything else flows from the sibling YAML -----
-default_dir = '/home/paolo/bci_vr_ws/test_node_data/test_evaluation/recorded';
-if ~isfolder(default_dir)
-    default_dir = '/home/paolo/bci_vr_ws/recordings';
-end
+default_dir = '/home/paolo/bci_vr_ws/recordings';
+
 [gdf_name, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
                                 'Select a GDF recording', default_dir);
 if isequal(gdf_name, 0)
@@ -40,10 +38,10 @@ if isequal(gdf_name, 0)
 end
 gdf_path = fullfile(gdf_dir, gdf_name);
 
-%% --- 1) Load GDF --------------------------------------------------------
+%% --- Load GDF --------------------------------------------------------
 [signal, header, basename] = load_gdf(gdf_path);
 
-% --- 2) Load companion YAML (rosparam dump) -----------------------------
+%% --- Load parameters YAML -----------------------------
 [params, ~] = load_params_yaml(gdf_path);
 
 paradigm  = params.integrator.paradigm;
@@ -61,20 +59,23 @@ bufsize_proc = double(params.RingBufferCfg.params.size);
 bufsize_art  = double(params.RingBufferCfgArtifact.params.size);
 eog_names    = to_strcell(params.CarCfg.params.EOG_ch_names);
 
-% Dynamically resolve do_car for each stream
 do_car_mi = true;
 if isfield(params, 'processing_fbcsp_mi')
     do_car_mi = logical(params.processing_fbcsp_mi.do_car);
+    nchannels = double(params.processing_fbcsp_mi.nchannels);
 end
 do_car_cvsa = true;
 if isfield(params, 'processing_fbcsp_cvsa')
     do_car_cvsa = logical(params.processing_fbcsp_cvsa.do_car);
+    nchannels = double(params.processing_fbcsp_cvsa.nchannels);
 end
 
-log_step('main_simulate: paradigm=%s, fs=%g, framerate=%g, chunk=%d, bufproc=%d, bufart=%d', ...
-         paradigm, fs, framerate, chunk_size, bufsize_proc, bufsize_art);
+signal = signal(:,1:nchannels); % remove the last 3 values: associated with ACC values
 
-% --- 3) Load CSP + sLDA per used paradigm --------------------------------
+log_step('main_simulate: paradigm=%s, fs=%g, framerate=%g, chunk=%d, bufproc=%d, bufart=%d, nchannels=%d', ...
+         paradigm, fs, framerate, chunk_size, bufsize_proc, bufsize_art, nchannels);
+
+%% --- Load CSP + sLDA per used paradigm --------------------------------
 use_mi   = ismember(paradigm, {'mi', 'hybrid'});
 use_cvsa = ismember(paradigm, {'cvsa', 'hybrid'});
 csp_mi   = []; slda_mi   = [];
@@ -88,7 +89,7 @@ if use_cvsa
     slda_cvsa = load_slda(params, 'cvsa');
 end
 
-% --- 4) Apply processing (one stream per paradigm) ----------------------
+%% --- Apply processing (one stream per paradigm) ----------------------
 features_mi = []; header_mi = [];
 features_cv = []; header_cv = [];
 info_proc   = [];
@@ -106,13 +107,13 @@ if use_cvsa
     if isempty(info_proc), info_proc = info2; end
 end
 
-% --- 5) Apply artifact detection on raw signal --------------------------
+%% --- Apply artifact detection on raw signal --------------------------
 art_cfg = params.ArtifactCfg.params;
 art_cfg.EOG_ch_names = to_strcell(art_cfg.EOG_ch_names);
 cfg_art = struct('samplerate', fs, 'chunk_size', chunk_size, 'bufsize_artifact', bufsize_art);
 [art_flags, info_art] = detect_artifacts(signal, header, art_cfg, cfg_art);
 
-% --- 6) Apply sLDA over the whole feature stream ------------------------
+%% --- Apply sLDA over the whole feature stream ------------------------
 %   Note on alignment: features (apply_processing) and art_flags
 %   (detect_artifacts) both live on the same chunk-index axis (k = 1..n_chunks).
 %   The artifact ringbuf fills first (bufsize_art / chunk_size chunks earlier
@@ -130,7 +131,7 @@ p_cvsa_aligned = []; if use_cvsa, p_cvsa_aligned = apply_slda(features_cv, slda_
 log_step('main_simulate: streams aligned (n_chunks=%d, first_valid_proc=%d, art_lead=%d chunks)', ...
          n_chunks, first_valid, art_lead);
 
-% --- 8) Integrate per trial ---------------------------------------------
+%% --- Integrate per trial ---------------------------------------------
 int_cfg = params.integrator;
 % Pull the dynamic_reconfigure-able fields with safe defaults
 if ~isfield(int_cfg, 'increment'),               int_cfg.increment = 1; end
@@ -147,10 +148,7 @@ header_chunks.framerate = framerate;
 trials = integrate_signal(p_mi_aligned, p_cvsa_aligned, art_flags, ...
                           header_chunks, int_cfg, paradigm);
 
-% --- 9) Read REAL outcomes from GDF events (897=HIT, 898=MISS, 899=TIMEOUT)
-%        These reflect what the online ROS system actually decided.
-%        The simulation (trials.pass) may differ because of timing / parameter
-%        differences between offline replay and real-time execution.
+%% --- Read REAL outcomes from GDF events (897=HIT, 898=MISS, 899=TIMEOUT)
 HIT_CODE_SIM = 897;  MISS_CODE_SIM = 898;  TIMEOUT_CODE_SIM = 899;  CF_CODE_SIM = 781;
 POS_ev = header.EVENT.POS;  TYP_ev = header.EVENT.TYP;
 cf_samp = POS_ev(TYP_ev == CF_CODE_SIM);
@@ -167,7 +165,7 @@ n_to_real   = sum(trial_outcome_real == TIMEOUT_CODE_SIM);
 log_step('main_simulate: GDF outcomes -> HIT=%d  MISS=%d  TIMEOUT=%d  (sim PASS=%d)', ...
          n_hit_real, n_miss_real, n_to_real, sum([trials.pass]));
 
-% --- 10) Plot per-trial panels -------------------------------------------
+%% --- Plot per-trial panels -------------------------------------------
 plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real);
 
 

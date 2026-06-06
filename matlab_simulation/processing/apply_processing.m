@@ -55,10 +55,10 @@ function [features, header_out, info, features_pre] = apply_processing(signal, h
     for b = 1:n_bands
         lo = csp.bands(b, 1);
         hi = csp.bands(b, 2);
-        [b_lp{b}, a_lp{b}] = butter(order, hi / nyq, 'low');
+        [b_lp{b}, a_lp{b}] = butter(order, hi / nyq, 'low');  
         [b_hp{b}, a_hp{b}] = butter(order, lo / nyq, 'high');
-        zi_lp{b} = zeros(max(numel(a_lp{b}), numel(b_lp{b})) - 1, C);
-        zi_hp{b} = zeros(max(numel(a_hp{b}), numel(b_hp{b})) - 1, C);
+        zi_lp{b} = []; % zeros(max(numel(a_lp{b}), numel(b_lp{b})) - 1, C);
+        zi_hp{b} = []; % zeros(max(numel(a_hp{b}), numel(b_hp{b})) - 1, C);
     end
 
     bufsize = cfg.bufsize;
@@ -80,8 +80,8 @@ function [features, header_out, info, features_pre] = apply_processing(signal, h
         end
 
         for b = 1:n_bands
-            [lp_out, zi_lp{b}] = filter(b_lp{b}, a_lp{b}, chunk_car, zi_lp{b}, 1);
-            [bp_out, zi_hp{b}] = filter(b_hp{b}, a_hp{b}, lp_out,    zi_hp{b}, 1);
+            [lp_out, zi_lp{b}] = filter(b_lp{b}, a_lp{b}, chunk_car, zi_lp{b});
+            [bp_out, zi_hp{b}] = filter(b_hp{b}, a_hp{b}, lp_out,    zi_hp{b});
             bufs(:,:,b) = [bufs(chunk_size+1:end,:,b); bp_out];
         end
 
@@ -105,8 +105,8 @@ function [features, header_out, info, features_pre] = apply_processing(signal, h
 
     header_out = header;
     if ~isempty(header.EVENT.POS)
-        header_out.EVENT.POS = max(1, round(header.EVENT.POS / chunk_size));
-        header_out.EVENT.DUR = round(header.EVENT.DUR / chunk_size);
+        header_out.EVENT.POS = ceil(header.EVENT.POS / chunk_size);
+        header_out.EVENT.DUR = ceil(header.EVENT.DUR / chunk_size);
     end
 
     n_valid = sum(~any(isnan(features), 2));

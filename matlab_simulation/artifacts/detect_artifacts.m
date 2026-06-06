@@ -42,13 +42,12 @@ function [art_flags, info] = detect_artifacts(signal, header, art_cfg, cfg)
     [b_lp,  a_lp]  = butter(art_cfg.filterOrder_EOG,   art_cfg.freq_low_EOG    / nyq, 'low');
     [b_hp,  a_hp]  = butter(art_cfg.filterOrder_EOG,   art_cfg.freq_high_EOG   / nyq, 'high');
     [b_hpk, a_hpk] = butter(art_cfg.filterOrder_peaks, art_cfg.freq_high_peaks / nyq, 'high');
-    zi_lp  = zeros(max(length(a_lp),  length(b_lp))  - 1, C);
-    zi_hp  = zeros(max(length(a_hp),  length(b_hp))  - 1, C);
-    zi_hpk = zeros(max(length(a_hpk), length(b_hpk)) - 1, C);
+    zi_lp  = []; % zeros(max(length(a_lp),  length(b_lp))  - 1, C);
+    zi_hp  = []; % zeros(max(length(a_hp),  length(b_hp))  - 1, C);
+    zi_hpk = []; % zeros(max(length(a_hpk), length(b_hpk)) - 1, C);
 
-    buf_eog   = zeros(bufsize, C);
-    buf_peaks = zeros(bufsize, C);
-    buf_ptr   = 0;
+    buf_eog   = nan(bufsize, C);
+    buf_peaks = nan(bufsize, C);
 
     art_flags = false(n_chunks, 1);
     first_valid_chunk = ceil(bufsize / chunk_size);
@@ -62,24 +61,19 @@ function [art_flags, info] = detect_artifacts(signal, header, art_cfg, cfg)
         chunk = signal(s0:s1, :);
 
         % CAR on non-EOG channels (matches validated test)
-        car_mean  = mean(chunk(:, non_eog), 2);
-        chunk_car = chunk - car_mean;
+        chunk_car = chunk - mean(chunk(:, non_eog), 2);
 
         % EOG: LP -> HP
-        [eog_lp, zi_lp] = filter(b_lp, a_lp, chunk_car, zi_lp, 1);
-        [eog_bp, zi_hp] = filter(b_hp, a_hp, eog_lp,    zi_hp, 1);
+        [eog_lp, zi_lp] = filter(b_lp, a_lp, chunk_car, zi_lp);
+        [eog_bp, zi_hp] = filter(b_hp, a_hp, eog_lp,    zi_hp);
         % peaks: HP
         [pks_hp, zi_hpk] = filter(b_hpk, a_hpk, chunk_car, zi_hpk, 1);
 
         % circular ring buffers
-        for s = 1:chunk_size
-            bi = mod(buf_ptr, bufsize) + 1;
-            buf_eog  (bi, :) = eog_bp(s, :);
-            buf_peaks(bi, :) = pks_hp(s, :);
-            buf_ptr = buf_ptr + 1;
-        end
+        buf_eog(:,:) = [buf_eog(chunk_size+1:end,:); eog_bp];
+        buf_peaks(:,:) = [buf_peaks(chunk_size+1:end,:); pks_hp];
 
-        if buf_ptr < bufsize, continue; end
+        if any(isnan(buf_eog(:))), continue; end
 
         % EOG check
         heog = buf_eog(:, EOG_ch(1)) - buf_eog(:, EOG_ch(2));

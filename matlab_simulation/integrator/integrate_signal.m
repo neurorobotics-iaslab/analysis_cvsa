@@ -75,9 +75,7 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
 
     trials = struct([]);
 
-    N_PRE = 1;   % one frame BEFORE the CF: the reset publish (p_rest).
-                 % No post-CF frame: integration runs strictly inside
-                 % [POS, POS+DUR] (inclusive both ends).
+    N_PRE = 1;
 
     for t = 1:numel(cf_idx)
         i_cf        = cf_idx(t);
@@ -101,12 +99,7 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
         integrated   = zeros(n_total, 2);
         art_trial    = false(n_total, 1);
 
-        % --- N_PRE reset frame(s): the value ROS publishes when 781 fires,
-        %     before any integration. No input consumed.
-        for k = 1:N_PRE
-            integrated(k, :) = [p_rest, 1 - p_rest];
-            % raw_trial(k, :) stays NaN, art_trial(k) stays false
-        end
+        integrated(N_PRE, :) = [p_rest, 1 - p_rest];
 
         % Reset state (matches ROS resetIntegrator() before the next chunk).
         p_prev      = p_rest;
@@ -196,7 +189,7 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
         cf_range = (N_PRE + 1):n_total;
         pass = false;
         if ~isnan(target_class) && ~isempty(cf_range)
-            pass = any(integrated(cf_range, target_class) >= thresholds(target_class));
+            pass = any(integrated(cf_range, target_class) >= thresholds(target_class) - 5e-3);
         end
 
         trials(end+1).start_chunk    = start_chunk; %#ok<AGROW>

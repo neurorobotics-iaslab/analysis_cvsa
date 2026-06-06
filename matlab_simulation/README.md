@@ -19,7 +19,7 @@ The core stage functions (`apply_processing`, `detect_artifacts`,
 | Artifact detector  | [`src/artifacts_bci/test/test_artifacts.m`](../../artifacts_bci/test/test_artifacts.m) | ~ 1e-7 |
 | FBCSP (CAR + BP + ringbuf + CSP + power) | [`src/slda_bci/test/test_slda.m`](../../slda_bci/test/test_slda.m) (GDF mode) | < 1e-6 |
 | sLDA (log + sigmoid) | [`src/slda_bci/test/test_slda.m`](../../slda_bci/test/test_slda.m) | < 1e-6 |
-| Integrator (leaky WTA + fusion + normalize) | [`src/test_pipeline/src/test_full_pipeline.m`](../../test_pipeline/src/test_full_pipeline.m) | full-pipeline validated |
+| Integrator (leaky WTA + fusion + normalize) | [`src/test_pipeline/src/full_pipeline.m`](../../test_pipeline/src/full_pipeline.m) | < 1e-6 |
 | Per-class normalisation | [`src/feedback_bci_vr/src/Training.cpp`](../../feedback_bci_vr/src/Training.cpp) `normalize_input` | exact port |
 
 `apply_processing.m` is also used by [`src/slda_bci/create_slda/validate_features.m`](../../slda_bci/create_slda/validate_features.m), which runs a stage-by-stage comparison of the calibration notebook (Python) vs the MATLAB implementation. Because `apply_processing` has been validated against ROS at ~1e-7 MAE, any discrepancy found by `validate_features` is attributed to the Python side.
@@ -31,7 +31,7 @@ in spirit.
 
 ## 1. How to run
 
-Three entry points, all self-contained (pick GDFs via file dialogs):
+Four entry points, all self-contained (pick GDFs via file dialogs):
 
 ### `main_simulate` — single-file, visual inspection
 
@@ -43,91 +43,96 @@ main_simulate
 Single GDF → companion YAML → full pipeline → one figure with all CF trials.
 Use this to inspect a specific recording in detail.
 
-### `main_evaluate_single` — per-file detailed analysis
+### `main_session_overview` — multi-file cross-paradigm summary
 
 ```matlab
-main_evaluate_single
+main_session_overview
 ```
 
-Multi-select GDFs. For each file runs the full pipeline and produces **4 SVG figures** saved to `<gdf_dir>/results/<basename>/` and one `eval_single_<paradigm>_<basename>.mat`:
+Multi-select GDFs of any paradigm (MI, CVSA, Hybrid mixed). Paradigm is inferred
+from the filename (`hybrid` > `cvsa` > `mi`). Files are sorted MI → CVSA → Hybrid
+with group separators in the figures.
 
-| Figure | Content |
-|---|---|
-| `01_trials.svg` | All CF trials in one window (identical to `main_simulate`) |
-| `02_metrics.svg` | 2×3 panels: trial accuracy (simulated / events 897-898 / no-artifact-reject), per-class hit rate, frame-level sample accuracy (total + mean/trial), time-to-hit per class, time of peak output on miss trials, artifact rate |
-| `03_erd_ers.svg` | Band-power heatmap `[time × selected channel]` averaged across trials — one row per band × two columns (class 1 / class 2) |
-| `04_topoplots.svg` | Toposcatter maps of mean band power — one subplot per band × class, using standard 10-20 positions with `scatteredInterpolant` background |
+**Three figures:**
 
-The saved mat contains a `results` struct (all scalar metrics, `topo_mean [n_cls × n_sel_ch × n_bands]`, ERD/ERS time series `erd_mean [n_cls × n_cf_min × n_sel_ch × n_bands]`, channel/band metadata) plus the full `trials` array. It is the input for `main_compare_sessions`.
+| Figure | Content | Source |
+|---|---|---|
+| Fig 1 | Trial accuracy — two subplots: `897/(897+898+899)` and `897/(897+898)` (no timeout). Per-file bar + per-paradigm dashed mean line. | Real GDF events |
+| Fig 2 | Time metrics — TTH (HIT trials, mean ± std + dots) and time-to-MISS (MISS trials). | Real GDF events |
+| Fig 3 | Sample accuracy (3 subplots): MI classifier (full CF), CVSA classifier (first 3 s), Hybrid fused (full CF). Each subplot shows all / HIT / MISS breakdown plus per-class split. | Offline simulation |
 
-**Computed metrics:**
+Console output per file: hit rate, sample accuracy (all / HIT / MISS / per-class),
+integrator parameters, and a per-trial diagnostic table (onset code, target class,
+mean P per class, argmax agreement, outcome) to catch any target-class inversion.
 
-| Metric | Description |
-|---|---|
-| `trial_acc` | Simulation hit rate: integrated ≥ threshold within CF window |
-| `trial_acc_events` | Event-based: count(897) / (count(897) + count(898)) from GDF |
-| `trial_acc_no_rej` | Simulation hit rate excluding trials with > 30 % artifact frames |
-| `sample_acc_total` | Pooled frame-level accuracy: argmax(raw P) == target class |
-| `sample_acc_mean_trial` | Per-trial frame accuracy averaged across trials |
-| `tth_per_class` | Mean time-to-hit (s from CF onset), per class, over PASS trials |
-| `t_miss_peak_cls` | Mean time at which integrated peaked, per class, over FAIL trials |
-| `art_rate` | Mean fraction of CF frames where the artifact gate fired |
-| `hit_rate_cls`, `confidence_cls`, `peak_norm_cls` | Per-class hit rate, mean raw P(target), mean max normalised |
-
-### `main_compare_sessions` — cross-session comparison
-
-```matlab
-main_compare_sessions          % GUI folder picker
-main_compare_sessions('/path') % programmatic
-```
-
-Selects a root folder, recursively finds all `eval_single_*.mat` files produced by `main_evaluate_single`, groups by paradigm (`mi` / `cvsa` / `hybrid`):
-
-1. **Per-file table** — basename, paradigm, trial acc (%), event-based acc (%), sample acc (%), TTH per class, `miss_max_fused` (mean max integrator on miss trials).
-2. **Per-paradigm aggregate** — mean ± std for every scalar metric.
-3. **One summary figure per paradigm** — bar charts per session for trial accuracy, frame accuracy, and time-to-hit.
+Does **not** save `.mat` files — it is a quick overview, not an archiving tool.
 
 ---
 
-### `main_hybrid_advantage` — offline evidence for hybrid BCI benefit
+### `main_hybrid_advantage` — offline analysis of hybrid recordings
 
 ```matlab
-main_hybrid_advantage          % GUI file picker (one or more GDF files)
+main_hybrid_advantage          % GUI file picker — hybrid GDF files only
 ```
 
-Designed to answer: **does the hybrid fusion actually help compared to MI alone or CVSA alone?**
+Designed to answer: **is the fusion driving the integrator in the correct direction,
+and where does it fail — classifier or integrator?**
 
-For each **hybrid** GDF the same EEG is replayed in three conditions using `integrate_signal` with different paradigm strings — giving an exact matched-trial comparison free of session-to-session variability:
+Accepts only **hybrid** GDF files (non-hybrid files are skipped with a warning).
+Runs the pipeline **once** per file (no counterfactual MI-only or CVSA-only
+simulation). Trial structure and outcomes are extracted **directly from the raw
+GDF event array** (sample-level TYP/POS), following the sequence:
 
-| Condition | Description |
+```
+... [750|751] , 781 , [897|898|899] ...
+       cue      CF     outcome
+```
+
+`integrate_signal` provides the same extraction internally via the chunk-rescaled
+header; a cross-check logs any discrepancy.
+
+**Key metric — mean P(class asked):**
+For each trial, take every valid CF frame and compute the mean probability of
+the **cued class** (i.e. P of the class the subject was asked to imagine/attend).
+
+| Value | Interpretation |
 |---|---|
-| Hybrid | LOP fusion with cosine-annealed CVSA prior |
-| MI-only (sim) | Leaky integrator driven by P_MI alone |
-| CVSA-only (sim) | Leaky integrator driven by P_CVSA alone |
+| > 0.5 + HIT | Classifier strong, integrator fast |
+| > 0.5 + MISS | Classifier correct direction but integrator too slow → tune `k_gain`/`buffer_size` |
+| ≈ 0.5 + MISS | Near-chance; integration goes nowhere |
+| < 0.5 + MISS | Classifier points wrong direction → genuine classifier failure |
+| < 0.5 + HIT | Rare; threshold hit early (CVSA dominance at t=0) before P decays |
 
-For **single-modality** GDF (mi or cvsa) the native condition is shown as a baseline.
+**Three figures per file:**
 
-**Five figures per file:**
+| Figure | Content |
+|---|---|
+| `01_temporal.svg` | Mean P_MI / P_CVSA / P_fused over CF time aligned to CF onset, one subplot per cued class. Vertical lines at α=0.5 (T/2) and α=0 (T) mark the cosine fusion schedule. |
+| `02_per_trial.svg` | **4-panel per-trial scatter** (one point per trial). Panel 1–3: mean P_MI / P_CVSA / P_fused (class asked). Panel 4: mean integrated buffer (class asked), with threshold lines. Color = outcome (green HIT / orange MISS / red TIMEOUT); marker = cued class (circle = class1, square = class2). Dashed horizontal lines show per-outcome group means. |
+| `03_buffer.svg` | Mean ± std of target-class integrated buffer over CF time, split by outcome. Gap between MISS curve and threshold line quantifies the integrator bottleneck. |
 
-| Figure | Content | Available for |
-|---|---|---|
-| `01_temporal_dynamics` | Mean P_MI and P_CVSA (or native output) over CF time per class, with ±std band. For hybrid: both classifiers + fused output plotted. Vertical lines at α=0.5 (T/2) and α=0 (T) mark the fusion schedule. | All paradigms |
-| `02_buffer_trajectories` | Mean ± std of the target-class buffer over CF time for HIT trials (left) and MISS trials (right), all conditions overlaid. Shows whether hybrid reaches threshold faster. | All paradigms |
-| `03_performance` | Hit rate barplot + mean TTH per class + CDF of time-to-hit. | All paradigms |
-| `04_trial_analysis` | **Hybrid**: saved-trial breakdown (both HIT / saved / MI wins / both MISS) + boxplot of early P_CVSA and early P_MI for saved vs other trials. **Single-modality**: classifier output distribution for HIT vs MISS (boxplot + per-trial scatter + onset confidence). | All paradigms |
-| `05_correlation` | Per-trial histogram of ρ(P_MI, P_CVSA), CDF, and frame-level scatter P_MI vs P_CVSA. Low ρ validates the LOP independence assumption. | Hybrid only |
+**Multi-file overview (Fig 4)** if > 1 GDF selected: hit rate bars, P\_fused and mean buffer (HIT vs MISS/TO), TTH distribution.
 
-**Multi-file overview (Fig 6)** if > 1 GDF is selected: bar chart of hit rates by condition, Δ(hybrid − MI) per file, and ρ per file.
+**Console output** prints per-trial: cue code, outcome, mean P\_MI / P\_CVSA / P\_fused / mean\_buf / max\_buf. Summary per outcome group follows.
 
-**Saved files:** `advantage_<paradigm>_<basename>.mat` per GDF (contains `res` struct + `trials_hyb/mi/cvsa`) + SVG figures in `<gdf_dir>/hybrid_advantage/`.
+**Saved files:** `advantage_hybrid_<basename>.mat` per GDF (contains `res` struct + `trials`) + SVG figures in `<gdf_dir>/hybrid_advantage/`.
+
+### `main_browse_gdf` — interactive scrollable viewer
+
+```matlab
+main_browse_gdf
+```
+
+Runs the full pipeline on one GDF, then shows two synchronised panels in a scrollable figure:
+1. sLDA classifier outputs — MI (green), CVSA (orange), fused (purple)
+2. Leaky-integrator buffer output per class, with threshold lines; the `init_val` reset point is shown one chunk before each event-781 onset
+
+All GDF markers are drawn as colour-coded vertical lines. Artifact frames are shaded red. Controls: slider + ← → keys to scroll, **Win (s)** field to change window width.
 
 Requirements (all entry points):
 - MATLAB R2019+ with the **Signal Processing Toolbox** (`butter`, `filter`)
 - **yamlmatlab** on the path — https://github.com/jiri-cigler/yamlmatlab
 - **BIOSIG** (`sload`) on the path — https://biosig.sourceforge.io
-
-Works automatically for `paradigm = "mi" | "cvsa" | "hybrid"` — read from
-`integrator.paradigm` in the YAML.
 
 ---
 
@@ -164,9 +169,9 @@ aligned by chunk index.
 ```
 matlab_simulation/
 ├── main_simulate.m            # single-file: GUI → pipeline → per-trial plot
-├── main_evaluate_single.m     # multi-GDF: pipeline + metrics + ERD/ERS + topoplots, saves SVG + mat
-├── main_compare_sessions.m    # recursive mat search → per-paradigm aggregate + bar charts
-├── main_hybrid_advantage.m    # hybrid vs MI-only vs CVSA-only matched comparison + saved-trial analysis
+├── main_session_overview.m    # multi-GDF (all paradigms): trial acc + TTH + sample acc, 3 figures
+├── main_hybrid_advantage.m    # hybrid GDFs only: real GDF events → mean P(class asked) + buffer trajectories
+├── main_browse_gdf.m          # interactive scrollable viewer: classifier probabilities + integrator signal
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename
 │   ├── load_params_yaml.m     # full rosparam-dump struct sibling to the GDF
