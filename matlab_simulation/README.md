@@ -75,25 +75,38 @@ Does **not** save `.mat` files — it is a quick overview, not an archiving tool
 main_hybrid_advantage          % GUI file picker — hybrid GDF files only
 ```
 
-Designed to answer: **is the fusion driving the integrator in the correct direction,
-and where does it fail — classifier or integrator?**
+Designed to answer: **is the fused classifier driving the integrator better than
+MI or CVSA alone — faster to the correct direction, fewer frames pointing the
+wrong way?**
 
-Accepts only **hybrid** GDF files (non-hybrid files are skipped with a warning).
-Runs the pipeline **once** per file (no counterfactual MI-only or CVSA-only
-simulation). Trial structure and outcomes are extracted **directly from the raw
-GDF event array** (sample-level TYP/POS), following the sequence:
+Accepts only **hybrid** GDF files. Runs the pipeline once and computes, for every
+valid CF frame of each trial, the following per-stream metrics over the CF window:
 
-```
-... [750|751] , 781 , [897|898|899] ...
-       cue      CF     outcome
-```
+| Metric | Definition |
+|---|---|
+| **mean P(target)** | mean over valid CF frames of P(target class) |
+| **frame accuracy** (acc) | fraction of valid CF frames where P(target) > 0.5 |
+| **acc_buf** | fraction of valid CF frames where buffer(target) > p_rest (= 0.5) |
+| **TTH** | first frame (in seconds) where P(target) > 0.5 — lower = reacts faster |
+| **false-direction rate** | fraction of valid CF frames where P(non-target) > 0.5 — lower = fewer misleading frames |
 
-`integrate_signal` provides the same extraction internally via the chunk-rescaled
-header; a cross-check logs any discrepancy.
+Streams: **MI**, **CVSA** (full CF), **CVSA-inf** (first `cvsa_influence` seconds only),
+**fused** (Bayesian LOP), **buffer** (leaky WTA integrator output).
 
-**Key metric — mean P(class asked):**
-For each trial, take every valid CF frame and compute the mean probability of
-the **cued class** (i.e. P of the class the subject was asked to imagine/attend).
+**Three figures:**
+
+| Figure | Content |
+|---|---|
+| Fig 1 | **Mean P(target) scatter** — one point per trial per stream (5 panels: MI / CVSA / CVSA-inf / fused / buffer). Color = outcome (green HIT / orange MISS / red TO); marker = cued class. Dashed lines = per-outcome group means. |
+| Fig 2 | **Frame accuracy scatter** — same layout as Fig 1, y-axis = fraction frames where P > 0.5. |
+| Fig 3 | **Duration + fused advantage** — three panels: (1) CF trial duration per trial colored by outcome; (2) TTH per stream (paired lines per trial, thick bar = mean) — lower means faster correct response; (3) False-direction rate per stream (same style) — lower means fewer misleading frames. Fused should show lower TTH and lower false-direction rate than MI or CVSA alone. |
+
+**Console output** (per trial, then summaries):
+- Per-trial table: `#, cue, result, mMI, aMI, mCV, aCV, mCVi, aCVi, mFus, aFus, mBuf, aBuf`
+- Per-class summary: mean of all metrics split by cued class
+- Per-outcome summary: mean of all metrics split by HIT/MISS/TIMEOUT
+
+**Interpreting mean P:**
 
 | Value | Interpretation |
 |---|---|
@@ -101,21 +114,8 @@ the **cued class** (i.e. P of the class the subject was asked to imagine/attend)
 | > 0.5 + MISS | Classifier correct direction but integrator too slow → tune `k_gain`/`buffer_size` |
 | ≈ 0.5 + MISS | Near-chance; integration goes nowhere |
 | < 0.5 + MISS | Classifier points wrong direction → genuine classifier failure |
-| < 0.5 + HIT | Rare; threshold hit early (CVSA dominance at t=0) before P decays |
 
-**Three figures per file:**
-
-| Figure | Content |
-|---|---|
-| `01_temporal.svg` | Mean P_MI / P_CVSA / P_fused over CF time aligned to CF onset, one subplot per cued class. Vertical lines at α=0.5 (T/2) and α=0 (T) mark the cosine fusion schedule. |
-| `02_per_trial.svg` | **4-panel per-trial scatter** (one point per trial). Panel 1–3: mean P_MI / P_CVSA / P_fused (class asked). Panel 4: mean integrated buffer (class asked), with threshold lines. Color = outcome (green HIT / orange MISS / red TIMEOUT); marker = cued class (circle = class1, square = class2). Dashed horizontal lines show per-outcome group means. |
-| `03_buffer.svg` | Mean ± std of target-class integrated buffer over CF time, split by outcome. Gap between MISS curve and threshold line quantifies the integrator bottleneck. |
-
-**Multi-file overview (Fig 4)** if > 1 GDF selected: hit rate bars, P\_fused and mean buffer (HIT vs MISS/TO), TTH distribution.
-
-**Console output** prints per-trial: cue code, outcome, mean P\_MI / P\_CVSA / P\_fused / mean\_buf / max\_buf. Summary per outcome group follows.
-
-**Saved files:** `advantage_hybrid_<basename>.mat` per GDF (contains `res` struct + `trials`) + SVG figures in `<gdf_dir>/hybrid_advantage/`.
+No files are saved.
 
 ### `main_browse_gdf` — interactive scrollable viewer
 
@@ -170,7 +170,7 @@ aligned by chunk index.
 matlab_simulation/
 ├── main_simulate.m            # single-file: GUI → pipeline → per-trial plot
 ├── main_session_overview.m    # multi-GDF (all paradigms): trial acc + TTH + sample acc, 3 figures
-├── main_hybrid_advantage.m    # hybrid GDFs only: real GDF events → mean P(class asked) + buffer trajectories
+├── main_hybrid_advantage.m    # hybrid GDFs only: mean P + frame acc + TTH + false-direction, 3 figures
 ├── main_browse_gdf.m          # interactive scrollable viewer: classifier probabilities + integrator signal
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename
