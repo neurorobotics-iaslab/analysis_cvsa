@@ -1,4 +1,4 @@
-function plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real)
+function fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real)
 % PLOT_TRIALS  One panel per 781 trial. All curves are in the P(class 1)
 %   reference frame (= the first class returned by sLDA, which is the only
 %   probability the integrator consumes). Each panel shows:
@@ -25,6 +25,7 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outco
 
     if isempty(trials)
         log_step('plot_trials: no trials -> nothing to plot');
+        fig = gobjects(0);
         return;
     end
 
@@ -46,7 +47,7 @@ function plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outco
     has_real = any(trial_outcome_real ~= 0);
 
     fig_name = sprintf('Continuous feedback [%s] %s', paradigm, basename);
-    figure('Name', fig_name, 'Color', 'w', 'NumberTitle', 'off');
+    fig = figure('Name', fig_name, 'Color', 'w', 'NumberTitle', 'off');
     log_step('plot_trials: %d trials in a %dx%d grid (P(c1) view, thr_up=%.2f, thr_dn=%.2f)', ...
              n_trials, n_rows, n_cols, thr_up, thr_dn);
 

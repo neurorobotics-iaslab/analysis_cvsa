@@ -166,7 +166,16 @@ log_step('main_simulate: GDF outcomes -> HIT=%d  MISS=%d  TIMEOUT=%d  (sim PASS=
          n_hit_real, n_miss_real, n_to_real, sum([trials.pass]));
 
 %% --- Plot per-trial panels -------------------------------------------
-plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real);
+fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real);
+
+%% --- Save figure -------------------------------------------------------
+out_dir = fullfile(gdf_dir, 'analysis_results');
+if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+if ~isempty(fig)
+    out_file = fullfile(out_dir, sprintf('trials_%s_%s.png', paradigm, basename));
+    exportgraphics(fig, out_file, 'Resolution', 150);
+    log_step('main_simulate: saved %s', out_file);
+end
 
 
 

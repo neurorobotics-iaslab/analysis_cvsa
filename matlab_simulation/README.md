@@ -61,9 +61,16 @@ with group separators in the figures.
 | Fig 2 | Time metrics — TTH (HIT trials, mean ± std + dots) and time-to-MISS (MISS trials). | Real GDF events |
 | Fig 3 | Sample accuracy (3 subplots): MI classifier (full CF), CVSA classifier (first 3 s), Hybrid fused (full CF). Each subplot shows all / HIT / MISS breakdown plus per-class split. | Offline simulation |
 
-Console output per file: hit rate, sample accuracy (all / HIT / MISS / per-class),
-integrator parameters, and a per-trial diagnostic table (onset code, target class,
-mean P per class, argmax agreement, outcome) to catch any target-class inversion.
+Console output per file: a per-trial outcome table (HIT/MISS/TIMEOUT + time for that
+event), hit rate, sample accuracy (all / HIT / MISS / per-class), and integrator
+parameters. Set `VERBOSE_DIAGNOSTIC = true` (default `false`) for an additional
+per-trial diagnostic table (onset code, target class, mean P per class, argmax
+agreement, outcome) to catch any target-class inversion — very verbose, off by default.
+
+After all files are processed, a **session summary** prints, per paradigm: each
+file's HIT/MISS/TO counts, accuracy, and mean TTH/Tmiss/Tto, followed by a `TOTAL`
+row pooling all trials of that paradigm across files (experiment-wide accuracy and
+mean times).
 
 Does **not** save `.mat` files — it is a quick overview, not an archiving tool.
 
@@ -93,18 +100,24 @@ valid CF frame of each trial, the following per-stream metrics over the CF windo
 Streams: **MI**, **CVSA** (full CF), **CVSA-inf** (first `cvsa_influence` seconds only),
 **fused** (Bayesian LOP), **buffer** (leaky WTA integrator output).
 
-**Three figures:**
+**Five figures:**
 
 | Figure | Content |
 |---|---|
 | Fig 1 | **Mean P(target) scatter** — one point per trial per stream (5 panels: MI / CVSA / CVSA-inf / fused / buffer). Color = outcome (green HIT / orange MISS / red TO); marker = cued class. Dashed lines = per-outcome group means. |
 | Fig 2 | **Frame accuracy scatter** — same layout as Fig 1, y-axis = fraction frames where P > 0.5. |
-| Fig 3 | **Duration + fused advantage** — three panels: (1) CF trial duration per trial colored by outcome; (2) TTH per stream (paired lines per trial, thick bar = mean) — lower means faster correct response; (3) False-direction rate per stream (same style) — lower means fewer misleading frames. Fused should show lower TTH and lower false-direction rate than MI or CVSA alone. |
+| Fig 3 | **Does CVSA fusion help? (binary view)** — 2×2 layout: (1,1) **frame-level rescue/hurt bar chart** — counts, over all trials within the CVSA-influence window, of CF frames where `P_MI(target)` and `P_fused(target)` agree/disagree on being `>0.5`: *rescued* (MI wrong → fused correct), *hurt* (MI correct → fused wrong), *both correct*, *both wrong*. Title shows the net effect (`rescued − hurt`) and a verdict ("CVSA helped"/"CVSA hurt"/"neutral"); (1,2) per-trial **CVSA-fusion advantage** = mean(P_fused(target) − P_MI(target)) over the CVSA-influence window — positive = fusion pushed toward the target class more than MI alone, negative = fusion pulled away; (2,1)/(2,2) mean ± SEM of P_MI(target) and P_fused(target) over CF time, one panel per cued class (each truncated to that class's longest trial, so the SEM band renders for both classes), with a vertical line marking where the CVSA prior fades to zero (`cvsa_influence`). |
+| Fig 4 | **CF trial duration & CVSA effect on HIT trials, by hit timing** — two panels: (1) per-trial CF duration scatter colored by outcome, with per-outcome dashed mean lines and a dotted line at `cvsa_influence` (split out from Fig 3 into its own figure); (2) **HIT trials only** (MISS/TIMEOUT excluded) — mean `P_MI(target) → P_fused(target)` slopegraph (± SEM, delta annotated), pooling CF frames within the first `cvsa_influence` seconds, split into trials that reached HIT *within* `cvsa_influence` (`duration < cvsa_influence`) vs *after* it (`duration ≥ cvsa_influence`) — tests whether fusion helped fast hits cross threshold sooner (positive delta) vs corrected/hindered MI early in slower hits. |
+| Fig 5 | **Does CVSA help, broken down by MI/CVSA agreement** — every CF frame within the CVSA-influence window is classified into one of 4 categories by whether `P_MI(target)>0.5` and `P_CVSA(target)>0.5`: *agree-correct* (both right), *MI correct, CVSA wrong*, *MI wrong, CVSA correct* (the "rescue" case), *agree-wrong* (both wrong). Three panels: (1) scatter of `P_MI(target)` vs `P_fused(target)` per frame, colored by category, with the `y=x` diagonal and crosshairs at 0.5; (2) slopegraph of mean `P_MI(target) → P_fused(target)` per category (± SEM), with the mean delta annotated above each pair — this is the "small improvement" view; (3) for the two disagreement categories only, `P_fused(target) − P_MI(target)` vs the cosine-annealed CVSA weight `α(t)`, showing how the rescue/cost effect scales with `α`. |
 
 **Console output** (per trial, then summaries):
 - Per-trial table: `#, cue, result, mMI, aMI, mCV, aCV, mCVi, aCVi, mFus, aFus, mBuf, aBuf`
 - Per-class summary: mean of all metrics split by cued class
 - Per-outcome summary: mean of all metrics split by HIT/MISS/TIMEOUT
+- CVSA-fusion advantage summary: count of trials where fusion helped (>0) vs hurt (<0), and the mean delta
+- CVSA-fusion frame-level effect (binary): rescued/hurt/both-correct/both-wrong frame counts within the CVSA-influence window, plus the net effect and verdict
+- HIT trials by hit timing: trial/frame counts, mean `P_MI -> P_fused`, and delta for HIT-within-`cvsa_influence` vs HIT-after-`cvsa_influence` groups
+- CVSA vs MI agreement breakdown: per-category frame counts, mean `P_MI -> P_fused`, and delta; plus rescue effect (MI wrong, CVSA correct) and cost effect (MI correct, CVSA wrong)
 
 **Interpreting mean P:**
 
@@ -170,7 +183,7 @@ aligned by chunk index.
 matlab_simulation/
 ├── main_simulate.m            # single-file: GUI → pipeline → per-trial plot
 ├── main_session_overview.m    # multi-GDF (all paradigms): trial acc + TTH + sample acc, 3 figures
-├── main_hybrid_advantage.m    # hybrid GDFs only: mean P + frame acc + TTH + false-direction, 3 figures
+├── main_hybrid_advantage.m    # hybrid GDFs only: mean P + frame acc + CVSA-fusion advantage, 5 figures
 ├── main_browse_gdf.m          # interactive scrollable viewer: classifier probabilities + integrator signal
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename

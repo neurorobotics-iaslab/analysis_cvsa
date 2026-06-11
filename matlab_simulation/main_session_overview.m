@@ -4,6 +4,12 @@
 %   filename (first keyword found: 'hybrid' > 'cvsa' > 'mi').
 %   Labels are assigned as: mi_1, mi_2, cvsa_1, cvsa_2, hybrid_1, hybrid_2 ...
 %
+%   Console output, per file: per-trial outcome (HIT/MISS/TIMEOUT) + time
+%   for that event, then a session summary with per-file means and
+%   per-paradigm experiment totals (pooled across all files of that
+%   paradigm). Set VERBOSE_DIAGNOSTIC=true for the per-trial P/argmax
+%   class-ordering diagnostic (off by default — very verbose).
+%
 %   Produces three figures (event-based metrics + offline simulation):
 %
 %     Fig 1 — Trial accuracy from real GDF outcomes (897 / 898 / 899)
@@ -31,6 +37,11 @@ addpath(this_dir, fullfile(this_dir,'io'), fullfile(this_dir,'processing'), ...
 
 HIT_EV = 897;  MISS_EV = 898;  TO_EV = 899;  CF_EV = 781;
 CVSA_MAX_S = 3.0;   % seconds used for CVSA sample accuracy
+
+% Set to true to print, for every trial, the per-frame P/argmax diagnostic
+% used to debug class-ordering issues. Very verbose — leave false for a
+% normal session overview.
+VERBOSE_DIAGNOSTIC = false;
 
 COL = struct('mi', [0.85 0.30 0.10], ...
              'cvsa',   [0.10 0.60 0.30], ...
@@ -73,8 +84,10 @@ for fi = 1:n_files
     cf_pos  = POS(TYP == CF_EV);
     n_cf_ev = numel(cf_pos);
     outcomes    = zeros(1, n_cf_ev);
+    dt_vals     = nan(1, n_cf_ev);
     tth_vals    = [];
     t_miss_vals = [];
+    to_vals     = [];
 
     for t = 1:n_cf_ev
         after = POS > cf_pos(t);
@@ -82,10 +95,29 @@ for fi = 1:n_files
         if isempty(idx), continue; end
         outcomes(t) = TYP(idx);
         dt = (POS(idx) - cf_pos(t)) / fs;
+        dt_vals(t) = dt;
         if outcomes(t) == HIT_EV
             tth_vals(end+1)    = dt; %#ok<AGROW>
         elseif outcomes(t) == MISS_EV
             t_miss_vals(end+1) = dt; %#ok<AGROW>
+        elseif outcomes(t) == TO_EV
+            to_vals(end+1)     = dt; %#ok<AGROW>
+        end
+    end
+
+    % ── Per-trial outcomes ────────────────────────────────────────────────────
+    fprintf('  Per-trial outcomes:\n');
+    for t = 1:n_cf_ev
+        switch outcomes(t)
+            case HIT_EV,  out_str = 'HIT';
+            case MISS_EV, out_str = 'MISS';
+            case TO_EV,   out_str = 'TIMEOUT';
+            otherwise,    out_str = '?';
+        end
+        if isnan(dt_vals(t))
+            fprintf('    trial %2d: %-7s\n', t, out_str);
+        else
+            fprintf('    trial %2d: %-7s  t=%.2fs\n', t, out_str, dt_vals(t));
         end
     end
 
@@ -188,14 +220,11 @@ for fi = 1:n_files
         hit_mask(1:n_ev)  = outcomes(1:n_ev) == HIT_EV;
         miss_mask(1:n_ev) = outcomes(1:n_ev) == MISS_EV | outcomes(1:n_ev) == TO_EV;
 
-        % ── DIAGNOSTIC: inspect first few HIT trials ──────────────────────────
-        % This is the key to understand the paradox: if 90% of trials are HIT,
-        % then P(target_class) MUST be > 0.5 for most frames. If sample accuracy
-        % shows < 50%, we are looking at the WRONG column.
         % ── DIAGNOSTIC: inspect ALL trials (HIT and MISS) ────────────────────
         % Prints: onset event code from GDF, target_class, mean P per class, argmax.
         % KEY: if argmax_agrees is LOW on HIT trials → target_class mapping is wrong
         %      (onset event code not matching int_cfg.classes order in YAML).
+        if VERBOSE_DIAGNOSTIC
         fprintf('  [DIAGNOSTIC — all trials: onset code | target_class | P | argmax_agrees | outcome]\n');
         POS_h = header_chunks.EVENT.POS;
         TYP_h = header_chunks.EVENT.TYP;
@@ -248,6 +277,7 @@ for fi = 1:n_files
         end
         fprintf('  int_cfg.classes = [%s]  (class 1 = lower code = first column of sLDA)\n', ...
                 num2str(classes_v(:)','%d '));
+        end
 
         % ── Sample accuracy: per trial → mean over trials ──────────────────────
         % Formula: for each trial, (# CF frames where argmax(P)==target) / (# valid frames)
@@ -297,8 +327,8 @@ for fi = 1:n_files
     r = struct('file_label',file_label,'paradigm',paradigm,'col',col, ...
                'n_hit',n_hit,'n_miss',n_miss,'n_to',n_to, ...
                'hit_tot',hit_tot,'hit_no_to',hit_no_to, ...
-               'tth_vals',tth_vals,'t_miss_vals',t_miss_vals, ...
-               'tth_mean',msafe(tth_vals),'t_miss_mean',msafe(t_miss_vals), ...
+               'tth_vals',tth_vals,'t_miss_vals',t_miss_vals,'to_vals',to_vals, ...
+               'tth_mean',msafe(tth_vals),'t_miss_mean',msafe(t_miss_vals),'to_mean',msafe(to_vals), ...
                'sa_mi',sa_mi,'sa_cvsa',sa_cvsa,'sa_fused',sa_fused, ...
                'sa_mi_hit',sa_mi_hit,'sa_mi_miss',sa_mi_miss, ...
                'sa_cvsa_hit',sa_cvsa_hit,'sa_cvsa_miss',sa_cvsa_miss, ...
@@ -326,6 +356,39 @@ for g = 1:numel(par_seq)
     grp_end(g)   = max(idx_g);
 end
 
+%% ═════════════════════════════════════════════════════════════════════════════
+%  SESSION SUMMARY — per-file means + per-paradigm experiment totals
+%  ═════════════════════════════════════════════════════════════════════════════
+fprintf('\n══════════════════ Session summary ══════════════════\n');
+for g = 1:numel(par_seq)
+    idx_g = grp_start(g):grp_end(g);
+    fprintf('  %s:\n', upper(par_seq{g}));
+    for i = idx_g
+        r = RES{i};
+        n_tot_r = max(1, r.n_hit + r.n_miss + r.n_to);
+        fprintf('    %-12s HIT=%d MISS=%d TO=%d  acc=%.0f%%  no-to=%.0f%%  TTH=%.2fs  Tmiss=%.2fs  Tto=%.2fs\n', ...
+                r.file_label, r.n_hit, r.n_miss, r.n_to, ...
+                100*r.n_hit/n_tot_r, 100*r.hit_no_to, r.tth_mean, r.t_miss_mean, r.to_mean);
+    end
+
+    n_hit_tot  = sum(cellfun(@(r) r.n_hit,  RES(idx_g)));
+    n_miss_tot = sum(cellfun(@(r) r.n_miss, RES(idx_g)));
+    n_to_tot   = sum(cellfun(@(r) r.n_to,   RES(idx_g)));
+    n_tot_g    = max(1, n_hit_tot + n_miss_tot + n_to_tot);
+
+    tth_all = []; tmiss_all = []; to_all = [];
+    for i = idx_g
+        tth_all   = [tth_all,   RES{i}.tth_vals];   %#ok<AGROW>
+        tmiss_all = [tmiss_all, RES{i}.t_miss_vals]; %#ok<AGROW>
+        to_all    = [to_all,    RES{i}.to_vals];     %#ok<AGROW>
+    end
+
+    fprintf('    %-12s HIT=%d MISS=%d TO=%d  acc=%.0f%%  no-to=%.0f%%  TTH=%.2fs  Tmiss=%.2fs  Tto=%.2fs  (n=%d files)\n', ...
+            'TOTAL', n_hit_tot, n_miss_tot, n_to_tot, ...
+            100*n_hit_tot/n_tot_g, 100*n_hit_tot/max(1,n_hit_tot+n_miss_tot), ...
+            msafe(tth_all), msafe(tmiss_all), msafe(to_all), numel(idx_g));
+end
+fprintf('═══════════════════════════════════════════════════════\n');
 
 %% ═════════════════════════════════════════════════════════════════════════════
 %  FIG 1 — TRIAL ACCURACY  (real GDF events)
@@ -488,6 +551,14 @@ end
 sgtitle(fig3,sprintf(['Sample accuracy — offline simulation  (MATLAB ≈ ROS)\n' ...
     'per-trial: (frames where argmax(P_{sLDA})==target) / total valid frames,  then mean over trials']), ...
     'FontSize',11);
+
+%% --- Save figures -------------------------------------------------------
+out_dir = fullfile(gdf_dir, 'analysis_results');
+if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+exportgraphics(fig1, fullfile(out_dir, 'overview_trial_accuracy.png'), 'Resolution', 150);
+exportgraphics(fig2, fullfile(out_dir, 'overview_time_metrics.png'),   'Resolution', 150);
+exportgraphics(fig3, fullfile(out_dir, 'overview_sample_accuracy.png'),'Resolution', 150);
+fprintf('Saved figures to %s\n', out_dir);
 
 fprintf('\nDone.\n');
 

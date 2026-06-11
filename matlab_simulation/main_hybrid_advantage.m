@@ -328,51 +328,173 @@ add_scatter_legend(ax_a(1), COL_HIT, COL_MISS, COL_TO, n_hit_real, n_miss_real, 
 sgtitle(fig2, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — frame accuracy (P > chance)', ...
         basename, n_hit_real, n_miss_real, n_to_real), 'FontSize', 10, 'Interpreter', 'none');
 
-%% ── Figure 3: trial duration + fused advantage ────────────────────────────
+%% ── Figure 3: does CVSA fusion help? ────────────────────────────────────────
 
-% Per-trial: duration, time-to-first-correct (TTH), false-direction rate ──
-dur_s    = nan(n_trials, 1);   % CF duration in seconds
-tth_mi   = nan(n_trials, 1);   % s until first frame where P_MI(target)   > 0.5
-tth_cvsa = nan(n_trials, 1);
-tth_fus  = nan(n_trials, 1);
-fp_mi    = nan(n_trials, 1);   % fraction CF frames where P_MI   → wrong class
-fp_cvsa  = nan(n_trials, 1);
-fp_fus   = nan(n_trials, 1);
+% ── Per-trial: CF duration (plotted separately in Figure 4) ────────────────
+dur_s = nan(n_trials, 1);
+for t = 1:n_trials
+    c = trial_class(t);
+    if isnan(c) || c < 1 || c > n_cls, continue; end
+    dur_s(t) = trials(t).n_cf * chunk_size / fs;
+end
+max_dur = max(dur_s, [], 'omitnan');
+
+% ── Per-trial time course of P_MI(target) vs P_fused(target), per class ────
+max_nc = 0;
+for t = 1:n_trials
+    if ~isnan(trial_class(t)), max_nc = max(max_nc, trials(t).n_cf); end
+end
+time_axis = (0:max_nc-1) * chunk_size / fs;
+
+mi_tc  = cell(1, n_cls);
+fus_tc = cell(1, n_cls);
+nc_cls = zeros(1, n_cls);   % longest CF (in chunks) among trials of each class
+for c = 1:n_cls
+    mi_tc{c}  = nan(n_trials, max_nc);
+    fus_tc{c} = nan(n_trials, max_nc);
+end
+
+% ── Per-trial CVSA-fusion advantage + frame-level rescue/hurt counts,
+%    evaluated over the CVSA-influence window where alpha > 0 ──────────────
+fus_adv = nan(n_trials, 1);   % mean(P_fused - P_MI) on target class
+n_resc     = 0;   % frames: P_MI(target)<=0.5 -> P_fused(target)>0.5  (CVSA rescued)
+n_hurt_fr  = 0;   % frames: P_MI(target)>0.5  -> P_fused(target)<=0.5 (CVSA hurt)
+n_both_ok  = 0;   % frames: both correct
+n_both_bad = 0;   % frames: both wrong
 
 for t = 1:n_trials
     c = trial_class(t);
     if isnan(c) || c < 1 || c > n_cls, continue; end
     np = trials(t).n_pre;
     nc = trials(t).n_cf;
-    dur_s(t) = nc * chunk_size / fs;
-
-    pm  = trials(t).p_mi  (np+1 : np+nc, :);
-    pc  = trials(t).p_cvsa(np+1 : np+nc, :);
-    pf  = trials(t).raw   (np+1 : np+nc, :);
-    vld = ~any(isnan(pm) | isnan(pc) | isnan(pf), 2);
+    pm = trials(t).p_mi(np+1:np+nc, c);
+    pf = trials(t).raw (np+1:np+nc, c);
+    vld = ~isnan(pm) & ~isnan(pf);
     if ~any(vld), continue; end
 
-    oth = 3 - c;   % non-target class (binary)
-    f = find(vld & pm(:,c) > 0.5, 1); if ~isempty(f), tth_mi(t)   = (f-1)*chunk_size/fs; end
-    f = find(vld & pc(:,c) > 0.5, 1); if ~isempty(f), tth_cvsa(t) = (f-1)*chunk_size/fs; end
-    f = find(vld & pf(:,c) > 0.5, 1); if ~isempty(f), tth_fus(t)  = (f-1)*chunk_size/fs; end
+    mi_tc{c}(t, 1:nc)  = pm;
+    fus_tc{c}(t, 1:nc) = pf;
+    nc_cls(c) = max(nc_cls(c), nc);
 
-    nv = sum(vld);
-    fp_mi(t)   = sum(vld & pm(:,oth) > 0.5) / nv;
-    fp_cvsa(t) = sum(vld & pc(:,oth) > 0.5) / nv;
-    fp_fus(t)  = sum(vld & pf(:,oth) > 0.5) / nv;
+    vld_inf = vld;
+    if numel(vld) > cvsa_inf * framerate
+        vld_inf(round(cvsa_inf*framerate)+1:end) = false;
+    end
+    if any(vld_inf)
+        fus_adv(t) = mean(pf(vld_inf) - pm(vld_inf));
+
+        mi_ok  = pm(vld_inf) > 0.5;
+        fus_ok = pf(vld_inf) > 0.5;
+        n_resc     = n_resc     + sum(~mi_ok &  fus_ok);
+        n_hurt_fr  = n_hurt_fr  + sum( mi_ok & ~fus_ok);
+        n_both_ok  = n_both_ok  + sum( mi_ok &  fus_ok);
+        n_both_bad = n_both_bad + sum(~mi_ok & ~fus_ok);
+    end
 end
 
-max_dur = max(dur_s, [], 'omitnan');
-stream_cols3 = {COL_MI, COL_CV, COL_FUS};
-stream_lbls3 = {'MI', 'CVSA', 'fused'};
-bw3 = 0.35;   % half-width of mean bar
+n_def  = sum(~isnan(fus_adv));
+n_help = sum(fus_adv > 0);
+n_hurt = sum(fus_adv < 0);
+fprintf('\n  CVSA-fusion advantage  (mean[P_fused(target) - P_MI(target)] over first %.1fs of CF):\n', cvsa_inf);
+fprintf('  helped (>0): %d/%d   hurt (<0): %d/%d   mean delta: %+.3f\n', ...
+        n_help, n_def, n_hurt, n_def, mean(fus_adv, 'omitnan'));
 
-fig3 = figure('Name', sprintf('Duration & fused advantage — %s', basename), ...
-              'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1350 400]);
+net_fr = n_resc - n_hurt_fr;
+if net_fr > 0,     verdict_fr = 'CVSA helped';
+elseif net_fr < 0, verdict_fr = 'CVSA hurt';
+else,              verdict_fr = 'neutral';
+end
+fprintf('\n  CVSA-fusion frame-level effect  (within first %.1fs of CF):\n', cvsa_inf);
+fprintf('  rescued (MI wrong -> fused correct): %d\n', n_resc);
+fprintf('  hurt    (MI correct -> fused wrong): %d\n', n_hurt_fr);
+fprintf('  both correct: %d   both wrong: %d\n', n_both_ok, n_both_bad);
+fprintf('  net effect: %+d frames  ->  %s\n', net_fr, verdict_fr);
 
-% ── Panel 1: trial duration per trial (colored by outcome) ────────────────
-ax1 = subplot(1,3,1);  hold(ax1,'on');
+fig3 = figure('Name', sprintf('Does CVSA fusion help? — %s', basename), ...
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1300 700]);
+
+% ── Panel (1,1): frame-level rescue/hurt bar chart ──────────────────────────
+ax1 = subplot(2,2,1);  hold(ax1,'on');
+bar_cats = categorical({'rescued','hurt','both correct','both wrong'});
+bar_cats = reordercats(bar_cats, {'rescued','hurt','both correct','both wrong'});
+bar_vals = [n_resc, n_hurt_fr, n_both_ok, n_both_bad];
+bar_cols = [0.15 0.65 0.15; 0.80 0.15 0.15; 0.55 0.55 0.55; 0.85 0.85 0.85];
+b1 = bar(ax1, bar_cats, bar_vals, 'FaceColor', 'flat');
+b1.CData = bar_cols;
+for i = 1:numel(bar_vals)
+    text(ax1, i, bar_vals(i), sprintf(' %d', bar_vals(i)), ...
+         'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontSize', 9);
+end
+ylabel(ax1, 'CF frames (within CVSA-infl. window)', 'FontSize', 9);
+title(ax1, sprintf('CVSA effect on frame correctness (first %.1fs)\nnet = %+d frames  ->  %s', ...
+      cvsa_inf, net_fr, verdict_fr), 'FontSize', 10, 'FontWeight', 'bold');
+grid(ax1, 'on');
+
+% ── Panel (1,2): per-trial CVSA-fusion advantage metric ─────────────────────
+ax2 = subplot(2,2,2);  hold(ax2,'on');
+for t = 1:n_trials
+    if isnan(fus_adv(t)), continue; end
+    c = trial_class(t);  if isnan(c)||c<1||c>n_cls, c=1; end
+    switch trial_outcome_real(t)
+        case HIT_CODE_SIM,     col = COL_HIT;
+        case MISS_CODE_SIM,    col = COL_MISS;
+        case TIMEOUT_CODE_SIM, col = COL_TO;
+        otherwise,             col = [0.5 0.5 0.5];
+    end
+    scatter(ax2, t, fus_adv(t), mk_sz(c), col, 'filled', ...
+            'Marker', mk_cls{c}, 'MarkerEdgeColor', 'k', 'LineWidth', 0.8);
+end
+yline(ax2, 0, 'k-', 'LineWidth', 1.2, 'HandleVisibility','off');
+set(ax2, 'XLim',[0,n_trials+1], 'XTick',1:n_trials);
+xlabel(ax2,'trial #','FontSize',9);
+ylabel(ax2, 'mean(P_{fused} - P_{MI})  on target class', 'FontSize', 9);
+title(ax2, sprintf('CVSA-fusion advantage (first %.1fs)  —  helped %d/%d, hurt %d/%d', ...
+      cvsa_inf, n_help, n_def, n_hurt, n_def), 'FontSize', 10, 'FontWeight', 'bold');
+grid(ax2,'on');
+
+% ── Panels (2,1)/(2,2): P_MI(target) vs P_fused(target) over CF time, per class ──
+for c = 1:n_cls
+    ax = subplot(2,2,2+c);  hold(ax,'on');
+    L = nc_cls(c);
+    if L == 0
+        text(ax, 0.5, 0.5, 'no trials', 'Units','normalized', 'HorizontalAlignment','center');
+        title(ax, sprintf('Class %s  (n=0)', cls_names{c}), 'FontSize', 10, 'FontWeight', 'bold');
+        continue;
+    end
+    ta    = time_axis(1:L);
+    m_mi  = mean(mi_tc{c}(:,1:L),  1, 'omitnan');
+    m_fus = mean(fus_tc{c}(:,1:L), 1, 'omitnan');
+    n_eff = sum(~isnan(mi_tc{c}(:,1:L)), 1);
+    s_mi  = std(mi_tc{c}(:,1:L),  0, 1, 'omitnan') ./ sqrt(max(n_eff,1));
+    s_fus = std(fus_tc{c}(:,1:L), 0, 1, 'omitnan') ./ sqrt(max(n_eff,1));
+
+    fill(ax, [ta, fliplr(ta)], [m_mi-s_mi, fliplr(m_mi+s_mi)], ...
+         COL_MI, 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    fill(ax, [ta, fliplr(ta)], [m_fus-s_fus, fliplr(m_fus+s_fus)], ...
+         COL_FUS, 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    plot(ax, ta, m_mi,  '-', 'Color', COL_MI,  'LineWidth', 2, 'DisplayName', 'P_{MI}(target)');
+    plot(ax, ta, m_fus, '-', 'Color', COL_FUS, 'LineWidth', 2, 'DisplayName', 'P_{fused}(target)');
+    yline(ax, 0.5, 'k:', 'LineWidth', 1, 'HandleVisibility', 'off');
+    xline(ax, cvsa_inf, '--', 'Color', [0.4 0.4 0.4], 'LineWidth', 1, ...
+          'DisplayName', sprintf('CVSA infl. ends (%.1fs)', cvsa_inf));
+    set(ax, 'XLim', [0, max(ta)], 'YLim', [0, 1]);
+    xlabel(ax, 'time from CF onset (s)', 'FontSize', 9);
+    ylabel(ax, 'P(target class)', 'FontSize', 9);
+    title(ax, sprintf('Class %s  (n=%d)', cls_names{c}, sum(trial_class==c & ~isnan(fus_adv))), ...
+          'FontSize', 10, 'FontWeight', 'bold');
+    legend(ax, 'FontSize', 8, 'Location', 'best');
+    grid(ax, 'on');
+end
+
+sgtitle(fig3, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — does CVSA fusion help?', ...
+        basename, n_hit_real, n_miss_real, n_to_real), 'FontSize', 10, 'Interpreter', 'none');
+
+%% ── Figure 4: CF trial duration + CVSA influence over time, by trial length ─
+fig4 = figure('Name', sprintf('CF duration & CVSA time-influence — %s', basename), ...
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [120 120 950 420]);
+
+% ── Panel 1: CF trial duration per trial (colored by outcome) ──────────────
+ax4a = subplot(1,2,1);  hold(ax4a,'on');
 for t = 1:n_trials
     if isnan(dur_s(t)), continue; end
     c = trial_class(t);  if isnan(c)||c<1||c>n_cls, c=1; end
@@ -382,7 +504,7 @@ for t = 1:n_trials
         case TIMEOUT_CODE_SIM, col = COL_TO;
         otherwise,             col = [0.5 0.5 0.5];
     end
-    scatter(ax1, t, dur_s(t), mk_sz(c), col, 'filled', ...
+    scatter(ax4a, t, dur_s(t), mk_sz(c), col, 'filled', ...
             'Marker', mk_cls{c}, 'MarkerEdgeColor', 'k', 'LineWidth', 0.8);
 end
 for oc = {HIT_CODE_SIM, MISS_CODE_SIM, TIMEOUT_CODE_SIM}
@@ -390,87 +512,249 @@ for oc = {HIT_CODE_SIM, MISS_CODE_SIM, TIMEOUT_CODE_SIM}
     v = dur_s(mask);  v = v(~isnan(v));
     if isempty(v), continue; end
     switch oc{1}, case HIT_CODE_SIM, lc=COL_HIT; case MISS_CODE_SIM, lc=COL_MISS; case TIMEOUT_CODE_SIM, lc=COL_TO; end
-    yline(ax1, mean(v), '--', 'Color', lc, 'LineWidth', 1.5, 'HandleVisibility','off');
+    yline(ax4a, mean(v), '--', 'Color', lc, 'LineWidth', 1.5, 'HandleVisibility','off');
 end
-h3 = gobjects(1,3);
-h3(1) = scatter(ax1,NaN,NaN,50,COL_HIT, 'filled','o','MarkerEdgeColor','k','DisplayName',sprintf('HIT (%d)', n_hit_real));
-h3(2) = scatter(ax1,NaN,NaN,50,COL_MISS,'filled','o','MarkerEdgeColor','k','DisplayName',sprintf('MISS (%d)',n_miss_real));
-h3(3) = scatter(ax1,NaN,NaN,50,COL_TO,  'filled','o','MarkerEdgeColor','k','DisplayName',sprintf('TO (%d)',  n_to_real));
-legend(ax1, h3, 'FontSize', 7, 'Location', 'best');
-set(ax1, 'XLim',[0,n_trials+1], 'XTick',1:n_trials, 'YLim',[0, max_dur*1.1]);
-xlabel(ax1,'trial #','FontSize',9);  ylabel(ax1,'duration (s)','FontSize',9);
-title(ax1,'CF trial duration','FontSize',10,'FontWeight','bold');
-grid(ax1,'on');
+yline(ax4a, cvsa_inf, 'k:', 'LineWidth', 1.2, 'DisplayName', sprintf('cvsa_{influence} (%.1fs)', cvsa_inf));
+h4 = gobjects(1,3);
+h4(1) = scatter(ax4a,NaN,NaN,50,COL_HIT, 'filled','o','MarkerEdgeColor','k','DisplayName',sprintf('HIT (%d)', n_hit_real));
+h4(2) = scatter(ax4a,NaN,NaN,50,COL_MISS,'filled','o','MarkerEdgeColor','k','DisplayName',sprintf('MISS (%d)',n_miss_real));
+h4(3) = scatter(ax4a,NaN,NaN,50,COL_TO,  'filled','o','MarkerEdgeColor','k','DisplayName',sprintf('TO (%d)',  n_to_real));
+legend(ax4a, h4, 'FontSize', 7, 'Location', 'best');
+set(ax4a, 'XLim',[0,n_trials+1], 'XTick',1:n_trials, 'YLim',[0, max_dur*1.1]);
+xlabel(ax4a,'trial #','FontSize',9);  ylabel(ax4a,'duration (s)','FontSize',9);
+title(ax4a, sprintf('%s  —  CF trial duration', basename), 'FontSize', 10, 'FontWeight', 'bold', 'Interpreter','none');
+grid(ax4a,'on');
 
-% ── Panel 2: time-to-first-correct (paired lines per trial) ───────────────
-ax2 = subplot(1,3,2);  hold(ax2,'on');
-tth_all = {tth_mi, tth_cvsa, tth_fus};
+% ── Panel 2: mean P_MI -> P_fused for HIT trials, by hit-timing category ───
+% MISS/TIMEOUT trials are excluded. For HIT trials, dur_s(t) is the time
+% from CF onset to hit, so it splits trials into those that hit within the
+% CVSA-influence window vs those that hit after it. For each group, frames
+% within the first cvsa_inf seconds of CF are pooled (same window as Fig 5).
+hit_cat_labels = {sprintf('HIT within %.1fs', cvsa_inf), sprintf('HIT after %.1fs', cvsa_inf)};
+hit_cat_short  = {sprintf('hit < %.1fs', cvsa_inf), sprintf('hit \\geq %.1fs', cvsa_inf)};
+hit_cat_cols   = [COL_CV; COL_BUF];
+
+hit_pmi  = {[], []};
+hit_pfus = {[], []};
+
 for t = 1:n_trials
-    vals = [tth_mi(t), tth_cvsa(t), tth_fus(t)];
-    ok = ~isnan(vals);
-    if ~any(ok), continue; end
-    switch trial_outcome_real(t)
-        case HIT_CODE_SIM,     col = COL_HIT;
-        case MISS_CODE_SIM,    col = COL_MISS;
-        case TIMEOUT_CODE_SIM, col = COL_TO;
-        otherwise,             col = [0.5 0.5 0.5];
-    end
-    if sum(ok) >= 2
-        plot(ax2, find(ok), vals(ok), '-', 'Color', [col, 0.35], 'LineWidth', 1, 'HandleVisibility','off');
-    end
-    for s = 1:3
-        if ~ok(s), continue; end
-        scatter(ax2, s, vals(s), 38, col, 'filled', 'o', ...
-                'MarkerEdgeColor', stream_cols3{s}, 'LineWidth', 0.8, 'MarkerFaceAlpha', 0.8);
-    end
+    if trial_outcome_real(t) ~= HIT_CODE_SIM, continue; end
+    c = trial_class(t);
+    if isnan(c) || c < 1 || c > n_cls, continue; end
+    if isnan(dur_s(t)), continue; end
+    np = trials(t).n_pre;  nc = trials(t).n_cf;
+    pm = trials(t).p_mi(np+1:np+nc, c);
+    pf = trials(t).raw (np+1:np+nc, c);
+    vld = ~isnan(pm) & ~isnan(pf);
+
+    n_inf = min(nc, round(cvsa_inf * framerate));
+    idx = find(vld(1:n_inf));
+    if isempty(idx), continue; end
+
+    if dur_s(t) < cvsa_inf, k = 1; else, k = 2; end
+    hit_pmi{k}  = [hit_pmi{k};  pm(idx)];
+    hit_pfus{k} = [hit_pfus{k}; pf(idx)];
 end
-for s = 1:3
-    m = mean(tth_all{s}, 'omitnan');
-    if ~isnan(m)
-        plot(ax2, [s-bw3, s+bw3], [m, m], '-', 'Color', stream_cols3{s}, 'LineWidth', 3, 'HandleVisibility','off');
-    end
+
+n_hit_fr     = [numel(hit_pmi{1}), numel(hit_pmi{2})];
+mean_hit_mi  = nan(1,2);  mean_hit_fus = nan(1,2);
+sem_hit_mi   = nan(1,2);  sem_hit_fus  = nan(1,2);
+mean_hit_d   = nan(1,2);
+for k = 1:2
+    if n_hit_fr(k) == 0, continue; end
+    mean_hit_mi(k)  = mean(hit_pmi{k});
+    mean_hit_fus(k) = mean(hit_pfus{k});
+    sem_hit_mi(k)   = std(hit_pmi{k})  / sqrt(n_hit_fr(k));
+    sem_hit_fus(k)  = std(hit_pfus{k}) / sqrt(n_hit_fr(k));
+    mean_hit_d(k)   = mean(hit_pfus{k} - hit_pmi{k});
 end
-set(ax2, 'XTick',1:3, 'XTickLabel',stream_lbls3, 'XLim',[0.5,3.5], 'YLim',[0, max_dur*1.05]);
-ylabel(ax2, 'time to first P(target) > 0.5  (s)', 'FontSize', 9);
-title(ax2, 'Time-to-first-correct  (\downarrow better)', 'FontSize', 10, 'FontWeight', 'bold');
+
+n_hit_within = sum(trial_outcome_real == HIT_CODE_SIM & ~isnan(trial_class(:)) & dur_s <  cvsa_inf);
+n_hit_after  = sum(trial_outcome_real == HIT_CODE_SIM & ~isnan(trial_class(:)) & dur_s >= cvsa_inf);
+n_hit_trials = [n_hit_within, n_hit_after];
+
+fprintf('\n  HIT trials, P_MI -> P_fused within first %.1fs of CF, by hit timing:\n', cvsa_inf);
+for k = 1:2
+    if n_hit_fr(k) == 0
+        fprintf('  %-18s trials=%3d   (no valid frames)\n', hit_cat_labels{k}, n_hit_trials(k));
+        continue;
+    end
+    fprintf('  %-18s trials=%3d   frames=%5d   P_MI=%.3f -> P_fused=%.3f   (delta=%+.3f)\n', ...
+            hit_cat_labels{k}, n_hit_trials(k), n_hit_fr(k), mean_hit_mi(k), mean_hit_fus(k), mean_hit_d(k));
+end
+
+ax4b = subplot(1,2,2); hold(ax4b,'on');
+for k = 1:2
+    if n_hit_fr(k) == 0, continue; end
+    plot(ax4b, [k-0.08, k+0.08], [mean_hit_mi(k), mean_hit_fus(k)], '-', ...
+         'Color', hit_cat_cols(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
+    errorbar(ax4b, k-0.08, mean_hit_mi(k),  sem_hit_mi(k),  'o', 'Color', hit_cat_cols(k,:), ...
+             'MarkerFaceColor', hit_cat_cols(k,:), 'CapSize', 3, 'HandleVisibility', 'off');
+    errorbar(ax4b, k+0.08, mean_hit_fus(k), sem_hit_fus(k), 's', 'Color', hit_cat_cols(k,:), ...
+             'MarkerFaceColor', 'w', 'LineWidth', 1.2, 'CapSize', 3, 'HandleVisibility', 'off');
+    text(ax4b, k, max(mean_hit_mi(k),mean_hit_fus(k)) + 0.04, sprintf('%+.3f', mean_hit_d(k)), ...
+         'HorizontalAlignment', 'center', 'FontSize', 8);
+end
+yline(ax4b, 0.5, 'k:', 'HandleVisibility', 'off');
+h4b = gobjects(1,2);
+h4b(1) = scatter(ax4b, NaN, NaN, 40, [0.3 0.3 0.3], 'filled', 'o', 'DisplayName', 'P_{MI}');
+h4b(2) = scatter(ax4b, NaN, NaN, 40, [0.3 0.3 0.3], 'Marker', 's', 'DisplayName', 'P_{fused}');
+legend(ax4b, h4b, 'FontSize', 8, 'Location', 'best');
+set(ax4b, 'XLim', [0.5,2.5], 'YLim', [0,1.1], 'XTick', 1:2, 'XTickLabel', ...
+    {sprintf('%s (n=%d)', hit_cat_short{1}, n_hit_within), sprintf('%s (n=%d)', hit_cat_short{2}, n_hit_after)});
+ylabel(ax4b, 'P(target class)', 'FontSize', 9);
+title(ax4b, sprintf('HIT trials: mean P_{MI} \\rightarrow P_{fused}\n(within first %.1fs of CF)', cvsa_inf), ...
+      'FontSize', 10, 'FontWeight', 'bold');
+grid(ax4b, 'on');
+
+%% ── Figure 5: magnitude of the CVSA-fusion effect, frame-by-frame ──────────
+% Per-frame data within the CVSA-influence window (alpha > 0), all trials.
+
+fr_pmi   = [];
+fr_pcvsa = [];
+fr_pfus  = [];
+fr_alpha = [];
+fr_class = [];
+
+for t = 1:n_trials
+    c = trial_class(t);
+    if isnan(c) || c < 1 || c > n_cls, continue; end
+    np = trials(t).n_pre;
+    nc = trials(t).n_cf;
+    pm = trials(t).p_mi  (np+1:np+nc, c);
+    pc = trials(t).p_cvsa(np+1:np+nc, c);
+    pf = trials(t).raw   (np+1:np+nc, c);
+    vld = ~isnan(pm) & ~isnan(pc) & ~isnan(pf);
+
+    n_inf = min(nc, round(cvsa_inf * framerate));
+    idx = find(vld(1:n_inf));
+    if isempty(idx), continue; end
+
+    t_sec = (idx-1) * chunk_size / fs;
+    alpha = 0.5 * (1 + cos(pi * min(t_sec, cvsa_inf) / cvsa_inf));
+
+    fr_pmi   = [fr_pmi;   pm(idx)];
+    fr_pcvsa = [fr_pcvsa; pc(idx)];
+    fr_pfus  = [fr_pfus;  pf(idx)];
+    fr_alpha = [fr_alpha; alpha];
+    fr_class = [fr_class; repmat(c, numel(idx), 1)];
+end
+
+fr_delta = fr_pfus - fr_pmi;     % signed effect of fusion on P(target class)
+
+% ── Classify every frame by MI/CVSA agreement on the target class ──────────
+mi_ok   = fr_pmi   > 0.5;
+cvsa_ok = fr_pcvsa > 0.5;
+
+fr_cat = zeros(size(fr_pmi));
+fr_cat(mi_ok  & cvsa_ok)  = 1;   % agree, both correct
+fr_cat(mi_ok  & ~cvsa_ok) = 2;   % MI correct, CVSA wrong  -> "cost?"
+fr_cat(~mi_ok & cvsa_ok)  = 3;   % MI wrong, CVSA correct  -> "rescue?"
+fr_cat(~mi_ok & ~cvsa_ok) = 4;   % agree, both wrong
+
+cat_labels  = {'agree: both correct', 'MI correct, CVSA wrong', 'MI wrong, CVSA correct', 'agree: both wrong'};
+cat_short   = {'agree-ok', 'MI ok / CVSA no', 'MI no / CVSA ok', 'agree-wrong'};
+cat_cols    = [0.20 0.60 0.20; 0.85 0.55 0.10; 0.20 0.40 0.85; 0.70 0.20 0.20];
+
+n_fr     = numel(fr_delta);
+n_cat    = zeros(1,4);
+mean_mi  = nan(1,4);
+mean_fus = nan(1,4);
+sem_mi   = nan(1,4);
+sem_fus  = nan(1,4);
+mean_d   = nan(1,4);
+
+fprintf('\n  CVSA vs MI agreement breakdown  (within first %.1fs of CF, %d frames):\n', cvsa_inf, n_fr);
+for k = 1:4
+    m = fr_cat == k;
+    n_cat(k) = sum(m);
+    if n_cat(k) == 0, continue; end
+    mean_mi(k)  = mean(fr_pmi(m));
+    mean_fus(k) = mean(fr_pfus(m));
+    sem_mi(k)   = std(fr_pmi(m))  / sqrt(n_cat(k));
+    sem_fus(k)  = std(fr_pfus(m)) / sqrt(n_cat(k));
+    mean_d(k)   = mean(fr_delta(m));
+    fprintf('  %-24s n=%5d (%4.1f%%)   P_MI=%.3f -> P_fused=%.3f   (delta=%+.3f)\n', ...
+            cat_labels{k}, n_cat(k), 100*n_cat(k)/n_fr, mean_mi(k), mean_fus(k), mean_d(k));
+end
+fprintf('  Rescue effect (MI wrong, CVSA correct): delta=%+.3f (n=%d)\n', mean_d(3), n_cat(3));
+fprintf('  Cost effect   (MI correct, CVSA wrong): delta=%+.3f (n=%d)\n', mean_d(2), n_cat(2));
+
+fig5 = figure('Name', sprintf('CVSA/MI agreement & fusion effect — %s', basename), ...
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1300 420]);
+
+% ── Panel 1: P_MI(target) vs P_fused(target), per CF frame, by agreement ────
+ax1 = subplot(1,3,1); hold(ax1,'on');
+for k = 1:4
+    m = fr_cat == k;
+    if ~any(m), continue; end
+    scatter(ax1, fr_pmi(m), fr_pfus(m), 10, cat_cols(k,:), 'filled', ...
+            'MarkerFaceAlpha', 0.25, 'MarkerEdgeColor', 'none', ...
+            'DisplayName', sprintf('%s (n=%d)', cat_labels{k}, n_cat(k)));
+end
+plot(ax1, [0 1], [0 1], 'k--', 'LineWidth', 1, 'HandleVisibility', 'off');
+xline(ax1, 0.5, 'k:', 'HandleVisibility', 'off');
+yline(ax1, 0.5, 'k:', 'HandleVisibility', 'off');
+set(ax1, 'XLim', [0,1], 'YLim', [0,1]);
+xlabel(ax1, 'P_{MI}(target)', 'FontSize', 9);
+ylabel(ax1, 'P_{fused}(target)', 'FontSize', 9);
+title(ax1, 'Per-frame effect, colored by MI/CVSA agreement', 'FontSize', 10, 'FontWeight', 'bold');
+legend(ax1, 'FontSize', 7, 'Location', 'best');
+grid(ax1, 'on'); axis(ax1, 'square');
+
+% ── Panel 2: mean P_MI -> P_fused per agreement category (slopegraph) ───────
+ax2 = subplot(1,3,2); hold(ax2,'on');
+for k = 1:4
+    if n_cat(k) == 0, continue; end
+    plot(ax2, [k-0.08, k+0.08], [mean_mi(k), mean_fus(k)], '-', ...
+         'Color', cat_cols(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
+    errorbar(ax2, k-0.08, mean_mi(k),  sem_mi(k),  'o', 'Color', cat_cols(k,:), ...
+             'MarkerFaceColor', cat_cols(k,:), 'CapSize', 3, 'HandleVisibility', 'off');
+    errorbar(ax2, k+0.08, mean_fus(k), sem_fus(k), 's', 'Color', cat_cols(k,:), ...
+             'MarkerFaceColor', 'w', 'LineWidth', 1.2, 'CapSize', 3, 'HandleVisibility', 'off');
+    text(ax2, k, max(mean_mi(k),mean_fus(k)) + 0.04, sprintf('%+.3f', mean_d(k)), ...
+         'HorizontalAlignment', 'center', 'FontSize', 8);
+end
+yline(ax2, 0.5, 'k:', 'HandleVisibility', 'off');
+h2 = gobjects(1,2);
+h2(1) = scatter(ax2, NaN, NaN, 40, [0.3 0.3 0.3], 'filled', 'o', 'DisplayName', 'P_{MI}');
+h2(2) = scatter(ax2, NaN, NaN, 40, [0.3 0.3 0.3], 'Marker', 's', 'DisplayName', 'P_{fused}');
+legend(ax2, h2, 'FontSize', 8, 'Location', 'best');
+set(ax2, 'XLim', [0.5,4.5], 'YLim', [0,1.1], 'XTick', 1:4, 'XTickLabel', cat_short);
+xtickangle(ax2, 12);
+ylabel(ax2, 'P(target class)', 'FontSize', 9);
+title(ax2, 'Mean P_{MI} \rightarrow P_{fused}  per agreement category', 'FontSize', 10, 'FontWeight', 'bold');
 grid(ax2, 'on');
 
-% ── Panel 3: false-direction rate (paired lines per trial) ─────────────────
-ax3 = subplot(1,3,3);  hold(ax3,'on');
-fp_all = {fp_mi, fp_cvsa, fp_fus};
-for t = 1:n_trials
-    vals = [fp_mi(t), fp_cvsa(t), fp_fus(t)];
-    ok = ~isnan(vals);
-    if ~any(ok), continue; end
-    switch trial_outcome_real(t)
-        case HIT_CODE_SIM,     col = COL_HIT;
-        case MISS_CODE_SIM,    col = COL_MISS;
-        case TIMEOUT_CODE_SIM, col = COL_TO;
-        otherwise,             col = [0.5 0.5 0.5];
-    end
-    if sum(ok) >= 2
-        plot(ax3, find(ok), vals(ok), '-', 'Color', [col, 0.35], 'LineWidth', 1, 'HandleVisibility','off');
-    end
-    for s = 1:3
-        if ~ok(s), continue; end
-        scatter(ax3, s, vals(s), 38, col, 'filled', 'o', ...
-                'MarkerEdgeColor', stream_cols3{s}, 'LineWidth', 0.8, 'MarkerFaceAlpha', 0.8);
-    end
-end
-for s = 1:3
-    m = mean(fp_all{s}, 'omitnan');
-    if ~isnan(m)
-        plot(ax3, [s-bw3, s+bw3], [m, m], '-', 'Color', stream_cols3{s}, 'LineWidth', 3, 'HandleVisibility','off');
-    end
-end
-yline(ax3, 0, 'k:', 'LineWidth', 1, 'HandleVisibility','off');
-set(ax3, 'XTick',1:3, 'XTickLabel',stream_lbls3, 'XLim',[0.5,3.5], 'YLim',[-0.02, 1]);
-ylabel(ax3, 'fraction frames: P \rightarrow wrong class', 'FontSize', 9);
-title(ax3, 'False-direction rate  (\downarrow better)', 'FontSize', 10, 'FontWeight', 'bold');
+% ── Panel 3: rescue vs cost effect, scaling with CVSA weight alpha(t) ───────
+ax3 = subplot(1,3,3); hold(ax3,'on');
+m3 = fr_cat == 3;   % rescue candidates: MI wrong, CVSA correct
+m2 = fr_cat == 2;   % cost candidates:   MI correct, CVSA wrong
+scatter(ax3, fr_alpha(m3), fr_delta(m3), 12, cat_cols(3,:), 'filled', 'MarkerFaceAlpha', 0.35, ...
+        'DisplayName', sprintf('rescue: MI wrong, CVSA right (n=%d)', n_cat(3)));
+scatter(ax3, fr_alpha(m2), fr_delta(m2), 12, cat_cols(2,:), 'filled', 'MarkerFaceAlpha', 0.35, ...
+        'DisplayName', sprintf('cost: MI right, CVSA wrong (n=%d)', n_cat(2)));
+yline(ax3, 0, 'k-', 'LineWidth', 1, 'HandleVisibility', 'off');
+set(ax3, 'XLim', [0,1]);
+xlabel(ax3, '\alpha(t)  (CVSA weight in fusion)', 'FontSize', 9);
+ylabel(ax3, 'P_{fused}-P_{MI}  on target class', 'FontSize', 9);
+title(ax3, sprintf('Rescue vs cost effect vs \\alpha\nrescue mean=%+.3f | cost mean=%+.3f', mean_d(3), mean_d(2)), ...
+      'FontSize', 10, 'FontWeight', 'bold');
+legend(ax3, 'FontSize', 8, 'Location', 'best');
 grid(ax3, 'on');
 
-sgtitle(fig3, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — fused advantage over MI & CVSA', ...
-        basename, n_hit_real, n_miss_real, n_to_real), 'FontSize', 10, 'Interpreter', 'none');
+sgtitle(fig5, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — does CVSA help, broken down by MI/CVSA agreement (first %.1fs of CF)', ...
+        basename, n_hit_real, n_miss_real, n_to_real, cvsa_inf), 'FontSize', 10, 'Interpreter', 'none');
+
+%% --- Save figures -------------------------------------------------------
+out_dir = fullfile(gdf_dir, 'analysis_results');
+if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+exportgraphics(fig1, fullfile(out_dir, sprintf('advantage_%s_meanP.png',          basename)), 'Resolution', 150);
+exportgraphics(fig2, fullfile(out_dir, sprintf('advantage_%s_frame_accuracy.png', basename)), 'Resolution', 150);
+exportgraphics(fig3, fullfile(out_dir, sprintf('advantage_%s_cvsa_fusion.png',    basename)), 'Resolution', 150);
+exportgraphics(fig4, fullfile(out_dir, sprintf('advantage_%s_cf_duration.png',    basename)), 'Resolution', 150);
+exportgraphics(fig5, fullfile(out_dir, sprintf('advantage_%s_agreement.png',      basename)), 'Resolution', 150);
+fprintf('Saved figures to %s\n', out_dir);
 
 % ── Local helpers (must be after all script statements) ───────────────────
 
