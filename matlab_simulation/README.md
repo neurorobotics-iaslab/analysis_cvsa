@@ -31,7 +31,8 @@ in spirit.
 
 ## 1. How to run
 
-Four entry points, all self-contained (pick GDFs via file dialogs):
+Six entry points, all self-contained (pick GDFs via file dialogs).
+`main_hybrid_advantage_probs` and `main_hybrid_advantage_integ` **require hybrid GDF files** — they analyse the Bayesian fusion of MI and CVSA and will not produce meaningful results on MI-only or CVSA-only recordings.
 
 ### `main_simulate` — single-file, visual inspection
 
@@ -41,7 +42,10 @@ main_simulate
 ```
 
 Single GDF → companion YAML → full pipeline → one figure with all CF trials.
-Use this to inspect a specific recording in detail.
+Use this to inspect a specific recording in detail. The figure is saved as SVG
+(full-screen size) under `<gdf_dir>/analysis_results/trial_simulation/`; the
+`SHOW_FIGURES` flag at the top of the script controls whether it is also shown
+on screen.
 
 ### `main_session_overview` — multi-file cross-paradigm summary
 
@@ -53,19 +57,44 @@ Multi-select GDFs of any paradigm (MI, CVSA, Hybrid mixed). Paradigm is inferred
 from the filename (`hybrid` > `cvsa` > `mi`). Files are sorted MI → CVSA → Hybrid
 with group separators in the figures.
 
-**Three figures:**
+**Seven figures:**
 
 | Figure | Content | Source |
 |---|---|---|
 | Fig 1 | Trial accuracy — two subplots: `897/(897+898+899)` and `897/(897+898)` (no timeout). Per-file bar + per-paradigm dashed mean line. | Real GDF events |
 | Fig 2 | Time metrics — TTH (HIT trials, mean ± std + dots) and time-to-MISS (MISS trials). | Real GDF events |
 | Fig 3 | Sample accuracy (3 subplots): MI classifier (full CF), CVSA classifier (first 3 s), Hybrid fused (full CF). Each subplot shows all / HIT / MISS breakdown plus per-class split. | Offline simulation |
+| Fig 4 | **CSP filter weights** (one row per CSP type: MI / CVSA). Full-scalp topoplots via `topo_map(bg_zero=true)` — all standard 10-20 channels shown (selected = black-bold, rest = gray). Col 1: class-1 channel importance (% of total filter weight). Col 2: class-2 channel importance. Col 3: per-channel selectivity `(w1−w2)/(w1+w2)` — red = class-1-only, blue = class-2-only. Col 4: **stacked band bar** — bar height = total |CSP filter| energy in that band (% of all bands); stack split = which class dominates it (blue = class-1 components, orange = class-2 components). Skipped if no companion YAML. | CSP model (from YAML) |
+| Fig 5 | **sLDA-weighted feature importance** (one row per type: MI / CVSA). Restricted to sLDA-selected features, weighted by `|sLDA coefficient|`. Col 1: channel topoplot — `Σ_k |coef_k| · |CSP_filter_k(ch)|` per channel (full 10-20 grid shown). Col 2: band bar — same sum per frequency band. Col 3: feature selection heatmap (CSP component × band) — color = `|coef|` for selected features, gray = excluded by sLDA. Skipped if no companion YAML. | CSP + sLDA models (from YAML) |
+| Fig 6 | **ERD/ERS ↔ CSP weight correlation** (one panel per CSP type × frequency band). Scatter of per-channel ERD/ERS class discrimination `|ERD(c1) − ERD(c2)|` during CF vs normalised CSP filter weight `Σ|W|/max`, Pearson r in title, linear fit line. Tests the claim: channels heavily weighted by the CSP spatial filter also show stronger neurophysiological class separation. Skipped if no companion YAML. | Raw GDF signal + CSP model |
+| Fig 7 | **Hemisphere ROI ERD/ERS time-courses** (one row per CSP type × non-empty ROI). CSP-selected channels grouped by 10-20 label suffix into Left (odd digit), Right (even digit), Midline (z). ERD/ERS band-averaged; baseline = cue period [−1.5s, 0s]. Left col: per-class traces ± across-channel SEM. Right col: lateralization c1(t)−c2(t). Gray solid = CF onset, blue dashed = CVSA influence window (3s), gray dotted = cue onset (−1.5s). Skipped if no companion YAML. | Raw GDF signal + CSP model |
 
 Console output per file: a per-trial outcome table (HIT/MISS/TIMEOUT + time for that
-event), hit rate, sample accuracy (all / HIT / MISS / per-class), and integrator
-parameters. Set `VERBOSE_DIAGNOSTIC = true` (default `false`) for an additional
-per-trial diagnostic table (onset code, target class, mean P per class, argmax
-agreement, outcome) to catch any target-class inversion — very verbose, off by default.
+event), hit rate, sample accuracy (all / HIT / MISS / per-class), integrator
+parameters, top-3 CSP channels per class (`[CSP-MI] top ch c769: C3>FC5>CP5 | c770: C4>FC6>CP6`),
+sLDA feature count (`[sLDA-MI] 12/24 features selected by sLDA`), and
+ERD trial counts (`[ERD-MI] c1=N c2=N trials`).
+Set `VERBOSE_DIAGNOSTIC = true` (default `false`) for an additional per-trial diagnostic
+table — very verbose, off by default.
+
+The seven figures are saved as SVG (full-screen size) into `<gdf_dir>/analysis_results/overview/`:
+`overview_trial_accuracy.svg`, `overview_time_metrics.svg`, `overview_sample_accuracy.svg`,
+`overview_csp_importance.svg`, `overview_slda_importance.svg`, `overview_erd_csp_corr.svg`,
+and `overview_roi_timecourse.svg`. The `SHOW_FIGURES` flag at the top of the script controls
+whether they are also shown on screen.
+
+**CSP weight interpretation** (Fig 4): component order `'alternate'` (MNE convention) means odd
+filter rows (1, 3, 5, …) maximise class-1 variance; even rows (2, 4, 6, …) maximise class-2
+variance. Channel importance = `Σ_bands Σ_{comp∈class} |W(comp, ch)|`, normalised per class.
+Stacked band bar: height = total filter energy per band; color split reveals whether a frequency
+range mainly helps discriminate class 1 or class 2.
+
+**sLDA weight interpretation** (Fig 5): `w_ch(channel) = Σ_k |coef_k| · |CSP_row_k(channel)|`
+sums the contribution of each sLDA-selected feature (weighted by discriminative power) to every
+scalp channel. This is the direct spatial signature of the classifier's linear decision boundary —
+heavier channels are literally the ones the classifier looks at most. The feature heatmap shows
+exactly which (frequency band, CSP component) pairs were retained by feature selection and how
+strongly they enter the decision.
 
 After all files are processed, a **session summary** prints, per paradigm: each
 file's HIT/MISS/TO counts, accuracy, and mean TTH/Tmiss/Tto, followed by a `TOTAL`
@@ -76,13 +105,13 @@ Does **not** save `.mat` files — it is a quick overview, not an archiving tool
 
 ---
 
-### `main_hybrid_advantage` — offline analysis of hybrid recordings
+### `main_hybrid_advantage_probs` — classifier-probability analysis of hybrid recordings
 
 ```matlab
-main_hybrid_advantage          % GUI file picker — hybrid GDF files only
+main_hybrid_advantage_probs    % GUI file picker — hybrid GDF files only
 ```
 
-Designed to answer: **is the fused classifier driving the integrator better than
+> **Requires hybrid GDF files.** Designed to answer: **is the fused classifier driving the integrator better than
 MI or CVSA alone — faster to the correct direction, fewer frames pointing the
 wrong way?**
 
@@ -128,7 +157,66 @@ Streams: **MI**, **CVSA** (full CF), **CVSA-inf** (first `cvsa_influence` second
 | ≈ 0.5 + MISS | Near-chance; integration goes nowhere |
 | < 0.5 + MISS | Classifier points wrong direction → genuine classifier failure |
 
-No files are saved.
+The five figures are saved as SVG (full-screen size) into `<gdf_dir>/analysis_results/advantage_hybrid/`;
+the `SHOW_FIGURES` flag at the top of the script controls whether they are also shown on screen.
+No `.mat` files are saved.
+
+---
+
+### `main_hybrid_advantage_integ` — counterfactual: hybrid vs MI-only vs CVSA-only
+
+```matlab
+main_hybrid_advantage_integ    % GUI file picker — hybrid GDF files only
+```
+
+> **Requires hybrid GDF files.** Designed to answer: **given the exact same classifier outputs recorded during a
+hybrid session, would trials have ended differently (HIT/MISS/TIMEOUT, and at
+what time) if the integrator buffer had been driven by MI alone or CVSA alone,
+instead of the Bayesian-fused signal?**
+
+Accepts only **hybrid** GDF files. For each file, the pipeline is run once to
+get `p_mi_aligned`, `p_cvsa_aligned`, `art_flags`, and `int_cfg` (identical to
+`main_simulate`/`main_hybrid_advantage`), then `integrate_signal` is called
+**three times** with the same `int_cfg` (same `buffer_size`, `k_gain`,
+`thresholds`, `classes`, `init_val`) — only the driving stream differs:
+
+| Run | Stream fed to the leaky-WTA buffer |
+|---|---|
+| Hybrid | Bayesian LOP fusion of MI+CVSA (as actually run online) |
+| MI-only | raw MI sLDA output |
+| CVSA-only | raw CVSA sLDA output |
+
+This gives three directly-comparable `trials` arrays sharing the same
+`n_pre`/`n_cf`/`artifact`/`target_class` per trial — only `.raw`/`.integrated`/
+`.normalized*` differ. The **simulated outcome** of each counterfactual is
+derived from its own integrator buffer (`integrated(:,i) >= thresholds(i) - 5e-3`,
+first class to cross wins; neither crossing within the CF window = TIMEOUT) —
+this is independent of the *real* GDF outcome, which only reflects the hybrid
+run.
+
+**Per-file figures** (saved under `per_file/`):
+
+| Figure | Content |
+|---|---|
+| `signals_<basename>.svg` | One panel per 781 trial — overlaying the leaky-integrator P(c1) control signal for all three streams (Hybrid/MI-only/CVSA-only) plus the thresholds and `p_rest` line. Background colour = REAL hybrid outcome (HIT=light green/MISS=light red/TIMEOUT=light yellow); the title shows the *simulated* outcome and time-to-event for each stream. |
+| `advantage_<basename>.svg` | 2×3 per-trial breakdown: (1,1) mean sLDA P(target) per trial (raw classifier signal); (1,2) **mean integrator buffer(target class) per trial** — the actual control-signal level for the cued class relative to the win threshold; (1,3) simulated time-to-outcome per trial; (2,1) simulated-outcome heatmap (trial × stream); (2,2) outcome counts per stream; (2,3) **per-trial control-signal advantage** (Hybrid − MI-only) and (Hybrid − CVSA-only) — positive = fusion pushed the buffer higher for the cued class that trial. |
+
+**Aggregate figures** (saved at the top level):
+
+| Figure | Layout | Content |
+|---|---|---|
+| `summary_hybrid_vs_unimodal.svg` | 3×3 | Outcome counts; accuracy (title states the Hybrid−MI/CVSA delta); mean TTH (title states speed advantage); mean time-to-MISS; **mean time-to-TIMEOUT** (restored); two "who hits?" concordance bars with rescued/cost/net annotated; mean buffer(target class) ± SEM with sign-flip permutation significance brackets and p-values in title; per-trial buffer-advantage histogram with count-above-zero annotation. |
+| `temporal_significance.svg` | 3×1 | (1) Mean ± SEM buffer(target class) aligned to CF onset for all three streams; (2) **Hybrid−MI delta trajectory** — mean ± SEM band, zero line = no advantage, coloured shading = p<0.05, peak annotated with magnitude and time; (3) same for **Hybrid−CVSA**. Directly answers: IS there an advantage, HOW MUCH, and WHEN. Grey patches = fewer than 15% of trials still running. |
+| `advantage_deep.svg` | 2×2 | (1,1) **Cumulative HIT fraction over time** with final accuracy-gap text box; thin dashed lines per class; (1,2) per-trial scatter MI-only vs Hybrid mean buffer(target) — count above diagonal annotated in title; (2,1) same scatter for CVSA-only vs Hybrid; (2,2) accuracy bars with **bootstrap 95% CI** (2000 resamples, asymmetric). |
+
+**Console output**: per-trial table; aggregate counts/accuracy/mean times; "who hits?" breakdown; per-class accuracy; **sign-flip permutation test** on mean buffer(target) advantage (Hybrid vs MI-only, Hybrid vs CVSA-only); **Cohen's d** (paired effect size) on buffer advantage; **bootstrap 95% CI** on per-stream accuracy and on accuracy deltas.
+
+**Statistics (no Stats Toolbox required)**: the sign-flip permutation test (`sign_flip_test` local helper, 2000 permutations for global tests, 500 for per-frame temporal test) and the bootstrap CI (percentile method, 2000 resamples) are both implemented without MATLAB's Statistics and Machine Learning Toolbox. The temporal significance figure is explicitly labelled as pointwise/uncorrected — for small n (40 trials) it is exploratory; sustained runs of low p-values are more meaningful than isolated frames.
+
+All figures are saved as SVG (full-screen size) under
+`<gdf_dir>/analysis_results/hybrid_vs_unimodal/`; the `SHOW_FIGURES` flag at the
+top of the script controls whether they are also shown on screen. No `.mat` files
+are saved.
 
 ### `main_browse_gdf` — interactive scrollable viewer
 
@@ -181,10 +269,11 @@ aligned by chunk index.
 
 ```
 matlab_simulation/
-├── main_simulate.m            # single-file: GUI → pipeline → per-trial plot
-├── main_session_overview.m    # multi-GDF (all paradigms): trial acc + TTH + sample acc, 3 figures
-├── main_hybrid_advantage.m    # hybrid GDFs only: mean P + frame acc + CVSA-fusion advantage, 5 figures
-├── main_browse_gdf.m          # interactive scrollable viewer: classifier probabilities + integrator signal
+├── main_simulate.m                  # single-file: GUI → pipeline → per-trial plot
+├── main_session_overview.m          # multi-GDF (all paradigms): trial acc + TTH + sample acc + CSP + sLDA analysis, 5 figures
+├── main_hybrid_advantage_probs.m    # HYBRID GDFs only: mean P + frame acc + CVSA-fusion advantage, 5 figures
+├── main_hybrid_advantage_integ.m    # HYBRID GDFs only: counterfactual hybrid vs MI-only vs CVSA-only, per-trial + aggregate figures
+├── main_browse_gdf.m                # interactive scrollable viewer: classifier probabilities + integrator signal
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename
 │   ├── load_params_yaml.m     # full rosparam-dump struct sibling to the GDF
@@ -200,7 +289,8 @@ matlab_simulation/
 │   ├── integrate_signal.m     # per-trial integration around each event 781
 │   └── bayesian_fuse.m        # hybrid prior fusion (cosine-annealed LOP)
 ├── plotting/
-│   └── plot_trials.m          # one panel per trial, P(c1) view
+│   ├── plot_trials.m          # one panel per trial, P(c1) view
+│   └── plot_trials_streams.m  # one panel per trial, Hybrid/MI-only/CVSA-only control-signal overlay (main_hybrid_advantage_integ)
 └── utils/
     ├── read_yaml.m            # thin yamlmatlab wrapper
     ├── log_step.m             # `[sim] ...` printf used everywhere

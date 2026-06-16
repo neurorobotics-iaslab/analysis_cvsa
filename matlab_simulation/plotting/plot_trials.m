@@ -1,4 +1,4 @@
-function fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real)
+function fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real, show_figure)
 % PLOT_TRIALS  One panel per 781 trial. All curves are in the P(class 1)
 %   reference frame (= the first class returned by sLDA, which is the only
 %   probability the integrator consumes). Each panel shows:
@@ -20,6 +20,9 @@ function fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial
 
     if nargin < 6 || isempty(trial_outcome_real)
         trial_outcome_real = zeros(1, numel(trials));
+    end
+    if nargin < 7 || isempty(show_figure)
+        show_figure = true;
     end
     HIT_EV = 897;  MISS_EV = 898;  TO_EV = 899;
 
@@ -47,7 +50,10 @@ function fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial
     has_real = any(trial_outcome_real ~= 0);
 
     fig_name = sprintf('Continuous feedback [%s] %s', paradigm, basename);
-    fig = figure('Name', fig_name, 'Color', 'w', 'NumberTitle', 'off');
+    if show_figure, vis = 'on'; else, vis = 'off'; end
+    fig = figure('Name', fig_name, 'Color', 'w', 'NumberTitle', 'off', 'Visible', vis);
+    set(fig, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
+    set(fig, 'InvertHardcopy', 'off');   % preserve per-trial axes background colours (HIT/MISS/TIMEOUT) on export
     log_step('plot_trials: %d trials in a %dx%d grid (P(c1) view, thr_up=%.2f, thr_dn=%.2f)', ...
              n_trials, n_rows, n_cols, thr_up, thr_dn);
 

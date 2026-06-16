@@ -30,6 +30,10 @@
 
 clear; clc; close all;
 
+% --- Display options -------------------------------------------------------
+SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
+
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir, fullfile(this_dir,'io'), fullfile(this_dir,'processing'), ...
         fullfile(this_dir,'artifacts'), fullfile(this_dir,'classifier'), ...
@@ -133,6 +137,16 @@ for fi = 1:n_files
 
     % ── Offline simulation for sample accuracy ────────────────────────────────
     sa_mi = NaN;  sa_cvsa = NaN;  sa_fused = NaN;
+    sa_mi_hit = NaN; sa_mi_miss = NaN;
+    sa_cvsa_hit = NaN; sa_cvsa_miss = NaN;
+    sa_fused_hit = NaN; sa_fused_miss = NaN;
+    sa_mi_cls = NaN; sa_cvsa_cls = NaN; sa_fused_cls = NaN;
+    r_csp_mi        = [];   % populated inside try if MI CSP is available
+    r_csp_cvsa      = [];   % populated inside try if CVSA CSP is available
+    r_slda_mi       = [];   % sLDA-weighted spatial analysis, MI
+    r_slda_cvsa     = [];   % sLDA-weighted spatial analysis, CVSA
+    r_erd_mi        = [];   % ERD/ERS epochs, MI CSP channels
+    r_erd_cvsa      = [];   % ERD/ERS epochs, CVSA CSP channels
 
     try
         [params, ~] = load_params_yaml(gdf_path);
@@ -279,6 +293,70 @@ for fi = 1:n_files
                 num2str(classes_v(:)','%d '));
         end
 
+        % ── CSP channel importance ─────────────────────────────────────────────
+        %   Alternate component ordering: rows 1,3,5,... maximise class-1 variance;
+        %   rows 2,4,6,... maximise class-2 variance (MNE component_order='alternate').
+        classes_sorted = sort(to_vec(int_cfg.classes));
+        if use_mi && ~isempty(csp_mi)
+            [w1, w2, bw1, bw2, sel] = csp_channel_weights(csp_mi);
+            r_csp_mi = struct('channels',    {csp_mi.selected_channels}, ...
+                              'bands',       csp_mi.bands, ...
+                              'n_bands',     csp_mi.n_bands, ...
+                              'n_components',csp_mi.n_components, ...
+                              'csp_matrices',{csp_mi.csp_matrices}, ...
+                              'w_c1',        w1,  'w_c2',      w2, ...
+                              'band_w_c1',   bw1, 'band_w_c2', bw2, ...
+                              'selectivity', sel, ...
+                              'class_codes', classes_sorted(:)');
+            t3c1 = top_channels(csp_mi.selected_channels, w1, 3);
+            t3c2 = top_channels(csp_mi.selected_channels, w2, 3);
+            fprintf('  [CSP-MI]   top ch  c%d: %s  |  c%d: %s\n', ...
+                    classes_sorted(1), strjoin(t3c1, '>'), ...
+                    classes_sorted(2), strjoin(t3c2, '>'));
+        end
+        if use_cvsa && ~isempty(csp_cvsa)
+            [w1, w2, bw1, bw2, sel] = csp_channel_weights(csp_cvsa);
+            r_csp_cvsa = struct('channels',    {csp_cvsa.selected_channels}, ...
+                                'bands',       csp_cvsa.bands, ...
+                                'n_bands',     csp_cvsa.n_bands, ...
+                                'n_components',csp_cvsa.n_components, ...
+                                'csp_matrices',{csp_cvsa.csp_matrices}, ...
+                                'w_c1',        w1,  'w_c2',      w2, ...
+                                'band_w_c1',   bw1, 'band_w_c2', bw2, ...
+                                'selectivity', sel, ...
+                                'class_codes', classes_sorted(:)');
+            t3c1 = top_channels(csp_cvsa.selected_channels, w1, 3);
+            t3c2 = top_channels(csp_cvsa.selected_channels, w2, 3);
+            fprintf('  [CSP-CVSA] top ch  c%d: %s  |  c%d: %s\n', ...
+                    classes_sorted(1), strjoin(t3c1, '>'), ...
+                    classes_sorted(2), strjoin(t3c2, '>'));
+        end
+
+        % ── sLDA-weighted spatial analysis ─────────────────────────────────────
+        %   Per-channel importance = sum_k |sLDA_coef_k| × |CSP_filter_row_k(ch)|
+        %   over all sLDA-selected features k. Reveals which channels and bands
+        %   the final classifier actually relies on and how strongly.
+        if use_mi && ~isempty(csp_mi) && ~isempty(slda_mi)
+            r_slda_mi = slda_spatial_weights(csp_mi, slda_mi);
+            r_slda_mi.channels    = csp_mi.selected_channels;
+            r_slda_mi.bands       = csp_mi.bands;
+            r_slda_mi.n_bands     = csp_mi.n_bands;
+            r_slda_mi.n_components = csp_mi.n_components;
+            r_slda_mi.class_codes = classes_sorted(:)';
+            fprintf('  [sLDA-MI]  %d/%d features selected by sLDA\n', ...
+                    r_slda_mi.n_selected, csp_mi.n_components * csp_mi.n_bands);
+        end
+        if use_cvsa && ~isempty(csp_cvsa) && ~isempty(slda_cvsa)
+            r_slda_cvsa = slda_spatial_weights(csp_cvsa, slda_cvsa);
+            r_slda_cvsa.channels    = csp_cvsa.selected_channels;
+            r_slda_cvsa.bands       = csp_cvsa.bands;
+            r_slda_cvsa.n_bands     = csp_cvsa.n_bands;
+            r_slda_cvsa.n_components = csp_cvsa.n_components;
+            r_slda_cvsa.class_codes = classes_sorted(:)';
+            fprintf('  [sLDA-CVSA] %d/%d features selected by sLDA\n', ...
+                    r_slda_cvsa.n_selected, csp_cvsa.n_components * csp_cvsa.n_bands);
+        end
+
         % ── Sample accuracy: per trial → mean over trials ──────────────────────
         % Formula: for each trial, (# CF frames where argmax(P)==target) / (# valid frames)
         %          then mean over all trials / HIT-only trials / MISS+TO trials.
@@ -319,6 +397,33 @@ for fi = 1:n_files
                     sa_mi_cls(cc)*100, sa_cvsa_cls(cc)*100, sa_fused_cls(cc)*100);
         end
 
+        % ── ERD/ERS (Pfurtscheller-style) for spatial validation figures ─────────
+        %   Placed AFTER sample-accuracy so any failure cannot abort SA stats.
+        %   Baseline = cue period [CF-1.5s, CF]. Result stored for Figs 6 & 7.
+        classes_sorted_erd = sort(to_vec(int_cfg.classes));
+        if use_mi && ~isempty(csp_mi)
+            try
+                r_erd_mi = compute_erd_ers(signal, header, csp_mi, ...
+                    classes_sorted_erd, eog_names, fs);
+                fprintf('  [ERD-MI]   c1=%d c2=%d trials\n', ...
+                        r_erd_mi.n_trials_cls(1), r_erd_mi.n_trials_cls(2));
+            catch ME2
+                r_erd_mi = [];
+                fprintf('  [ERD-MI]   skipped [%s] %s\n', ME2.identifier, ME2.message);
+            end
+        end
+        if use_cvsa && ~isempty(csp_cvsa)
+            try
+                r_erd_cvsa = compute_erd_ers(signal, header, csp_cvsa, ...
+                    classes_sorted_erd, eog_names, fs);
+                fprintf('  [ERD-CVSA] c1=%d c2=%d trials\n', ...
+                        r_erd_cvsa.n_trials_cls(1), r_erd_cvsa.n_trials_cls(2));
+            catch ME2
+                r_erd_cvsa = [];
+                fprintf('  [ERD-CVSA] skipped [%s] %s\n', ME2.identifier, ME2.message);
+            end
+        end
+
     catch ME
         fprintf('  [warn] simulation error: %s\n', ME.message);
     end
@@ -334,6 +439,12 @@ for fi = 1:n_files
                'sa_cvsa_hit',sa_cvsa_hit,'sa_cvsa_miss',sa_cvsa_miss, ...
                'sa_fused_hit',sa_fused_hit,'sa_fused_miss',sa_fused_miss, ...
                'sa_mi_cls',sa_mi_cls,'sa_cvsa_cls',sa_cvsa_cls,'sa_fused_cls',sa_fused_cls);
+    r.csp_mi          = r_csp_mi;
+    r.csp_cvsa        = r_csp_cvsa;
+    r.slda_mi_weights   = r_slda_mi;
+    r.slda_cvsa_weights = r_slda_cvsa;
+    r.erd_mi            = r_erd_mi;
+    r.erd_cvsa          = r_erd_cvsa;
     RES{end+1} = r;
 end
 
@@ -394,7 +505,8 @@ fprintf('═══════════════════════�
 %  FIG 1 — TRIAL ACCURACY  (real GDF events)
 %  ═════════════════════════════════════════════════════════════════════════════
 fig1 = figure('Name','Trial Accuracy','Color','w','NumberTitle','off', ...
-              'Position',[50 50 max(900,120*n_f) 480]);
+              'Position',[50 50 max(900,120*n_f) 480], 'Visible', fig_vis);
+set(fig1, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 
 metric_title = {'897 / (897+898+899)', '897 / (897+898)  [no timeout]'};
 fields1 = {'hit_tot','hit_no_to'};
@@ -442,7 +554,8 @@ sgtitle(fig1,'Trial accuracy — real GDF outcomes (897/898/899)','FontSize',13)
 %  FIG 2 — TIME TO HIT / TIME TO MISS  (real GDF event positions)
 %  ═════════════════════════════════════════════════════════════════════════════
 fig2 = figure('Name','Time Metrics','Color','w','NumberTitle','off', ...
-              'Position',[60 60 max(900,120*n_f) 480]);
+              'Position',[60 60 max(900,120*n_f) 480], 'Visible', fig_vis);
+set(fig2, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 
 time_titles = {'Time to HIT  (897 trials)','Time to MISS  (898 trials)'};
 time_fields  = {'tth_vals','t_miss_vals'};
@@ -500,7 +613,8 @@ col_hit    = [0.15 0.65 0.15];
 col_miss   = [0.80 0.20 0.10];
 
 fig3 = figure('Name','Sample Accuracy','Color','w','NumberTitle','off', ...
-              'Position',[70 70 max(1300,150*n_f) 680]);
+              'Position',[70 70 max(1300,150*n_f) 680], 'Visible', fig_vis);
+set(fig3, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 
 for row = 1:3
     for col_sp = 1:3   % col: 1=all 2=HIT 3=MISS/TO
@@ -553,12 +667,466 @@ sgtitle(fig3,sprintf(['Sample accuracy — offline simulation  (MATLAB ≈ ROS)\
     'FontSize',11);
 
 %% --- Save figures -------------------------------------------------------
-out_dir = fullfile(gdf_dir, 'analysis_results');
+out_dir = fullfile(gdf_dir, 'analysis_results', 'overview');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
-exportgraphics(fig1, fullfile(out_dir, 'overview_trial_accuracy.png'), 'Resolution', 150);
-exportgraphics(fig2, fullfile(out_dir, 'overview_time_metrics.png'),   'Resolution', 150);
-exportgraphics(fig3, fullfile(out_dir, 'overview_sample_accuracy.png'),'Resolution', 150);
+saveas(fig1, fullfile(out_dir, 'overview_trial_accuracy.svg'),  'svg');
+saveas(fig2, fullfile(out_dir, 'overview_time_metrics.svg'),    'svg');
+saveas(fig3, fullfile(out_dir, 'overview_sample_accuracy.svg'), 'svg');
 fprintf('Saved figures to %s\n', out_dir);
+if ~SHOW_FIGURES
+    close(fig1); close(fig2); close(fig3);
+end
+
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 4 — CSP CHANNEL IMPORTANCE
+%
+%   Spatial filter weights show which scalp regions and frequency bands drive
+%   each class, using MNE alternate component ordering:
+%     odd filter rows  (1,3,5,...) → class-1-dominant components
+%     even filter rows (2,4,6,...) → class-2-dominant components
+%
+%   Panel layout (one row per CSP type: MI / CVSA):
+%     col 1 — class-1 channel importance topoplot (parula, % of total weight)
+%     col 2 — class-2 channel importance topoplot (parula, % of total weight)
+%     col 3 — per-channel selectivity: (w1-w2)/(w1+w2), red=class1, blue=class2
+%     col 4 — per-band weight contribution (grouped bars: class1 vs class2)
+%  ═════════════════════════════════════════════════════════════════════════════
+csp_type_seen  = {};
+csp_data_rows  = {};
+csp_row_prefix = {};
+for fi2 = 1:numel(RES)
+    r2 = RES{fi2};
+    if ~isempty(r2.csp_mi) && ~ismember('MI', csp_type_seen)
+        csp_type_seen{end+1}  = 'MI';
+        csp_data_rows{end+1}  = r2.csp_mi;
+        csp_row_prefix{end+1} = sprintf('MI CSP (from %s)', r2.file_label);
+    end
+    if ~isempty(r2.csp_cvsa) && ~ismember('CVSA', csp_type_seen)
+        csp_type_seen{end+1}  = 'CVSA';
+        csp_data_rows{end+1}  = r2.csp_cvsa;
+        csp_row_prefix{end+1} = sprintf('CVSA CSP (from %s)', r2.file_label);
+    end
+end
+n_csp_f = numel(csp_data_rows);
+
+if n_csp_f > 0
+    fig4 = figure('Name','CSP Channel Importance','Color','w', ...
+                  'NumberTitle','off','Visible',fig_vis);
+    set(fig4,'Units','normalized','Position',[0 0 1 1]);
+
+    % Blue-white-red diverging colormap for selectivity panels
+    n2  = 64;
+    bwr = [linspace(0,1,n2)', linspace(0,1,n2)', ones(n2,1); ...   % blue→white
+           ones(n2,1), linspace(1,0,n2)', linspace(1,0,n2)'];      % white→red
+
+    for ci = 1:n_csp_f
+        csp_d  = csp_data_rows{ci};
+        cls    = csp_d.class_codes(:)';
+        ch     = csp_d.channels;
+        prefix = csp_row_prefix{ci};
+        nb     = csp_d.n_bands;
+        band_lbl = arrayfun(@(b) sprintf('%.0f-%.0f', ...
+            csp_d.bands(b,1), csp_d.bands(b,2)), 1:nb, 'UniformOutput', false);
+
+        % col 1: class-1 channel weight — full-scalp topoplot
+        %   topo_map bg_zero=true fills all standard 10-20 positions with 0,
+        %   giving smooth full-scalp interpolation even when only a subset was
+        %   selected. Black-bold labels = selected; gray labels = standard rest.
+        ax41 = subplot(n_csp_f, 4, (ci-1)*4 + 1);
+        v1 = csp_d.w_c1 * 100;
+        mx1 = max(v1(:)); if mx1 < 1e-6, mx1 = 1; end
+        topo_map(ch, v1, [0, mx1], ax41, ...
+            sprintf('%s | class %d — channel weight (%%)', prefix, cls(1)), true, true);
+        colormap(ax41, parula);
+        caxis(ax41, [0, mx1]);
+
+        % col 2: class-2 channel weight — full-scalp topoplot
+        ax42 = subplot(n_csp_f, 4, (ci-1)*4 + 2);
+        v2 = csp_d.w_c2 * 100;
+        mx2 = max(v2(:)); if mx2 < 1e-6, mx2 = 1; end
+        topo_map(ch, v2, [0, mx2], ax42, ...
+            sprintf('%s | class %d — channel weight (%%)', prefix, cls(2)), true, true);
+        colormap(ax42, parula);
+        caxis(ax42, [0, mx2]);
+
+        % col 3: per-channel class selectivity — full-scalp topoplot
+        %   selectivity = (w_c1 - w_c2) / (w_c1 + w_c2) ∈ [-1, +1]
+        %   +1 = channel exclusively used by class-1 components
+        %   -1 = channel exclusively used by class-2 components
+        %    0 = equally shared
+        ax43 = subplot(n_csp_f, 4, (ci-1)*4 + 3);
+        topo_map(ch, csp_d.selectivity, [-1 1], ax43, ...
+            sprintf('%s | selectivity (w_1-w_2)/(w_1+w_2)\n+1=c%d only, -1=c%d only', ...
+                    prefix, cls(1), cls(2)), true, true);
+        colormap(ax43, bwr);
+        caxis(ax43, [-1 1]);
+
+        % col 4: per-band importance — stacked bar chart
+        %   Bar height = total |CSP filter| energy in that band (% of all bands).
+        %   Stack split = how much comes from class-1-dominant vs class-2-dominant
+        %   CSP components (odd rows → class 1, even rows → class 2).
+        %   Tall bar = important frequency range; color split = which class drives it.
+        ax44 = subplot(n_csp_f, 4, (ci-1)*4 + 4);
+        hb   = bar(ax44, 1:nb, [csp_d.band_w_c1(:)*100, csp_d.band_w_c2(:)*100], 'stacked');
+        hb(1).FaceColor = [0.20 0.45 0.80];   % blue   = class-1-dominant components
+        hb(2).FaceColor = [0.85 0.45 0.10];   % orange = class-2-dominant components
+        set(ax44, 'XTick', 1:nb, 'XTickLabel', band_lbl, ...
+            'XTickLabelRotation', 45, 'FontSize', 7);
+        ylabel(ax44, '% of total |CSP filter| weight', 'FontSize', 8);
+        xlabel(ax44, 'Frequency band (Hz)', 'FontSize', 8);
+        title(ax44, sprintf('%s\nband importance\nbar height = %% energy; color = class dominance', ...
+              prefix), 'FontSize', 8, 'Interpreter', 'none');
+        legend(ax44, sprintf('c%d components', cls(1)), sprintf('c%d components', cls(2)), ...
+               'Location', 'northeast', 'FontSize', 7);
+        box(ax44, 'off');
+    end
+
+    sgtitle(fig4, ['CSP spatial filter analysis — channel and band importance' newline ...
+        'component order: alternate (odd rows = class-1, even rows = class-2)' newline ...
+        'black labels = CSP-selected channels;  gray labels = all other standard 10-20'], ...
+        'FontSize', 10);
+    saveas(fig4, fullfile(out_dir, 'overview_csp_importance.svg'), 'svg');
+    fprintf('Saved %s\n', fullfile(out_dir, 'overview_csp_importance.svg'));
+    if ~SHOW_FIGURES, close(fig4); end
+end
+
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 5 — sLDA-WEIGHTED CHANNEL AND BAND IMPORTANCE
+%
+%   While Fig 4 shows ALL CSP filter weights, Fig 5 is restricted to the
+%   (band, component) features the sLDA actually selected and weighted by
+%   |sLDA coefficient| — the direct spatial signature of the classifier's
+%   decision function. Answers: "where on the scalp and in which frequency
+%   band does the final classifier look, and how strongly?"
+%
+%   Panel layout (one row per CSP/sLDA type: MI / CVSA):
+%     col 1 — channel importance topoplot: sum_k |coef_k| × |CSP_filter_k(ch)|
+%              black-bold = CSP-selected channels; gray = rest of 10-20 grid
+%     col 2 — band importance bar chart: same sum aggregated per band
+%     col 3 — feature selection heatmap (comp × band):
+%              color = |sLDA coef|; gray = not selected by sLDA
+%  ═════════════════════════════════════════════════════════════════════════════
+slda_type_seen  = {};
+slda_data_rows  = {};
+slda_row_prefix = {};
+for fi2 = 1:numel(RES)
+    r2 = RES{fi2};
+    if ~isempty(r2.slda_mi_weights) && ~ismember('MI', slda_type_seen)
+        slda_type_seen{end+1}  = 'MI';
+        slda_data_rows{end+1}  = r2.slda_mi_weights;
+        slda_row_prefix{end+1} = sprintf('MI sLDA (from %s)', r2.file_label);
+    end
+    if ~isempty(r2.slda_cvsa_weights) && ~ismember('CVSA', slda_type_seen)
+        slda_type_seen{end+1}  = 'CVSA';
+        slda_data_rows{end+1}  = r2.slda_cvsa_weights;
+        slda_row_prefix{end+1} = sprintf('CVSA sLDA (from %s)', r2.file_label);
+    end
+end
+n_slda_f = numel(slda_data_rows);
+
+if n_slda_f > 0
+    fig5 = figure('Name','sLDA Feature Importance','Color','w', ...
+                  'NumberTitle','off','Visible',fig_vis);
+    set(fig5,'Units','normalized','Position',[0 0 1 1]);
+
+    for ci = 1:n_slda_f
+        sd     = slda_data_rows{ci};
+        ch     = sd.channels;
+        cls    = sd.class_codes(:)';
+        prefix = slda_row_prefix{ci};
+        n_comp = sd.n_components;
+        nb     = sd.n_bands;
+        band_lbl = arrayfun(@(b) sprintf('%.0f-%.0f', ...
+            sd.bands(b,1), sd.bands(b,2)), 1:nb, 'UniformOutput', false);
+
+        % ── col 1: sLDA-weighted channel importance topoplot ─────────────────
+        ax51 = subplot(n_slda_f, 3, (ci-1)*3 + 1);
+        v_ch = sd.w_ch * 100;
+        mx_ch = max(v_ch(:)); if mx_ch < 1e-6, mx_ch = 1; end
+        topo_map(ch, v_ch, [0, mx_ch], ax51, ...
+            sprintf('%s\nchannel importance (%%)', prefix), true, true);
+        colormap(ax51, parula);
+        caxis(ax51, [0, mx_ch]);
+
+        % ── col 2: sLDA-weighted band importance bar chart ──────────────────
+        ax52 = subplot(n_slda_f, 3, (ci-1)*3 + 2);
+        bar(ax52, 1:nb, sd.band_w * 100, 'FaceColor', [0.25 0.50 0.75]);
+        set(ax52, 'XTick', 1:nb, 'XTickLabel', band_lbl, ...
+            'XTickLabelRotation', 45, 'FontSize', 7);
+        ylabel(ax52, '% of total sLDA importance', 'FontSize', 8);
+        xlabel(ax52, 'Frequency band (Hz)', 'FontSize', 8);
+        title(ax52, sprintf('%s\nband importance\n(sum_k |coef_k|·|CSP_k|, per band)', prefix), ...
+              'FontSize', 8, 'Interpreter', 'none');
+        box(ax52, 'off');
+
+        % ── col 3: feature selection heatmap (comp × band) ──────────────────
+        %   Each cell (comp, band): color = |sLDA coef| if selected; gray if not.
+        %   Odd rows = class-1-dominant; even rows = class-2-dominant (alternate order).
+        ax53 = subplot(n_slda_f, 3, (ci-1)*3 + 3);
+        fm      = sd.feat_mat;            % [n_comp × n_bands], NaN for unselected
+        fm_disp = fm; fm_disp(isnan(fm_disp)) = 0;  % 0 for colormap (masked by AlphaData)
+        im = imagesc(ax53, 1:nb, 1:n_comp, fm_disp);
+        set(im, 'AlphaData', double(~isnan(fm)));
+        set(ax53, 'Color', [0.88 0.88 0.88]);
+        colormap(ax53, parula);
+        colorbar(ax53, 'FontSize', 6);
+        set(ax53, 'XTick', 1:nb, 'XTickLabel', band_lbl, 'XTickLabelRotation', 45, 'FontSize', 6);
+        comp_lbl = cell(1, n_comp);
+        for cc = 1:n_comp
+            cl = cls(1 + mod(cc+1, 2));  % odd cc → cls(1), even cc → cls(2)
+            comp_lbl{cc} = sprintf('c%d (↑cl%d)', cc, cl);
+        end
+        set(ax53, 'YTick', 1:n_comp, 'YTickLabel', comp_lbl, 'FontSize', 6);
+        xlabel(ax53, 'Frequency band (Hz)', 'FontSize', 8);
+        ylabel(ax53, 'CSP component', 'FontSize', 8);
+        title(ax53, sprintf('%s\nfeature selection: %d / %d used\ngray = excluded by sLDA, color = |coef|', ...
+              prefix, sd.n_selected, n_comp * nb), ...
+              'FontSize', 8, 'Interpreter', 'none');
+    end
+
+    sgtitle(fig5, ['sLDA feature selection — spatial and frequency importance' newline ...
+        'channel importance = Σ_k |coef_k| · |CSP filter_k(channel)| over sLDA-selected features' newline ...
+        'black labels = CSP-selected channels;  gray labels = rest of standard 10-20'], ...
+        'FontSize', 10);
+    saveas(fig5, fullfile(out_dir, 'overview_slda_importance.svg'), 'svg');
+    fprintf('Saved %s\n', fullfile(out_dir, 'overview_slda_importance.svg'));
+    if ~SHOW_FIGURES, close(fig5); end
+end
+
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 6 — ERD/ERS CLASS DISCRIMINATION vs CSP FILTER WEIGHT (CORRELATION)
+%
+%   Claim: channels weighted heavily by the CSP spatial filter also show
+%   stronger ERD/ERS class discrimination during continuous feedback.
+%
+%   Per panel (one per CSP type × frequency band):
+%     x — CSP filter weight: sum(|filter rows|) for this band, per channel
+%     y — ERD/ERS class discrimination: |mean_ERD(c1) - mean_ERD(c2)| during CF
+%     r — Pearson correlation coefficient across CSP-selected channels
+%
+%   Uses first file per CSP type (consistent with Figs 4–5).
+%  ═════════════════════════════════════════════════════════════════════════════
+erd6_type  = {};   % 'MI' / 'CVSA'
+erd6_erd   = {};   % erd struct
+erd6_csp   = {};   % csp struct
+
+for fi2 = 1:numel(RES)
+    r2 = RES{fi2};
+    if ~isempty(r2.erd_mi)   && ~isempty(r2.csp_mi)   && ~ismember('MI',   erd6_type)
+        erd6_type{end+1} = 'MI';  erd6_erd{end+1} = r2.erd_mi;  erd6_csp{end+1} = r2.csp_mi;
+    end
+    if ~isempty(r2.erd_cvsa) && ~isempty(r2.csp_cvsa) && ~ismember('CVSA', erd6_type)
+        erd6_type{end+1} = 'CVSA'; erd6_erd{end+1} = r2.erd_cvsa; erd6_csp{end+1} = r2.csp_cvsa;
+    end
+end
+n_erd6 = numel(erd6_erd);
+
+if n_erd6 > 0
+    nb_max6 = max(cellfun(@(c) c.n_bands, erd6_csp));
+
+    fig6 = figure('Name','ERD/ERS vs CSP Weight','Color','w', ...
+                  'NumberTitle','off','Visible',fig_vis);
+    set(fig6,'Units','normalized','OuterPosition',[0 0 1 1]);
+
+    for ri = 1:n_erd6
+        ed  = erd6_erd{ri};   % erd struct
+        cd  = erd6_csp{ri};   % csp struct
+        ch  = ed.ch_names;
+        nb  = cd.n_bands;
+        typ = erd6_type{ri};
+
+        for b = 1:nb
+            ax = subplot(n_erd6, nb_max6, (ri-1)*nb_max6 + b);
+            hold(ax, 'on');
+
+            % CSP weight per channel: sum |W| over all components, normalised
+            W     = cd.csp_matrices{b};          % [n_comp x n_sel]
+            csp_w = (sum(abs(W), 1))';           % [n_sel x 1]
+            csp_w = csp_w / max(csp_w(:) + eps);
+
+            % ERD/ERS discrimination: |mean_c1 - mean_c2| during CF
+            % mean_erd_cf: [n_sel x n_bands x 2]
+            e1      = ed.mean_erd_cf(:, b, 1);  % [n_sel x 1]
+            e2      = ed.mean_erd_cf(:, b, 2);  % [n_sel x 1]
+            discrim = abs(e1 - e2);
+
+            ok = ~isnan(csp_w) & ~isnan(discrim) & isfinite(csp_w) & isfinite(discrim);
+            r_val = NaN;
+            if sum(ok) >= 3
+                C = corrcoef(csp_w(ok), discrim(ok));
+                r_val = C(1,2);
+            end
+
+            scatter(ax, csp_w(ok), discrim(ok), 40, [0.15 0.40 0.75], 'filled', ...
+                    'MarkerEdgeColor', 'k', 'LineWidth', 0.5);
+            % Linear fit line
+            if sum(ok) >= 3
+                p_fit = polyfit(csp_w(ok), discrim(ok), 1);
+                xfit = linspace(0, 1, 50);
+                plot(ax, xfit, polyval(p_fit, xfit), '--', 'Color', [0.5 0.5 0.5], ...
+                     'LineWidth', 0.8, 'HandleVisibility', 'off');
+            end
+            % Channel labels
+            ch_ok = ch(ok);
+            csp_ok = csp_w(ok); disc_ok = discrim(ok);
+            for ci = 1:numel(ch_ok)
+                text(ax, csp_ok(ci), disc_ok(ci), ['  ' strtrim(ch_ok{ci})], ...
+                     'FontSize', 5.5, 'Interpreter', 'none', 'Color', [0.2 0.2 0.2]);
+            end
+
+            band_str = sprintf('%.0f-%.0f Hz', cd.bands(b,1), cd.bands(b,2));
+            if isnan(r_val)
+                r_str = 'r=n/a';
+            else
+                r_str = sprintf('r = %.2f  (n=%d ch)', r_val, sum(ok));
+            end
+            title(ax, sprintf('%s | %s\n%s', typ, band_str, r_str), ...
+                  'FontSize', 8, 'Interpreter', 'none');
+            xlabel(ax, 'CSP filter weight (norm.)', 'FontSize', 7);
+            if b == 1
+                ylabel(ax, '|ERD(c1) – ERD(c2)|  (%)', 'FontSize', 7);
+            end
+            box(ax, 'off');  grid(ax, 'on');
+        end
+    end
+
+    sgtitle(fig6, ['ERD/ERS class discrimination vs CSP spatial filter weight' newline ...
+                   'Claim: channels with high CSP weight show stronger ERD/ERS class separation' newline ...
+                   '(Pfurtscheller ERD/ERS during CF; Pearson r over CSP-selected channels)'], ...
+            'FontSize', 10);
+    saveas(fig6, fullfile(out_dir, 'overview_erd_csp_corr.svg'), 'svg');
+    fprintf('Saved %s\n', fullfile(out_dir, 'overview_erd_csp_corr.svg'));
+    if ~SHOW_FIGURES, close(fig6); end
+end
+
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 7 — HEMISPHERE ROI ERD/ERS TIME-COURSE
+%
+%   CSP-selected channels grouped into Left (odd-digit), Right (even-digit),
+%   Midline (trailing z) ROIs. ERD/ERS time-course averaged over ROI channels
+%   and over all frequency bands, from cue onset (-1.5s) to max CF end (5s).
+%
+%   Left col  — per-class traces c1(t) and c2(t) with ± across-channel SEM
+%   Right col — lateralization c1(t) – c2(t)
+%
+%   Vertical lines: solid gray = CF onset (t=0), dashed blue = CVSA influence
+%   window boundary (3s). Uses first file per CSP type.
+%  ═════════════════════════════════════════════════════════════════════════════
+erd7_type = {};
+erd7_erd  = {};
+
+for fi2 = 1:numel(RES)
+    r2 = RES{fi2};
+    if ~isempty(r2.erd_mi)   && ~ismember('MI',   erd7_type)
+        erd7_type{end+1} = 'MI';   erd7_erd{end+1} = r2.erd_mi;
+    end
+    if ~isempty(r2.erd_cvsa) && ~ismember('CVSA', erd7_type)
+        erd7_type{end+1} = 'CVSA'; erd7_erd{end+1} = r2.erd_cvsa;
+    end
+end
+n_erd7 = numel(erd7_erd);
+
+ROI_NAMES  = {'left', 'right', 'midline'};
+ROI_LABELS = {'Left (odd)', 'Right (even)', 'Midline (z)'};
+COL_CLS7   = {[0.15 0.50 0.85],  [0.85 0.35 0.10]};   % c1=blue  c2=orange
+CVSA_INF_S = 3.0;   % CVSA influence window
+
+if n_erd7 > 0
+    % Count non-empty ROI × CSP-type combinations
+    has_roi = false(n_erd7, numel(ROI_NAMES));
+    roi_ch_cells = cell(n_erd7, numel(ROI_NAMES));  % channel names per ROI
+    for ri = 1:n_erd7
+        ch = erd7_erd{ri}.ch_names;
+        for k = 1:numel(ROI_NAMES)
+            roi_mask = strcmp(cellfun(@hemisphere_of, ch(:)', 'UniformOutput', false), ROI_NAMES{k});
+            has_roi(ri,k) = any(roi_mask);
+            roi_ch_cells{ri,k} = ch(roi_mask);
+        end
+    end
+    n_rows7 = sum(has_roi(:));
+
+    if n_rows7 == 0
+        fprintf('  [ROI] no hemisphere ROI channels found, skipping Fig 7\n');
+    else
+        fig7 = figure('Name','ROI ERD/ERS Time-course','Color','w', ...
+                      'NumberTitle','off','Visible',fig_vis);
+        set(fig7,'Units','normalized','OuterPosition',[0 0 1 1]);
+
+        row7 = 0;
+        for ri = 1:n_erd7
+            ed    = erd7_erd{ri};
+            tv    = ed.time_vec;              % [1 x T]
+            T7    = numel(tv);
+            n_cue7 = ed.n_cue;
+            ctype = erd7_type{ri};
+            ch    = ed.ch_names;
+
+            % Band-average: erd_time [T x n_sel x n_bands x n_cls] → [T x n_sel x n_cls]
+            n_cls7  = size(ed.erd_time, 4);
+            n_sel7  = size(ed.erd_time, 2);
+            et_avg  = reshape(nanmean(ed.erd_time, 3), T7, n_sel7, n_cls7);
+
+            for k = 1:numel(ROI_NAMES)
+                if ~has_roi(ri,k), continue; end
+                row7 = row7 + 1;
+                roi_mask = strcmp(cellfun(@hemisphere_of, ch(:)', 'UniformOutput', false), ROI_NAMES{k});
+                n_roi = sum(roi_mask);
+
+                ax1 = subplot(n_rows7, 2, (row7-1)*2 + 1);  hold(ax1,'on');
+                ax2 = subplot(n_rows7, 2, (row7-1)*2 + 2);  hold(ax2,'on');
+
+                lat_mean = nan(T7, n_cls7);
+                for cls = 1:n_cls7
+                    roi_data = et_avg(:, roi_mask, cls);  % [T x n_roi]
+                    mn  = nanmean(roi_data, 2);            % [T x 1]
+                    sem = nanstd(roi_data, 0, 2) / sqrt(max(n_roi, 1));
+                    lat_mean(:, cls) = mn;
+
+                    c_col = COL_CLS7{min(cls, numel(COL_CLS7))};
+                    n_tr  = ed.n_trials_cls(min(cls, numel(ed.n_trials_cls)));
+                    fill(ax1, [tv, fliplr(tv)], [(mn+sem)', fliplr((mn-sem)')], ...
+                         c_col, 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility','off');
+                    plot(ax1, tv, mn', '-', 'Color', c_col, 'LineWidth', 1.5, ...
+                         'DisplayName', sprintf('class %d  (n=%d trials)', cls, n_tr));
+                end
+
+                % Lateralization c1 – c2
+                if n_cls7 >= 2
+                    lat = lat_mean(:,1) - lat_mean(:,2);
+                    plot(ax2, tv, lat', 'k-', 'LineWidth', 1.5);
+                    yline(ax2, 0, '--k', 'LineWidth', 0.8, 'HandleVisibility','off');
+                end
+
+                % Common decorations
+                for ax_k = [ax1, ax2]
+                    xline(ax_k, 0,            '-',  'Color', [0.55 0.55 0.55], 'LineWidth', 1.2, 'HandleVisibility','off');
+                    xline(ax_k, CVSA_INF_S,   '--', 'Color', [0.30 0.45 0.80], 'LineWidth', 0.8, 'HandleVisibility','off');
+                    xline(ax_k, -1.5,          ':',  'Color', [0.65 0.65 0.65], 'LineWidth', 0.8, 'HandleVisibility','off');
+                    xlim(ax_k, [tv(1), tv(end)]);
+                    xlabel(ax_k, 'time from CF onset (s)', 'FontSize', 7);
+                    grid(ax_k, 'on'); box(ax_k, 'off');
+                end
+                ylabel(ax1, 'ERD/ERS (%)',           'FontSize', 7);
+                ylabel(ax2, 'lateralization c1–c2 (%)','FontSize', 7);
+
+                roi_ch_str = strjoin(roi_ch_cells{ri,k}, ' ');
+                title(ax1, sprintf('%s | %s   [%s]  (%d ch, band-avg)', ...
+                      ctype, ROI_LABELS{k}, roi_ch_str, n_roi), ...
+                      'FontSize', 7.5, 'Interpreter', 'none');
+                title(ax2, 'lateralization  (blue dashed = CVSA influence window)', ...
+                      'FontSize', 7.5, 'Interpreter', 'none');
+                legend(ax1, 'Location', 'best', 'FontSize', 6.5);
+            end
+        end
+
+        sgtitle(fig7, ['ERD/ERS hemisphere ROI time-courses  (band-averaged, Pfurtscheller)' newline ...
+                       'Baseline = cue period [–1.5s, 0s] | gray line = CF onset | dotted = cue onset | blue dashed = CVSA window (3s)'], ...
+                'FontSize', 10);
+        saveas(fig7, fullfile(out_dir, 'overview_roi_timecourse.svg'), 'svg');
+        fprintf('Saved %s\n', fullfile(out_dir, 'overview_roi_timecourse.svg'));
+        if ~SHOW_FIGURES, close(fig7); end
+    end
+end
 
 fprintf('\nDone.\n');
 
@@ -649,4 +1217,251 @@ function add_group_decorations(ax, grp_start, grp_end, par_seq, COL, ylim_top)
         xline(ax, grp_end(g)+0.5, '--','Color',[0.5 0.5 0.5],'LineWidth',1, ...
               'HandleVisibility','off');
     end
+end
+
+function [w_c1, w_c2, band_w_c1, band_w_c2, selectivity] = csp_channel_weights(csp)
+%CSP_CHANNEL_WEIGHTS  Per-channel and per-band importance from CSP filter matrices.
+%   MNE component_order='alternate': odd filter rows (1,3,...) maximise class-1
+%   variance; even rows (2,4,...) maximise class-2 variance.
+%   w_c1 and w_c2 are each normalised independently to sum to 1.
+%   band_w_c1/band_w_c2 are jointly normalised (sum over both = 1).
+    n_bands = csp.n_bands;
+    n_sel   = numel(csp.selected_channels);
+    w1_raw = zeros(1, n_sel);
+    w2_raw = zeros(1, n_sel);
+    bw1    = zeros(1, n_bands);
+    bw2    = zeros(1, n_bands);
+    for b = 1:n_bands
+        W      = csp.csp_matrices{b};       % [n_comp x n_sel]
+        n_comp = size(W, 1);
+        idx1   = 1:2:n_comp;                % class-1 dominant (alternate)
+        idx2   = 2:2:n_comp;                % class-2 dominant
+        a1     = sum(abs(W(idx1, :)), 1);
+        a2     = sum(abs(W(idx2, :)), 1);
+        w1_raw = w1_raw + a1;
+        w2_raw = w2_raw + a2;
+        bw1(b) = sum(a1);
+        bw2(b) = sum(a2);
+    end
+    w_c1       = w1_raw / max(sum(w1_raw), eps);
+    w_c2       = w2_raw / max(sum(w2_raw), eps);
+    tot        = sum(bw1) + sum(bw2);
+    band_w_c1  = bw1 / max(tot, eps);
+    band_w_c2  = bw2 / max(tot, eps);
+    selectivity = (w_c1 - w_c2) ./ max(w_c1 + w_c2, eps);
+end
+
+function top = top_channels(ch_names, weights, n)
+%TOP_CHANNELS  Return the n channel names with the highest weights.
+    [~, ord] = sort(weights(:)', 'descend');
+    top = ch_names(ord(1:min(n, numel(ch_names))));
+end
+
+function erd = compute_erd_ers(signal, header, csp, class_codes, eog_names, fs)
+%COMPUTE_ERD_ERS  Pfurtscheller-style ERD/ERS for CSP-selected channels.
+%
+%   Epochs each CF trial from (CF - 1.5s) to (CF + 5s).
+%   Baseline = cue period [CF-1.5s, CF] (= 1.5s immediately preceding CF onset).
+%   ERD/ERS = (power - baseline) / baseline * 100.
+%   Power = 200ms moving average of instantaneous squared signal.
+%   Filtering matches apply_processing.m: causal LP then HP Butterworth.
+%
+%   Returns struct:
+%     .time_vec      [1 x T]                   s relative to CF onset
+%     .mean_erd_cf   [n_sel x n_bands x n_cls] mean ERD during CF per class
+%     .erd_time      [T x n_sel x n_bands x n_cls] time-course (NaN = no data)
+%     .ch_names      {1 x n_sel}               channel names
+%     .n_cue         scalar                    # cue samples
+%     .n_trials_cls  [1 x n_cls]               trials per class
+
+    CUE_S    = 1.5;
+    CF_MAX_S = 5.0;
+    MA_S     = 0.2;
+    CF_EV    = 781;
+    OUT_EVS  = [897, 898, 899];
+
+    [n_samp, n_ch_all] = size(signal);
+    all_labels = to_strcell(header.Label);
+    n_cls = numel(class_codes);
+
+    % Resolve CSP-selected channel indices (safe: skip unresolved)
+    sel_names = csp.selected_channels;
+    n_all = numel(sel_names);
+    sel_idx = zeros(1, n_all);
+    for i = 1:n_all
+        m = find(strcmpi(all_labels, strtrim(sel_names{i})), 1);
+        if ~isempty(m), sel_idx(i) = m; end
+    end
+    valid    = sel_idx > 0;
+    sel_idx  = sel_idx(valid);
+    sel_names = sel_names(valid);
+    n_sel    = numel(sel_idx);
+    if n_sel == 0
+        wanted = to_strcell(csp.selected_channels);
+        fprintf('  [ERD] no CSP channels matched GDF labels — wanted: %s\n', ...
+                strjoin(wanted(:)', ', '));
+        fprintf('  [ERD] GDF has: %s\n', strjoin(all_labels(:)', ', '));
+        erd = []; return;
+    end
+
+    % EOG indices for CAR (matches apply_processing.m)
+    eog_idx = [];
+    for i = 1:numel(eog_names)
+        m = find(strcmpi(all_labels, strtrim(eog_names{i})), 1);
+        if ~isempty(m), eog_idx(end+1) = m; end  %#ok<AGROW>
+    end
+    non_eog = setdiff(1:n_ch_all, eog_idx);
+
+    % CAR → keep only CSP-selected channels (processed one-shot, not chunk-based)
+    car_mean = mean(signal(:, non_eog), 2);
+    sig_sel  = signal(:, sel_idx) - car_mean;   % [n_samp x n_sel]
+
+    % Trial discovery: CF events + preceding class events
+    POS = header.EVENT.POS;
+    TYP = header.EVENT.TYP;
+    cf_all  = POS(TYP == CF_EV);
+    n_cf_ev = numel(cf_all);
+    n_cue   = round(CUE_S * fs);
+    n_cf    = round(CF_MAX_S * fs);
+    T       = n_cue + n_cf;
+
+    trial_cls    = nan(1, n_cf_ev);
+    trial_cf_dur = nan(1, n_cf_ev);
+    for t = 1:n_cf_ev
+        p0 = cf_all(t);
+        if p0 - n_cue < 1 || p0 + n_cf - 1 > n_samp, continue; end
+        pre = find(POS < p0 & ismember(TYP, class_codes), 1, 'last');
+        if isempty(pre), continue; end
+        ci = find(class_codes == TYP(pre), 1);
+        if isempty(ci), continue; end
+        trial_cls(t) = ci;
+        post = find(POS > p0 & ismember(TYP, OUT_EVS), 1);
+        if ~isempty(post)
+            trial_cf_dur(t) = min(POS(post) - p0, n_cf);
+        else
+            trial_cf_dur(t) = n_cf;
+        end
+    end
+    n_trials_cls = arrayfun(@(c) sum(trial_cls == c), 1:n_cls);
+
+    % Running sum/count (one band at a time to limit peak memory)
+    n_bands = csp.n_bands;
+    ep_sum  = zeros(T, n_sel, n_bands, n_cls);
+    ep_cnt  = zeros(T, n_cls);
+
+    % Count valid time points per trial (same across bands)
+    for t = 1:n_cf_ev
+        if isnan(trial_cls(t)), continue; end
+        vd = n_cue + trial_cf_dur(t);
+        ci = trial_cls(t);
+        ep_cnt(1:vd, ci) = ep_cnt(1:vd, ci) + 1;
+    end
+
+    % Filter + accumulate per band
+    nyq  = fs / 2;
+    n_ma = max(1, round(MA_S * fs));
+    for b = 1:n_bands
+        lo = csp.bands(b,1);  hi = csp.bands(b,2);
+        [b_lp, a_lp] = butter(4, hi/nyq, 'low');
+        [b_hp, a_hp] = butter(4, lo/nyq, 'high');
+        tmp   = filter(b_lp, a_lp, sig_sel);
+        tmp   = filter(b_hp, a_hp, tmp);
+        pwr_b = movmean(tmp .^ 2, n_ma, 1);   % [n_samp x n_sel], 200ms MA
+        clear tmp;
+
+        for t = 1:n_cf_ev
+            if isnan(trial_cls(t)), continue; end
+            p0  = cf_all(t);
+            ep0 = p0 - n_cue;
+            ep_pwr = pwr_b(ep0 : p0 + n_cf - 1, :);  % [T x n_sel]
+            base   = mean(ep_pwr(1:n_cue, :), 1);      % [1 x n_sel]
+            erd_ep = (ep_pwr - base) ./ (abs(base) + eps) * 100;
+            vd  = n_cue + trial_cf_dur(t);
+            ci  = trial_cls(t);
+            ep_sum(1:vd, :, b, ci) = ep_sum(1:vd, :, b, ci) + erd_ep(1:vd, :);
+        end
+        clear pwr_b;
+    end
+    clear sig_sel;
+
+    % Compute mean (NaN where count = 0)
+    erd_time = nan(T, n_sel, n_bands, n_cls);
+    for cls = 1:n_cls
+        cnt = max(ep_cnt(:, cls), 1);   % avoid /0; zero rows set to NaN below
+        for b = 1:n_bands
+            tmp = ep_sum(:, :, b, cls) ./ cnt;
+            tmp(ep_cnt(:, cls) == 0, :) = NaN;
+            erd_time(:, :, b, cls) = tmp;
+        end
+    end
+
+    % Mean during CF window (t > 0)
+    cf_samp     = (n_cue+1):T;
+    mean_erd_cf = reshape(nanmean(erd_time(cf_samp,:,:,:), 1), n_sel, n_bands, n_cls);
+    time_vec    = ((-n_cue):(n_cf-1)) / fs;
+
+    erd = struct('time_vec',     time_vec, ...
+                 'mean_erd_cf',  mean_erd_cf, ...
+                 'erd_time',     erd_time, ...
+                 'ch_names',     {sel_names(:)'}, ...
+                 'n_cue',        n_cue, ...
+                 'n_trials_cls', n_trials_cls);
+end
+
+function roi = hemisphere_of(ch)
+%HEMISPHERE_OF  Assign a 10-20 channel to a hemisphere ROI.
+%   Returns 'left' (odd trailing digit), 'right' (even trailing digit),
+%   'midline' (trailing z/Z), or '' (unknown/non-standard).
+    ch   = strtrim(lower(ch));
+    last = ch(end);
+    if last == 'z'
+        roi = 'midline';
+    elseif last >= '1' && last <= '9'
+        if mod(str2double(last), 2) == 1, roi = 'left'; else, roi = 'right'; end
+    else
+        roi = '';
+    end
+end
+
+function r = slda_spatial_weights(csp, slda)
+%SLDA_SPATIAL_WEIGHTS  Channel and band importance weighted by |sLDA coefficient|.
+%
+%   For each sLDA-selected feature k (= a specific CSP component in a specific
+%   frequency band), contributes |coef_k| × |CSP_filter_row_k| to the per-channel
+%   importance map. This gives the spatial signature of the classifier's decision.
+%
+%   Band-major feature vector: index k (1-based) → band = ceil(k/n_comp),
+%   component = mod(k-1, n_comp)+1. If feature selection is active, slda.weights
+%   is already indexed in selection order (w(i) belongs to selected_feature_indices(i)).
+    n_comp  = csp.n_components;
+    n_bands = csp.n_bands;
+    n_sel_ch = numel(csp.selected_channels);
+
+    if isempty(slda.selected_feature_indices)
+        sel_idx = (1:(n_comp * n_bands))';   % no FS: all features used
+    else
+        sel_idx = slda.selected_feature_indices(:);  % 1-based, FS active
+    end
+
+    w_ch     = zeros(1, n_sel_ch);
+    band_w   = zeros(1, n_bands);
+    feat_mat = nan(n_comp, n_bands);   % NaN = not selected
+
+    for fi = 1:numel(sel_idx)
+        k    = sel_idx(fi);
+        band = ceil(k / n_comp);
+        comp = mod(k-1, n_comp) + 1;
+        if band < 1 || band > n_bands || comp < 1 || comp > n_comp, continue; end
+        lda_w = abs(slda.weights(fi));
+        filt  = abs(csp.csp_matrices{band}(comp, :));
+        w_ch            = w_ch + lda_w * filt;
+        band_w(band)    = band_w(band) + lda_w * sum(filt);
+        feat_mat(comp, band) = lda_w;
+    end
+
+    sw = sum(w_ch);   if sw > 0, w_ch   = w_ch   / sw;  end
+    sb = sum(band_w); if sb > 0, band_w = band_w / sb;   end
+
+    r = struct('w_ch', w_ch, 'band_w', band_w, 'feat_mat', feat_mat, ...
+               'n_selected', numel(sel_idx));
 end

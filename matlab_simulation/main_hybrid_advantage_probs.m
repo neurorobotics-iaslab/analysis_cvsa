@@ -14,6 +14,10 @@
 
 clear; clc; close all;
 
+% --- Display options -------------------------------------------------------
+SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
+
 % --- Make every subfolder visible to the simulator -----------------------
 this_dir = '/home/paolo/bci_vr_ws/src/analysis_bci/matlab_simulation';
 addpath(this_dir);
@@ -25,15 +29,20 @@ addpath(fullfile(this_dir, 'integrator'));
 addpath(fullfile(this_dir, 'plotting'));
 addpath(fullfile(this_dir, 'utils'));
 
-% --- GUI: pick the GDF; everything else flows from the sibling YAML -----
+% --- GUI: pick GDF(s); everything else flows from the sibling YAML(s) ---
 default_dir = '/home/paolo/bci_vr_ws/recordings';
 
-[gdf_name, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
-                                'Select a GDF recording', default_dir);
-if isequal(gdf_name, 0)
+[gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
+                                'Select GDF recording(s)', default_dir, 'MultiSelect', 'on');
+if isequal(gdf_names, 0)
     error('main_simulate:cancel', 'No GDF selected.');
 end
-gdf_path = fullfile(gdf_dir, gdf_name);
+if ischar(gdf_names), gdf_names = {gdf_names}; end
+n_files = numel(gdf_names);
+
+for file_idx = 1:n_files
+gdf_path = fullfile(gdf_dir, gdf_names{file_idx});
+fprintf('\n[%d/%d] %s\n', file_idx, n_files, gdf_names{file_idx});
 
 %% --- Load GDF --------------------------------------------------------
 [signal, header, basename] = load_gdf(gdf_path);
@@ -42,6 +51,10 @@ gdf_path = fullfile(gdf_dir, gdf_name);
 [params, ~] = load_params_yaml(gdf_path);
 
 paradigm  = params.integrator.paradigm;
+if ~strcmp(paradigm, 'hybrid')
+    fprintf('  skipping %s: paradigm=%s (hybrid-only)\n', basename, paradigm);
+    continue;
+end
 fs        = double(params.acquisition.samplerate);
 framerate = double(params.acquisition.framerate);
 chunk_size = round(fs / framerate);
@@ -294,7 +307,8 @@ mean_ylims  = {[0.2,1.0],[0.2,1.0],[0.2,1.0],[0.2,1.0],[p_rest-0.05,1.0]};
 mean_yref   = {0.5, 0.5, 0.5, 0.5, p_rest};
 
 fig1 = figure('Name', sprintf('Mean P per trial — %s', basename), ...
-              'Color', 'w', 'NumberTitle', 'off', 'Position', [40 40 1600 420]);
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [40 40 1600 420], 'Visible', fig_vis);
+set(fig1, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 ax_m = gobjects(1,5);
 for sp = 1:5
     ax_m(sp) = subplot(1,5,sp);
@@ -316,7 +330,8 @@ acc_ylims  = repmat({[0, 1]}, 1, 5);
 acc_yref   = {0.5, 0.5, 0.5, 0.5, 0.5};
 
 fig2 = figure('Name', sprintf('Frame accuracy per trial — %s', basename), ...
-              'Color', 'w', 'NumberTitle', 'off', 'Position', [60 60 1600 420]);
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [60 60 1600 420], 'Visible', fig_vis);
+set(fig2, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 ax_a = gobjects(1,5);
 for sp = 1:5
     ax_a(sp) = subplot(1,5,sp);
@@ -411,7 +426,8 @@ fprintf('  both correct: %d   both wrong: %d\n', n_both_ok, n_both_bad);
 fprintf('  net effect: %+d frames  ->  %s\n', net_fr, verdict_fr);
 
 fig3 = figure('Name', sprintf('Does CVSA fusion help? — %s', basename), ...
-              'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1300 700]);
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1300 700], 'Visible', fig_vis);
+set(fig3, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 
 % ── Panel (1,1): frame-level rescue/hurt bar chart ──────────────────────────
 ax1 = subplot(2,2,1);  hold(ax1,'on');
@@ -491,7 +507,8 @@ sgtitle(fig3, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — does CVSA fusion help?
 
 %% ── Figure 4: CF trial duration + CVSA influence over time, by trial length ─
 fig4 = figure('Name', sprintf('CF duration & CVSA time-influence — %s', basename), ...
-              'Color', 'w', 'NumberTitle', 'off', 'Position', [120 120 950 420]);
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [120 120 950 420], 'Visible', fig_vis);
+set(fig4, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 
 % ── Panel 1: CF trial duration per trial (colored by outcome) ──────────────
 ax4a = subplot(1,2,1);  hold(ax4a,'on');
@@ -681,7 +698,8 @@ fprintf('  Rescue effect (MI wrong, CVSA correct): delta=%+.3f (n=%d)\n', mean_d
 fprintf('  Cost effect   (MI correct, CVSA wrong): delta=%+.3f (n=%d)\n', mean_d(2), n_cat(2));
 
 fig5 = figure('Name', sprintf('CVSA/MI agreement & fusion effect — %s', basename), ...
-              'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1300 420]);
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1300 420], 'Visible', fig_vis);
+set(fig5, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
 
 % ── Panel 1: P_MI(target) vs P_fused(target), per CF frame, by agreement ────
 ax1 = subplot(1,3,1); hold(ax1,'on');
@@ -747,14 +765,18 @@ sgtitle(fig5, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — does CVSA help, broken
         basename, n_hit_real, n_miss_real, n_to_real, cvsa_inf), 'FontSize', 10, 'Interpreter', 'none');
 
 %% --- Save figures -------------------------------------------------------
-out_dir = fullfile(gdf_dir, 'analysis_results');
+out_dir = fullfile(gdf_dir, 'analysis_results', 'advantage_hybrid');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
-exportgraphics(fig1, fullfile(out_dir, sprintf('advantage_%s_meanP.png',          basename)), 'Resolution', 150);
-exportgraphics(fig2, fullfile(out_dir, sprintf('advantage_%s_frame_accuracy.png', basename)), 'Resolution', 150);
-exportgraphics(fig3, fullfile(out_dir, sprintf('advantage_%s_cvsa_fusion.png',    basename)), 'Resolution', 150);
-exportgraphics(fig4, fullfile(out_dir, sprintf('advantage_%s_cf_duration.png',    basename)), 'Resolution', 150);
-exportgraphics(fig5, fullfile(out_dir, sprintf('advantage_%s_agreement.png',      basename)), 'Resolution', 150);
+saveas(fig1, fullfile(out_dir, sprintf('advantage_%s_meanP.svg',          basename)), 'svg');
+saveas(fig2, fullfile(out_dir, sprintf('advantage_%s_frame_accuracy.svg', basename)), 'svg');
+saveas(fig3, fullfile(out_dir, sprintf('advantage_%s_cvsa_fusion.svg',    basename)), 'svg');
+saveas(fig4, fullfile(out_dir, sprintf('advantage_%s_cf_duration.svg',    basename)), 'svg');
+saveas(fig5, fullfile(out_dir, sprintf('advantage_%s_agreement.svg',      basename)), 'svg');
 fprintf('Saved figures to %s\n', out_dir);
+close([fig1, fig2, fig3, fig4, fig5]);
+
+end % file_idx loop
+
 
 % ── Local helpers (must be after all script statements) ───────────────────
 

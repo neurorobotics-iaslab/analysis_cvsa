@@ -117,14 +117,19 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero)
 
     scatter(ax, xf, yf, 18, vf, 'filled', 'MarkerEdgeColor','none');
 
-    % Labels only for the original (non-zero-padded) channels
-    orig_mask = find(ok) <= n_orig;
-    fi_orig   = find(ok); fi_orig = fi_orig(orig_mask);
-    for i = 1:numel(fi_orig)
-        text(ax, xy(fi_orig(i),1), xy(fi_orig(i),2)+0.11, ...
-             strtrim(ch_names{fi_orig(i)}), ...
-             'FontSize',5.5,'HorizontalAlignment','center','Color','k', ...
-             'FontWeight','bold');
+    % Labels: original channels in black-bold; bg_zero-padded channels in gray
+    ok_idx = find(ok);
+    for i = 1:numel(ok_idx)
+        idx = ok_idx(i);
+        if idx <= n_orig
+            text(ax, xy(idx,1), xy(idx,2)+0.11, strtrim(ch_names{idx}), ...
+                 'FontSize', 5.5, 'HorizontalAlignment', 'center', ...
+                 'Color', 'k', 'FontWeight', 'bold');
+        else
+            text(ax, xy(idx,1), xy(idx,2)+0.11, strtrim(ch_names{idx}), ...
+                 'FontSize', 4.5, 'HorizontalAlignment', 'center', ...
+                 'Color', [0.55 0.55 0.55]);
+        end
     end
     set(ax, 'XLim',[-1.4,1.4], 'YLim',[-1.4,1.4]);
     if ~isempty(ttl)

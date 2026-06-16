@@ -17,6 +17,9 @@
 
 clear; clc; close all;
 
+% --- Display options -------------------------------------------------------
+SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+
 % --- Make every subfolder visible to the simulator -----------------------
 this_dir = '/home/paolo/bci_vr_ws/src/analysis_bci/matlab_simulation';
 addpath(this_dir);
@@ -28,15 +31,20 @@ addpath(fullfile(this_dir, 'integrator'));
 addpath(fullfile(this_dir, 'plotting'));
 addpath(fullfile(this_dir, 'utils'));
 
-% --- GUI: pick the GDF; everything else flows from the sibling YAML -----
+% --- GUI: pick GDF(s); everything else flows from the sibling YAML(s) ---
 default_dir = '/home/paolo/bci_vr_ws/recordings';
 
-[gdf_name, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
-                                'Select a GDF recording', default_dir);
-if isequal(gdf_name, 0)
+[gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
+                                'Select GDF recording(s)', default_dir, 'MultiSelect', 'on');
+if isequal(gdf_names, 0)
     error('main_simulate:cancel', 'No GDF selected.');
 end
-gdf_path = fullfile(gdf_dir, gdf_name);
+if ischar(gdf_names), gdf_names = {gdf_names}; end
+n_files = numel(gdf_names);
+
+for file_idx = 1:n_files
+gdf_path = fullfile(gdf_dir, gdf_names{file_idx});
+fprintf('\n[%d/%d] %s\n', file_idx, n_files, gdf_names{file_idx});
 
 %% --- Load GDF --------------------------------------------------------
 [signal, header, basename] = load_gdf(gdf_path);
@@ -166,17 +174,19 @@ log_step('main_simulate: GDF outcomes -> HIT=%d  MISS=%d  TIMEOUT=%d  (sim PASS=
          n_hit_real, n_miss_real, n_to_real, sum([trials.pass]));
 
 %% --- Plot per-trial panels -------------------------------------------
-fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real);
+fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real, SHOW_FIGURES);
 
 %% --- Save figure -------------------------------------------------------
-out_dir = fullfile(gdf_dir, 'analysis_results');
+out_dir = fullfile(gdf_dir, 'analysis_results', 'trial_simulation');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 if ~isempty(fig)
-    out_file = fullfile(out_dir, sprintf('trials_%s_%s.png', paradigm, basename));
-    exportgraphics(fig, out_file, 'Resolution', 150);
+    out_file = fullfile(out_dir, sprintf('trials_%s_%s.svg', paradigm, basename));
+    saveas(fig, out_file, 'svg');
     log_step('main_simulate: saved %s', out_file);
+    close(fig);
 end
 
+end % file_idx loop
 
 
 % ----------------------------------------------------------------------
