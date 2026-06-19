@@ -667,7 +667,7 @@ sgtitle(fig3,sprintf(['Sample accuracy — offline simulation  (MATLAB ≈ ROS)\
     'FontSize',11);
 
 %% --- Save figures -------------------------------------------------------
-out_dir = fullfile(gdf_dir, 'analysis_results', 'overview');
+out_dir = fullfile(gdf_dir, 'analysis_results', 'session_overview');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 saveas(fig1, fullfile(out_dir, 'overview_trial_accuracy.svg'),  'svg');
 saveas(fig2, fullfile(out_dir, 'overview_time_metrics.svg'),    'svg');
@@ -1127,6 +1127,24 @@ if n_erd7 > 0
         if ~SHOW_FIGURES, close(fig7); end
     end
 end
+
+%% ── Save session summary .mat for cross-script use ──────────────────────────
+summary_file = struct();
+for fi2 = 1:numel(RES)
+    r2 = RES{fi2};
+    summary_file(fi2).file_label  = r2.file_label;
+    summary_file(fi2).paradigm    = r2.paradigm;
+    summary_file(fi2).n_hit       = r2.n_hit;
+    summary_file(fi2).n_miss      = r2.n_miss;
+    summary_file(fi2).n_to        = r2.n_to;
+    summary_file(fi2).hit_rate    = r2.hit_tot;
+    summary_file(fi2).hit_no_to   = r2.hit_no_to;
+    summary_file(fi2).tth_vals    = r2.tth_vals;
+    summary_file(fi2).t_miss_vals = r2.t_miss_vals;
+    summary_file(fi2).to_vals     = r2.to_vals;
+end
+save(fullfile(out_dir, 'session_summary.mat'), 'summary_file');
+fprintf('Saved session_summary.mat to %s\n', out_dir);
 
 fprintf('\nDone.\n');
 

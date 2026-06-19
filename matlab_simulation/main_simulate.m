@@ -42,6 +42,8 @@ end
 if ischar(gdf_names), gdf_names = {gdf_names}; end
 n_files = numel(gdf_names);
 
+simulate_summary = struct([]);
+
 for file_idx = 1:n_files
 gdf_path = fullfile(gdf_dir, gdf_names{file_idx});
 fprintf('\n[%d/%d] %s\n', file_idx, n_files, gdf_names{file_idx});
@@ -177,7 +179,7 @@ log_step('main_simulate: GDF outcomes -> HIT=%d  MISS=%d  TIMEOUT=%d  (sim PASS=
 fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial_outcome_real, SHOW_FIGURES);
 
 %% --- Save figure -------------------------------------------------------
-out_dir = fullfile(gdf_dir, 'analysis_results', 'trial_simulation');
+out_dir = fullfile(gdf_dir, 'analysis_results', 'simulate');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 if ~isempty(fig)
     out_file = fullfile(out_dir, sprintf('trials_%s_%s.svg', paradigm, basename));
@@ -186,7 +188,23 @@ if ~isempty(fig)
     close(fig);
 end
 
+%% --- Accumulate per-file summary for cross-subject use ------------------
+idx_acc = numel(simulate_summary) + 1;
+simulate_summary(idx_acc).basename = basename;
+simulate_summary(idx_acc).paradigm = paradigm;
+simulate_summary(idx_acc).n_trials = n_trials;
+simulate_summary(idx_acc).n_hit    = n_hit_real;
+simulate_summary(idx_acc).n_miss   = n_miss_real;
+simulate_summary(idx_acc).n_to     = n_to_real;
+simulate_summary(idx_acc).n_pass_sim = sum([trials.pass]);
+
 end % file_idx loop
+
+%% --- Save aggregate .mat for cross-script / cross-subject use ------------
+if ~isempty(simulate_summary)
+    save(fullfile(out_dir, 'simulate_summary.mat'), 'simulate_summary');
+    fprintf('Saved simulate_summary.mat to %s\n', out_dir);
+end
 
 
 % ----------------------------------------------------------------------

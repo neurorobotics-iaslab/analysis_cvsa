@@ -12,31 +12,37 @@ analysis_bci/
 
 ## matlab_simulation
 
-Full offline re-implementation of every ROS processing node (FBCSP, artifact detector, sLDA, integrator), validated against ROS at MAE < 1e-6. Six entry points:
+Full offline re-implementation of every ROS processing node (FBCSP, artifact detector, sLDA, integrator), validated against ROS at MAE < 1e-6. Nine entry points:
 
-| Script | Input GDFs | Purpose |
+| Script | Input | Purpose |
 |---|---|---|
-| `main_simulate` | any paradigm | Single GDF → full pipeline → per-trial P(c1) plot |
-| `main_session_overview` | any paradigm | One or more GDFs → trial accuracy, time metrics, sample accuracy, **CSP channel/band importance** (Fig 4), **sLDA-weighted feature importance** (Fig 5), **ERD/ERS ↔ CSP correlation** (Fig 6), and **hemisphere ROI time-courses** (Fig 7). Saves seven SVGs. |
-| `main_compare_sessions` (deprecated name: `main_compare_paradigms`) | any paradigm | Loads `eval_single_*.mat` files recursively → per-paradigm aggregate table + bar charts |
-| `main_hybrid_advantage_probs` | **hybrid only** | Classifier-probability analysis: per-stream mean P(target), frame accuracy, CVSA-fusion advantage over the leaky-integrator buffer — 5 figures |
-| `main_hybrid_advantage_integ` | **hybrid only** | Counterfactual integrator analysis: runs the buffer 3× (hybrid / MI-only / CVSA-only) on the same sLDA streams — per-trial + aggregate + temporal advantage + deep analysis — 5 figures |
-| `main_browse_gdf` | any paradigm | Interactive scrollable viewer: classifier probabilities + integrator signal |
+| `main_simulate` | any paradigm GDF | Single GDF → full pipeline → per-trial P(c1) plot + `simulate_summary.mat` |
+| `main_session_overview` | any paradigm GDF(s) | Trial accuracy, time metrics, sample accuracy, CSP/sLDA/ERD analysis — 7 SVGs + `session_summary.mat` |
+| `main_compare_sessions` (deprecated: `main_compare_paradigms`) | any paradigm GDF(s) | Loads `eval_single_*.mat` files recursively → per-paradigm aggregate table + bar charts |
+| `main_trial_dynamics` | any paradigm GDF(s) | Within-session learning/fatigue: accuracy 1st-vs-2nd-half, TTH trend vs trial position, accuracy by quartile — real GDF events only, no YAML needed — 3 figures + `trial_dynamics_summary.mat` |
+| `main_hybrid_advantage_probs` | **hybrid only** | Classifier-probability analysis: per-stream mean P(target), frame accuracy, CVSA-fusion advantage — 5 figures + `hybrid_advantage_probs_summary.mat` |
+| `main_hybrid_advantage_integ` | **hybrid only** | Counterfactual integrator analysis: runs the buffer 3× (hybrid / MI-only / CVSA-only) — per-trial + aggregate + temporal advantage — 5 figures + `counterfactual_summary.mat` |
+| `main_validate_counterfactual` | `session_summary.mat` + `counterfactual_summary.mat` | Compares real between-session accuracy vs offline simulation — validates the counterfactual methodology — 1 figure |
+| `main_group_analysis` | root folder (recursive scan) | Aggregates `session_summary.mat`, `counterfactual_summary.mat`, `hybrid_advantage_probs_summary.mat`, and `topo_erders_summary.mat` across **all subjects** found under the root → group-level accuracy, counterfactual-advantage, CVSA-fusion-mechanism, and ERD/ERS-grounding figures with subject-level statistics — 4 figures + `group_summary.mat` |
+| `main_browse_gdf` | any paradigm GDF | Interactive scrollable viewer: classifier probabilities + integrator signal |
 
-> **Note**: `main_hybrid_advantage_probs` and `main_hybrid_advantage_integ` both require **hybrid GDF files** (recorded during a hybrid paradigm session). They will not produce meaningful results with MI-only or CVSA-only recordings.
+> **Note**: `main_hybrid_advantage_probs` and `main_hybrid_advantage_integ` both require **hybrid GDF files**. `main_validate_counterfactual` requires the `.mat` outputs of `main_session_overview` and `main_hybrid_advantage_integ` for one subject. `main_group_analysis` requires the same outputs (plus `main_hybrid_advantage_probs`'s and `topo_erders`'s) but pooled across **multiple subjects** under a common root folder (`recordings/<subject>/...`) — run the per-file scripts first for each subject. `main_trial_dynamics` has no such dependency — it only needs the GDF files themselves.
 
 ```matlab
 cd /home/paolo/bci_vr_ws/src/analysis_bci/matlab_simulation
-main_simulate
-main_session_overview
-main_hybrid_advantage_probs    % hybrid GDFs only
-main_hybrid_advantage_integ    % hybrid GDFs only
+main_simulate                  % saves simulate_summary.mat
+main_session_overview          % saves session_summary.mat
+main_trial_dynamics            % any paradigm — no YAML needed, saves trial_dynamics_summary.mat
+main_hybrid_advantage_probs    % hybrid GDFs only — saves hybrid_advantage_probs_summary.mat
+main_hybrid_advantage_integ    % hybrid GDFs only — saves counterfactual_summary.mat
+main_validate_counterfactual   % loads the two .mat files above, one subject
+main_group_analysis            % scans recordings/ recursively, all subjects
 main_browse_gdf
 ```
 
-The companion YAML (rosparam dump saved by `bag_bci` alongside each GDF) is loaded automatically. For calibration recordings the YAML lives in `../parameters/` relative to the GDF; `load_params_yaml` searches there as a fallback.
+The companion YAML (rosparam dump saved by `bag_bci` alongside each GDF) is loaded automatically. For calibration recordings the YAML lives in `../parameters/` relative to the GDF; `load_params_yaml` searches there as a fallback. `main_trial_dynamics` is the only GDF-based script that does **not** need the YAML — it works purely from GDF event codes.
 
-`main_simulate`, `main_session_overview`, `main_hybrid_advantage_probs`, and `main_hybrid_advantage_integ` all save their figures as SVG (full-screen size) into a dedicated subfolder of `<gdf_dir>/analysis_results/`: `trial_simulation/`, `overview/`, `advantage_hybrid/`, and `hybrid_vs_unimodal/` respectively. `main_session_overview` produces seven SVGs in `overview/`: `overview_trial_accuracy.svg`, `overview_time_metrics.svg`, `overview_sample_accuracy.svg`, `overview_csp_importance.svg` (CSP filter weights — per-class channel topoplots with full 10-20 grid, selectivity, stacked band bars), `overview_slda_importance.svg` (sLDA-weighted importance — channel topoplot weighted by |sLDA coef|, band bars, feature selection heatmap comp × band), `overview_erd_csp_corr.svg` (ERD/ERS class discrimination vs CSP filter weight scatter, Pearson r per band), and `overview_roi_timecourse.svg` (Left/Right/Midline hemisphere ROI ERD/ERS time-courses, band-averaged, per class + lateralization). Figs 4–7 are skipped if no companion YAML is available. Each script has a `SHOW_FIGURES` flag at the top controlling whether the figures are also displayed on screen. `topo_erders.m` (in `analysis_gdf/`) follows the same pattern, saving into `<gdf_dir>/analysis_results/eeglab/`.
+Every GDF-based script saves its figures as SVG (full-screen size) into a subfolder of `<gdf_dir>/analysis_results/` **named after the script itself**: `simulate/`, `session_overview/`, `trial_dynamics/`, `hybrid_advantage_probs/`, `hybrid_advantage_integ/`. `main_session_overview` also saves `session_summary.mat` in `session_overview/` and produces seven SVGs: `overview_trial_accuracy.svg`, `overview_time_metrics.svg`, `overview_sample_accuracy.svg`, `overview_csp_importance.svg`, `overview_slda_importance.svg`, `overview_erd_csp_corr.svg`, and `overview_roi_timecourse.svg`. Figs 4–7 are skipped if no companion YAML is available. `main_trial_dynamics` saves `trial_dynamics_summary.mat` in `trial_dynamics/`. `main_hybrid_advantage_probs` saves `hybrid_advantage_probs_summary.mat` in `hybrid_advantage_probs/`. `main_hybrid_advantage_integ` saves `counterfactual_summary.mat` in `hybrid_advantage_integ/`. `main_validate_counterfactual` saves `counterfactual_validation.svg` under a sibling `validate_counterfactual/` folder. `main_group_analysis` scans a root folder recursively (subject = first path component under the root) and saves `group_summary.mat` + four SVGs under `<root>/group_analysis/`. Each GDF-based script has a `SHOW_FIGURES` flag at the top. `topo_erders.m` (in `analysis_gdf/`) saves into `<gdf_dir>/analysis_results/topo_erders/`, including `topo_erders_summary.mat` (per paradigm × band: mean ERD/ERS per class, discrimination, CSP-weight Pearson r) for cross-subject use by `main_group_analysis`.
 
 Requirements: MATLAB R2019+ with Signal Processing Toolbox, [yamlmatlab](https://github.com/jiri-cigler/yamlmatlab), [BIOSIG](https://biosig.sourceforge.io) (`sload`).
 
@@ -60,7 +66,7 @@ Loads one or more GDFs (any mix of MI/CVSA/Hybrid), runs EEGLAB preprocessing (r
 
 All figures are saved as SVG (full-screen size); the `SHOW_FIGURES` flag at the top of the script controls whether they are also displayed on screen.
 
-For each paradigm found, output goes to `<gdf_dir>/analysis_results/eeglab/<paradigm>/`:
+For each paradigm found, output goes to `<gdf_dir>/analysis_results/topo_erders/<paradigm>/`:
 - `all_<paradigm>` — average across all files of that paradigm, all channels
 - `sel_<paradigm>` — same, but only CSP-selected channels are non-zero (MI bands → MI channels, CVSA bands → CVSA channels; hybrid keeps both separate, never mixed)
 - `per_file/all_<filename>` and `per_file/sel_<filename>` — same pair for each individual file
@@ -81,6 +87,8 @@ Per-trial values are computed as Pfurtscheller-style band power (`bandpass` → 
 **ERD/ERS vs. CSP weight** (`corr_<paradigm>` files): one figure per paradigm, one panel per band that has CSP info — scatter of each channel's class discrimination `|ERD/ERS(class1) - ERD/ERS(class2)|` during continuous feedback (from `CUE_DURATION_S` to the max CF end) against that channel's CSP weight (sum of `|csp_matrices|` over components for that band; 0 for channels not selected by the CSP). The `|c1-c2|` difference (not the per-class average) is used for both MI and CVSA bands: it captures contralateral ERD/ERS patterns (e.g. C4 ERD for class1 / C3 ERD for class2 both appear as large `|c1-c2|`, whereas averaging the classes would cancel them out), and matches the lateralization index already used for CVSA topoplots. MI-origin bands use the MI CSP, CVSA-origin bands use the CVSA CSP (hybrid produces one panel per band, using the matching CSP). Each panel's title shows the Pearson correlation coefficient between this discrimination signal and CSP weight.
 
 **ERD/ERS lateralization time-course by hemisphere ROI** (`roi_<paradigm>_<band>` and `per_file/roi_<filename>_<band>` files): one figure per band that has CSP info — channels selected by that band's CSP (MI-origin bands → MI CSP, CVSA-origin bands → CVSA CSP) are grouped into hemisphere ROIs (Left/Right/Midline, by the trailing digit/`z` of the 10-20 label: odd = left, even = right, `z` = midline; channels matching neither are dropped). One row per non-empty ROI, from cue onset (t=0) to the max CF end, dashed line = CF onset: left column overlays the per-class ERD/ERS time-courses (`c1(t)`, `c2(t)`); right column shows the lateralization time-course `c1(t) - c2(t)`. Bands without CSP info, or whose origin has no CSP-selected channels, are skipped.
+
+**`topo_erders_summary.mat`**: saved directly under `analysis_results/topo_erders/` (one level above the per-paradigm subfolders). One row per (paradigm, band): `mean_erd_c1`, `mean_erd_c2` (averaged over that band's CSP-selected channels during the CF window), `discrimination` (`|mean_erd_c1 - mean_erd_c2|`), `csp_r` (the same Pearson r shown in the `corr_<paradigm>` panel for that band), `n_csp_channels`. Rows with no CSP info for that (origin, band) are skipped. Used by `main_group_analysis` to pool ERD/ERS discrimination and CSP-weight grounding across subjects.
 
 ---
 

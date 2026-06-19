@@ -33,7 +33,7 @@
 %   Row labels use the actual cue/event codes for that paradigm.
 %
 %   Output is organised in one sub-folder PER PARADIGM under
-%   <gdf_folder>/results_eeglab/<paradigm>/:
+%   <gdf_folder>/analysis_results/topo_erders/<paradigm>/:
 %     - "all_<paradigm>_<MI|CVSA>_<band>"  : grand average over all files
 %                                            of that paradigm, all channels
 %     - "sel_<paradigm>_<MI|CVSA>_<band>"  : same, but with all non-CSP
@@ -87,6 +87,11 @@
 %   MI-origin bands use the MI CSP, CVSA-origin bands use the CVSA CSP
 %   (hybrid: both, one panel each).
 %   Pearson correlation coefficient is shown in each panel's title.
+%
+%   Also saves topo_erders_summary.mat under analysis_results/topo_erders/
+%   (one row per paradigm x band: mean ERD/ERS per class over CSP-selected
+%   channels during CF, their discrimination, and the CSP-weight Pearson r)
+%   for cross-subject aggregation by main_group_analysis.m.
 
 clear; clc; close all;
 
@@ -138,7 +143,7 @@ if isequal(files,0), disp('Operazione annullata'); return; end
 if ischar(files), files = {files}; end
 n_files = numel(files);
 
-output_dir = fullfile(folder, 'analysis_results', 'eeglab');
+output_dir = fullfile(folder, 'analysis_results', 'topo_erders');
 if ~exist(output_dir, 'dir'), mkdir(output_dir); end
 
 %% --- 4. PRE-SCAN: paradigm, event codes, CSP channels + bands per file ----
@@ -437,6 +442,8 @@ end
 %% --- 7. GENERATE TOPOPLOT GRIDS ---------------------------------------------
 fprintf('\n--- GENERATING TOPOPLOTS ---\n');
 
+erd_summary = struct([]);
+
 for p = 1:n_par
     par_dir       = fullfile(output_dir, paradigms{p});
     par_dir_files = fullfile(par_dir, 'per_file');
@@ -473,6 +480,16 @@ for p = 1:n_par
     idx_p = find(strcmp(file_paradigm, paradigms{p}));
     plot_csp_correlation(par_heat{p}, chan_labels, heat_times, heat_time_range, CUE_DURATION_S*1000, ...
                           bnd, bnames, origin, file_csp_info, idx_p, ref_labels, par_dir, paradigms{p}, fig_vis);
+
+    % ── Per-band scalar summary for cross-subject use (mean ERD per class,
+    %    discrimination, CSP-weight correlation) ──────────────────────────
+    for idx_b = 1:size(bnd,1)
+        if strcmpi(origin{idx_b}, 'MI'), mask_b = par_mi_mask{p}; else, mask_b = par_cvsa_mask{p}; end
+        row = compute_erd_summary_row(par_heat{p}{idx_b}, heat_times, heat_time_range, CUE_DURATION_S*1000, ...
+                                       bnd(idx_b,:), bnames{idx_b}, origin{idx_b}, file_csp_info, idx_p, ref_labels, mask_b);
+        row.paradigm = paradigms{p};
+        erd_summary(end+1) = row; %#ok<AGROW>
+    end
 
     % ── ERD/ERS lateralization time-course, by CSP-channel hemisphere ROI ─
     plot_csp_roi_timecourse(par_heat{p}, ref_labels, heat_times, heat_time_range, CUE_DURATION_S*1000, ...
@@ -513,6 +530,9 @@ for p = 1:n_par
         end
     end
 end
+
+save(fullfile(output_dir, 'topo_erders_summary.mat'), 'erd_summary');
+fprintf('Saved topo_erders_summary.mat to %s\n', output_dir);
 
 fprintf('\nDone. Figures saved under: %s (one sub-folder per paradigm)\n', output_dir);
 
@@ -768,6 +788,41 @@ function imp = csp_importance_for_band(file_csp_info, idx_files, name, band, ref
             end
             return;
         end
+    end
+end
+
+function row = compute_erd_summary_row(heat_band, heat_times, heat_time_range, cf_start_ms, ...
+                                        band, band_name, origin, file_csp_info, idx_files, ref_labels, mask)
+% COMPUTE_ERD_SUMMARY_ROW  Per-band scalar summary for cross-subject pooling:
+%   mean ERD/ERS per class (averaged over the CSP-selected channels of this
+%   band's origin, during the CF window), their discrimination, and the
+%   Pearson r between per-channel ERD/ERS discrimination and CSP weight
+%   (same r reported in the corr_<paradigm> figure panel for this band).
+%   Returns NaN fields if no CSP info is found for this (origin, band).
+    cf_idx_l = heat_times >= cf_start_ms & heat_times <= heat_time_range(2);
+    row = struct('band_name', band_name, 'band_origin', origin, ...
+                 'freq_lo', band(1), 'freq_hi', band(2), ...
+                 'mean_erd_c1', NaN, 'mean_erd_c2', NaN, 'discrimination', NaN, ...
+                 'csp_r', NaN, 'n_csp_channels', 0);
+
+    imp = csp_importance_for_band(file_csp_info, idx_files, origin, band, ref_labels);
+    if isempty(imp), return; end
+
+    d1_full = mean(heat_band.c1(:, cf_idx_l), 2, 'omitnan');
+    d2_full = mean(heat_band.c2(:, cf_idx_l), 2, 'omitnan');
+    mag = abs(d1_full - d2_full);
+
+    good = ~isnan(mag) & ~isnan(imp);
+    if sum(good) >= 2
+        cc = corrcoef(mag(good), imp(good));
+        row.csp_r = cc(1,2);
+    end
+
+    if ~isempty(mask) && any(mask)
+        row.mean_erd_c1    = mean(d1_full(mask), 'omitnan');
+        row.mean_erd_c2    = mean(d2_full(mask), 'omitnan');
+        row.discrimination = abs(row.mean_erd_c1 - row.mean_erd_c2);
+        row.n_csp_channels = sum(mask);
     end
 end
 

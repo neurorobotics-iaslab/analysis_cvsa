@@ -40,123 +40,24 @@ end
 if ischar(gdf_names), gdf_names = {gdf_names}; end
 n_files = numel(gdf_names);
 
+probs_summary = struct([]);
+
 for file_idx = 1:n_files
 gdf_path = fullfile(gdf_dir, gdf_names{file_idx});
 fprintf('\n[%d/%d] %s\n', file_idx, n_files, gdf_names{file_idx});
 
-%% --- Load GDF --------------------------------------------------------
-[signal, header, basename] = load_gdf(gdf_path);
-
-%% --- Load parameters YAML -----------------------------
-[params, ~] = load_params_yaml(gdf_path);
-
-paradigm  = params.integrator.paradigm;
-if ~strcmp(paradigm, 'hybrid')
-    fprintf('  skipping %s: paradigm=%s (hybrid-only)\n', basename, paradigm);
+%% --- Load + preprocess both MI/CVSA streams (shared with main_hybrid_advantage_integ) ---
+S = load_hybrid_streams(gdf_path);
+if S.skip
+    fprintf('  skipping %s: paradigm=%s (hybrid-only)\n', S.basename, S.paradigm);
     continue;
 end
-fs        = double(params.acquisition.samplerate);
-framerate = double(params.acquisition.framerate);
-chunk_size = round(fs / framerate);
-if abs(fs - header.SampleRate) > 1e-3
-    log_step('main_simulate: YAML samplerate=%.1f != GDF samplerate=%.1f -> using GDF', ...
-             fs, header.SampleRate);
-    fs = header.SampleRate;
-    chunk_size = round(fs / framerate);
-end
+signal = S.signal; header = S.header; basename = S.basename;
+fs = S.fs; framerate = S.framerate; chunk_size = S.chunk_size;
+int_cfg = S.int_cfg;
 
-bufsize_proc = double(params.RingBufferCfg.params.size);
-bufsize_art  = double(params.RingBufferCfgArtifact.params.size);
-eog_names    = to_strcell(params.CarCfg.params.EOG_ch_names);
-
-do_car_mi = true;
-if isfield(params, 'processing_fbcsp_mi')
-    do_car_mi = logical(params.processing_fbcsp_mi.do_car);
-    nchannels = double(params.processing_fbcsp_mi.nchannels);
-end
-do_car_cvsa = true;
-if isfield(params, 'processing_fbcsp_cvsa')
-    do_car_cvsa = logical(params.processing_fbcsp_cvsa.do_car);
-    nchannels = double(params.processing_fbcsp_cvsa.nchannels);
-end
-
-signal = signal(:,1:nchannels); % remove the last 3 values: associated with ACC values
-
-log_step('main_simulate: paradigm=%s, fs=%g, framerate=%g, chunk=%d, bufproc=%d, bufart=%d, nchannels=%d', ...
-         paradigm, fs, framerate, chunk_size, bufsize_proc, bufsize_art, nchannels);
-
-%% --- Load CSP + sLDA per used paradigm --------------------------------
-use_mi   = ismember(paradigm, {'mi', 'hybrid'});
-use_cvsa = ismember(paradigm, {'cvsa', 'hybrid'});
-csp_mi   = []; slda_mi   = [];
-csp_cvsa = []; slda_cvsa = [];
-if use_mi
-    csp_mi   = load_csp(params, 'mi');
-    slda_mi  = load_slda(params, 'mi');
-end
-if use_cvsa
-    csp_cvsa  = load_csp(params, 'cvsa');
-    slda_cvsa = load_slda(params, 'cvsa');
-end
-
-%% --- Apply processing (one stream per paradigm) ----------------------
-features_mi = []; header_mi = [];
-features_cv = []; header_cv = [];
-info_proc   = [];
-if use_mi
-    proc_cfg_mi = struct('samplerate', fs, 'chunk_size', chunk_size, ...
-                         'bufsize', bufsize_proc, 'filter_order', 4, ...
-                         'do_car', do_car_mi, 'eog_names', {eog_names});
-    [features_mi, header_mi, info_proc] = apply_processing(signal, header, csp_mi, proc_cfg_mi);
-end
-if use_cvsa
-    proc_cfg_cvsa = struct('samplerate', fs, 'chunk_size', chunk_size, ...
-                           'bufsize', bufsize_proc, 'filter_order', 4, ...
-                           'do_car', do_car_cvsa, 'eog_names', {eog_names});
-    [features_cv, header_cv, info2] = apply_processing(signal, header, csp_cvsa, proc_cfg_cvsa);
-    if isempty(info_proc), info_proc = info2; end
-end
-
-%% --- Apply artifact detection on raw signal --------------------------
-art_cfg = params.ArtifactCfg.params;
-art_cfg.EOG_ch_names = to_strcell(art_cfg.EOG_ch_names);
-cfg_art = struct('samplerate', fs, 'chunk_size', chunk_size, 'bufsize_artifact', bufsize_art);
-[art_flags, info_art] = detect_artifacts(signal, header, art_cfg, cfg_art);
-
-%% --- Apply sLDA over the whole feature stream ------------------------
-%   Note on alignment: features (apply_processing) and art_flags
-%   (detect_artifacts) both live on the same chunk-index axis (k = 1..n_chunks).
-%   The artifact ringbuf fills first (bufsize_art / chunk_size chunks earlier
-%   than the processing ringbuf), so art_flags are already "valid" by the
-%   time features become valid -- the +bufsize_proc/chunk offset is implicit
-%   in starting integration only at the first 781, which is well past both
-%   buffers' fill points.
-n_chunks    = info_proc.n_chunks;
-first_valid = info_proc.first_valid_chunk;
-art_lead    = max(0, round((bufsize_proc - bufsize_art) / chunk_size));
-
-p_mi_aligned   = []; if use_mi,   p_mi_aligned   = apply_slda(features_mi, slda_mi,   csp_mi.bands  ); end
-p_cvsa_aligned = []; if use_cvsa, p_cvsa_aligned = apply_slda(features_cv, slda_cvsa, csp_cvsa.bands); end
-
-log_step('main_simulate: streams aligned (n_chunks=%d, first_valid_proc=%d, art_lead=%d chunks)', ...
-         n_chunks, first_valid, art_lead);
-
-%% --- Integrate per trial ---------------------------------------------
-int_cfg = params.integrator;
-% Pull the dynamic_reconfigure-able fields with safe defaults
-if ~isfield(int_cfg, 'increment'),               int_cfg.increment = 1; end
-if ~isfield(int_cfg, 'thresholds_rejection'),    int_cfg.thresholds_rejection = []; end
-if ~isfield(int_cfg, 'cvsa_influence'),          int_cfg.cvsa_influence = 2.5; end
-if ~isfield(int_cfg, 'thresholds'),              int_cfg.thresholds = params.training_node.thresholds; end
-
-% header_chunks for trial extents (use whichever paradigm produced a header)
-if use_mi,   header_chunks = header_mi;
-else,        header_chunks = header_cv;
-end
-header_chunks.framerate = framerate;
-
-trials = integrate_signal(p_mi_aligned, p_cvsa_aligned, art_flags, ...
-                          header_chunks, int_cfg, paradigm);
+trials = integrate_signal(S.p_mi_aligned, S.p_cvsa_aligned, S.art_flags, ...
+                          S.header_chunks, int_cfg, S.paradigm);
 
 %% --- Read REAL outcomes from GDF events (897=HIT, 898=MISS, 899=TIMEOUT)
 HIT_CODE_SIM = 897;  MISS_CODE_SIM = 898;  TIMEOUT_CODE_SIM = 899;  CF_CODE_SIM = 781;
@@ -765,7 +666,7 @@ sgtitle(fig5, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — does CVSA help, broken
         basename, n_hit_real, n_miss_real, n_to_real, cvsa_inf), 'FontSize', 10, 'Interpreter', 'none');
 
 %% --- Save figures -------------------------------------------------------
-out_dir = fullfile(gdf_dir, 'analysis_results', 'advantage_hybrid');
+out_dir = fullfile(gdf_dir, 'analysis_results', 'hybrid_advantage_probs');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 saveas(fig1, fullfile(out_dir, sprintf('advantage_%s_meanP.svg',          basename)), 'svg');
 saveas(fig2, fullfile(out_dir, sprintf('advantage_%s_frame_accuracy.svg', basename)), 'svg');
@@ -775,7 +676,40 @@ saveas(fig5, fullfile(out_dir, sprintf('advantage_%s_agreement.svg',      basena
 fprintf('Saved figures to %s\n', out_dir);
 close([fig1, fig2, fig3, fig4, fig5]);
 
+%% --- Accumulate per-file summary for cross-subject use ------------------
+idx_acc = numel(probs_summary) + 1;
+probs_summary(idx_acc).basename     = basename;
+probs_summary(idx_acc).n_hit        = n_hit_real;
+probs_summary(idx_acc).n_miss       = n_miss_real;
+probs_summary(idx_acc).n_to         = n_to_real;
+probs_summary(idx_acc).mean_P_mi    = mean(mean_P_mi,   'omitnan');
+probs_summary(idx_acc).mean_P_cvsa  = mean(mean_P_cvsa, 'omitnan');
+probs_summary(idx_acc).mean_P_fus   = mean(mean_P_fus,  'omitnan');
+probs_summary(idx_acc).mean_buf     = mean(mean_buf,    'omitnan');
+probs_summary(idx_acc).acc_mi       = mean(acc_mi,   'omitnan');
+probs_summary(idx_acc).acc_cvsa     = mean(acc_cvsa, 'omitnan');
+probs_summary(idx_acc).acc_fus      = mean(acc_fus,  'omitnan');
+probs_summary(idx_acc).acc_buf      = mean(acc_buf,  'omitnan');
+probs_summary(idx_acc).fus_adv_mean = mean(fus_adv, 'omitnan');
+probs_summary(idx_acc).n_help       = n_help;
+probs_summary(idx_acc).n_hurt       = n_hurt;
+probs_summary(idx_acc).n_def        = n_def;
+probs_summary(idx_acc).n_rescued_fr = n_resc;
+probs_summary(idx_acc).n_hurt_fr    = n_hurt_fr;
+probs_summary(idx_acc).n_both_ok_fr = n_both_ok;
+probs_summary(idx_acc).n_both_bad_fr = n_both_bad;
+probs_summary(idx_acc).rescue_delta = mean_d(3);
+probs_summary(idx_acc).cost_delta   = mean_d(2);
+
 end % file_idx loop
+
+%% --- Save aggregate .mat for cross-script / cross-subject use ------------
+if ~isempty(probs_summary)
+    out_dir_top = fullfile(gdf_dir, 'analysis_results', 'hybrid_advantage_probs');
+    if ~exist(out_dir_top, 'dir'), mkdir(out_dir_top); end
+    save(fullfile(out_dir_top, 'hybrid_advantage_probs_summary.mat'), 'probs_summary');
+    fprintf('\nSaved hybrid_advantage_probs_summary.mat to %s\n', out_dir_top);
+end
 
 
 % ── Local helpers (must be after all script statements) ───────────────────

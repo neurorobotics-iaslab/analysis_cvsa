@@ -31,8 +31,8 @@ in spirit.
 
 ## 1. How to run
 
-Six entry points, all self-contained (pick GDFs via file dialogs).
-`main_hybrid_advantage_probs` and `main_hybrid_advantage_integ` **require hybrid GDF files** — they analyse the Bayesian fusion of MI and CVSA and will not produce meaningful results on MI-only or CVSA-only recordings.
+Nine entry points. GDF-based scripts pick files via GUI dialogs. `main_validate_counterfactual` picks `.mat` files instead of GDFs (one subject) — run `main_session_overview` and `main_hybrid_advantage_integ` first to generate them. `main_group_analysis` picks a root folder and aggregates the same `.mat` files (plus `main_hybrid_advantage_probs`'s and `topo_erders.m`'s, in `analysis_gdf/`) across **all subjects** found underneath it.
+`main_hybrid_advantage_probs` and `main_hybrid_advantage_integ` **require hybrid GDF files**. `main_trial_dynamics` works on any paradigm and needs no companion YAML.
 
 ### `main_simulate` — single-file, visual inspection
 
@@ -43,9 +43,9 @@ main_simulate
 
 Single GDF → companion YAML → full pipeline → one figure with all CF trials.
 Use this to inspect a specific recording in detail. The figure is saved as SVG
-(full-screen size) under `<gdf_dir>/analysis_results/trial_simulation/`; the
+(full-screen size) under `<gdf_dir>/analysis_results/simulate/`; the
 `SHOW_FIGURES` flag at the top of the script controls whether it is also shown
-on screen.
+on screen. Also saves `simulate_summary.mat` in that folder (per-file: basename, paradigm, n_trials, n_hit, n_miss, n_to, n_pass_sim) for cross-subject use by `main_group_analysis`.
 
 ### `main_session_overview` — multi-file cross-paradigm summary
 
@@ -77,7 +77,7 @@ ERD trial counts (`[ERD-MI] c1=N c2=N trials`).
 Set `VERBOSE_DIAGNOSTIC = true` (default `false`) for an additional per-trial diagnostic
 table — very verbose, off by default.
 
-The seven figures are saved as SVG (full-screen size) into `<gdf_dir>/analysis_results/overview/`:
+The seven figures are saved as SVG (full-screen size) into `<gdf_dir>/analysis_results/session_overview/`:
 `overview_trial_accuracy.svg`, `overview_time_metrics.svg`, `overview_sample_accuracy.svg`,
 `overview_csp_importance.svg`, `overview_slda_importance.svg`, `overview_erd_csp_corr.svg`,
 and `overview_roi_timecourse.svg`. The `SHOW_FIGURES` flag at the top of the script controls
@@ -101,7 +101,31 @@ file's HIT/MISS/TO counts, accuracy, and mean TTH/Tmiss/Tto, followed by a `TOTA
 row pooling all trials of that paradigm across files (experiment-wide accuracy and
 mean times).
 
-Does **not** save `.mat` files — it is a quick overview, not an archiving tool.
+Also saves `session_summary.mat` in `session_overview/` — required by `main_validate_counterfactual` and `main_group_analysis`. Contains per-file metrics (paradigm, n_hit, n_miss, n_to, hit_rate, tth_vals, t_miss_vals, to_vals) for all files processed in that run.
+
+---
+
+### `main_trial_dynamics` — within-session learning/fatigue trends
+
+```matlab
+main_trial_dynamics   % GUI file picker — any paradigm, mixed MI/CVSA/Hybrid
+```
+
+Uses **only real GDF events** (897/898/899 relative to 781) — no CSP/sLDA/artifact simulation, no companion YAML required, so it runs even on files missing their calibration model. For each file, trial index is normalised to fractional session progress (0 = first trial, 1 = last trial), so sessions of different length pool correctly within the same paradigm. Tests whether performance changes systematically over the course of a session — **learning** (improves) vs **fatigue** (degrades) — separately per paradigm.
+
+**Three figures** (saved under `<gdf_dir>/analysis_results/trial_dynamics/`):
+
+| Figure | Content |
+|---|---|
+| `trial_dynamics_half_split.svg` | One panel per paradigm found: paired per-file dots (1st-half accuracy → 2nd-half accuracy) + paradigm mean line; sign-flip permutation test on the paired delta (2nd half − 1st half). Positive delta = learning, negative = fatigue. |
+| `trial_dynamics_tth_trend.svg` | One panel per paradigm: time-to-HIT vs normalised trial position (all HIT trials pooled across that paradigm's files), linear fit, Pearson r with a permutation p-value (shuffling trial position). Negative r = getting faster over the session = learning. |
+| `trial_dynamics_quartiles.svg` | Single figure: accuracy across four quartiles of session progress, grouped bars per paradigm — a finer-grained view of the same trend. |
+
+**Console output**: per-file 1st-half/2nd-half accuracy table; per-paradigm pooled half-split statistics (mean delta, p-value); per-paradigm TTH-trend statistics (r, p-value).
+
+Also saves `trial_dynamics_summary.mat` — a flat per-trial table (file_label, paradigm, trial_idx, n_trials, frac, outcome_code, dt) — under `trial_dynamics/`.
+
+**Interpretation caveat**: with few trials per file the half-split is noisy; pool more files of the same paradigm (and ideally more subjects via a multi-subject extension) before drawing conclusions from a single session.
 
 ---
 
@@ -157,9 +181,11 @@ Streams: **MI**, **CVSA** (full CF), **CVSA-inf** (first `cvsa_influence` second
 | ≈ 0.5 + MISS | Near-chance; integration goes nowhere |
 | < 0.5 + MISS | Classifier points wrong direction → genuine classifier failure |
 
-The five figures are saved as SVG (full-screen size) into `<gdf_dir>/analysis_results/advantage_hybrid/`;
+The five figures are saved as SVG (full-screen size) into `<gdf_dir>/analysis_results/hybrid_advantage_probs/`;
 the `SHOW_FIGURES` flag at the top of the script controls whether they are also shown on screen.
-No `.mat` files are saved.
+Also saves `hybrid_advantage_probs_summary.mat` in that folder (per-file: mean P/accuracy per stream,
+CVSA-fusion advantage, frame-level rescue/hurt counts, rescue/cost deltas) for cross-subject use by
+`main_group_analysis`.
 
 ---
 
@@ -214,9 +240,55 @@ run.
 **Statistics (no Stats Toolbox required)**: the sign-flip permutation test (`sign_flip_test` local helper, 2000 permutations for global tests, 500 for per-frame temporal test) and the bootstrap CI (percentile method, 2000 resamples) are both implemented without MATLAB's Statistics and Machine Learning Toolbox. The temporal significance figure is explicitly labelled as pointwise/uncorrected — for small n (40 trials) it is exploratory; sustained runs of low p-values are more meaningful than isolated frames.
 
 All figures are saved as SVG (full-screen size) under
-`<gdf_dir>/analysis_results/hybrid_vs_unimodal/`; the `SHOW_FIGURES` flag at the
-top of the script controls whether they are also shown on screen. No `.mat` files
-are saved.
+`<gdf_dir>/analysis_results/hybrid_advantage_integ/`; the `SHOW_FIGURES` flag at the
+top of the script controls whether they are also shown on screen.
+
+Also saves `counterfactual_summary.mat` in `hybrid_advantage_integ/` — required by `main_validate_counterfactual` and `main_group_analysis`. Contains aggregate accuracy, TTH, bootstrap 95% CI, and outcome counts for the three streams (index 1=Hybrid, 2=MI-only, 3=CVSA-only).
+
+---
+
+### `main_validate_counterfactual` — real session vs offline simulation
+
+```matlab
+main_validate_counterfactual   % GUI picks session_summary.mat then counterfactual_summary.mat
+```
+
+Loads the `.mat` outputs of `main_session_overview` (all three paradigm sessions) and `main_hybrid_advantage_integ` (hybrid counterfactual), then compares per paradigm:
+
+| Comparison | What it tests |
+|---|---|
+| Real MI session acc vs simulated MI-only (from hybrid data) | Is the counterfactual a valid proxy for a dedicated MI session? |
+| Real CVSA session acc vs simulated CVSA-only (from hybrid data) | Same for CVSA |
+| Real Hybrid session acc vs simulated Hybrid | Sanity check — should agree closely |
+
+**One figure** (`counterfactual_validation.svg`, saved under a sibling `validate_counterfactual/` folder next to `hybrid_advantage_integ/`):
+- Grouped bar chart: real (solid) vs simulated (lighter + dashed) accuracy per paradigm, with bootstrap CI and Δ annotation
+- Scatter: simulated vs real accuracy for the three paradigms with identity line and ±10% tolerance band
+- TTH comparison: same grouped bar layout for mean time-to-HIT
+
+**Interpretation**: points near the identity line → simulation valid → the counterfactual claim ("hybrid beats MI-only, given identical classifier streams") is representative of true between-session performance. Large divergence → dual-task cognitive cost degrades the MI signal in hybrid sessions.
+
+**Console output**: per-paradigm table of real acc, simulated acc, delta, and n_trials; TTH comparison; interpretation guidance.
+
+---
+
+### `main_group_analysis` — multi-subject aggregation
+
+```matlab
+main_group_analysis   % GUI uigetdir on a root folder, e.g. recordings/
+```
+
+Recursively scans the selected root for every `session_overview/session_summary.mat`, `hybrid_advantage_integ/counterfactual_summary.mat`, `hybrid_advantage_probs/hybrid_advantage_probs_summary.mat`, and `topo_erders/topo_erders_summary.mat` found anywhere underneath it (expects the layout `<root>/<subject>/.../analysis_results/...`). Subject ID = first path component directly under the root. If a subject has multiple matching `.mat` files (e.g. several evaluation sessions), real-session counts are summed, counterfactual accuracy is pooled weighted by `n_trials`, and fusion-mechanism/ERD metrics are averaged (frame counts summed) before computing per-subject statistics.
+
+**Four figures** (saved under `<root>/group_analysis/`):
+- `group_real_accuracy.svg` — per-subject real-session accuracy per paradigm (MI/CVSA/Hybrid), grouped bars with group mean ± SEM dashed lines
+- `group_counterfactual_advantage.svg` — left panel: per-subject counterfactual accuracy (Hybrid/MI-only/CVSA-only); right panel: per-subject Hybrid−MI and Hybrid−CVSA accuracy deltas, plus group mean ± SEM and a **sign-flip permutation test across subjects** (not trials) — once N>1 subject is available this is the statistically meaningful unit, unlike the per-trial test already reported inside `main_hybrid_advantage_integ`
+- `group_fusion_mechanism.svg` — left panel: per-subject CVSA-fusion advantage `mean(P_fused-P_MI)` with group mean ± SEM and sign-flip test; right panel: per-subject rescue-delta vs cost-delta slopegraph with a group-level sign-flip test on `(rescue-cost)` across subjects — tests whether the frame-level fusion mechanism described per-file by `main_hybrid_advantage_probs` generalises across the cohort
+- `group_erd_across_subjects.svg` — left panel: per-subject ERD/ERS class discrimination (`|ERD(c1)-ERD(c2)|`, averaged over that subject's bands), grouped by task, with group mean dashed lines — this is the **mean ERD across subjects, per task**; right panel: per-subject CSP-weight correlation (Pearson r), grouped by task, with a group-level sign-flip test on r across subjects — tests whether the neurophysiological grounding shown per-file by `topo_erders.m` holds across the cohort
+
+**Console output**: per-subject real-session accuracy table; per-subject counterfactual accuracy table; per-subject fusion-mechanism table; per-subject ERD-discrimination/CSP-r table; group-level paired sign-flip tests (mean delta, p-value, stars) for accuracy (Hybrid vs MI-only/CVSA-only), the fusion mechanism (fusion advantage, rescue-cost), and ERD/ERS CSP-weight correlation, all across subjects.
+
+Also saves `group_summary.mat` (subjects list, per-subject real/counterfactual accuracy and TTH matrices, per-subject fusion-mechanism vectors, per-subject ERD-discrimination/CSP-r matrices, group-level p-values) under `<root>/group_analysis/`.
 
 ### `main_browse_gdf` — interactive scrollable viewer
 
@@ -269,16 +341,20 @@ aligned by chunk index.
 
 ```
 matlab_simulation/
-├── main_simulate.m                  # single-file: GUI → pipeline → per-trial plot
-├── main_session_overview.m          # multi-GDF (all paradigms): trial acc + TTH + sample acc + CSP + sLDA analysis, 5 figures
-├── main_hybrid_advantage_probs.m    # HYBRID GDFs only: mean P + frame acc + CVSA-fusion advantage, 5 figures
-├── main_hybrid_advantage_integ.m    # HYBRID GDFs only: counterfactual hybrid vs MI-only vs CVSA-only, per-trial + aggregate figures
+├── main_simulate.m                  # single-file: GUI → pipeline → per-trial plot + simulate_summary.mat
+├── main_session_overview.m          # multi-GDF (all paradigms): trial acc + TTH + sample acc + CSP + sLDA + ERD/ERS, 7 figures + session_summary.mat
+├── main_trial_dynamics.m            # any paradigm, GDF events only (no YAML): within-session learning/fatigue, 3 figures + trial_dynamics_summary.mat
+├── main_hybrid_advantage_probs.m    # HYBRID GDFs only: mean P + frame acc + CVSA-fusion advantage, 5 figures + hybrid_advantage_probs_summary.mat
+├── main_hybrid_advantage_integ.m    # HYBRID GDFs only: counterfactual hybrid vs MI-only vs CVSA-only, per-trial + aggregate figures + counterfactual_summary.mat
+├── main_validate_counterfactual.m   # .mat inputs (one subject): real between-session acc vs offline simulation, 1 figure
+├── main_group_analysis.m            # root folder, recursive scan: group-level figures across ALL subjects + group_summary.mat
 ├── main_browse_gdf.m                # interactive scrollable viewer: classifier probabilities + integrator signal
 ├── io/
 │   ├── load_gdf.m             # signal [N x C], header (Label, SampleRate, EVENT.*), basename
 │   ├── load_params_yaml.m     # full rosparam-dump struct sibling to the GDF
 │   ├── load_csp.m             # extracts processing_fbcsp_<paradigm>.CspCfg.params
-│   └── load_slda.m            # follows slda_node_<paradigm>.path_slda_model and reads sLDACfg.params
+│   ├── load_slda.m            # follows slda_node_<paradigm>.path_slda_model and reads sLDACfg.params
+│   └── load_hybrid_streams.m  # shared loader: GDF+YAML -> p_mi_aligned/p_cvsa_aligned/art_flags/int_cfg (used by main_hybrid_advantage_probs/_integ)
 ├── processing/
 │   └── apply_processing.m     # FBCSP chunk loop; rescales EVENT.POS/.DUR to chunks
 ├── artifacts/

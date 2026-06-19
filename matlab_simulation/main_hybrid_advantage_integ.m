@@ -64,7 +64,7 @@ end
 if ischar(gdf_names), gdf_names = {gdf_names}; end
 n_files = numel(gdf_names);
 
-out_dir       = fullfile(gdf_dir, 'analysis_results', 'hybrid_vs_unimodal');
+out_dir       = fullfile(gdf_dir, 'analysis_results', 'hybrid_advantage_integ');
 out_dir_files = fullfile(out_dir, 'per_file');
 if ~exist(out_dir, 'dir'),       mkdir(out_dir);       end
 if ~exist(out_dir_files, 'dir'), mkdir(out_dir_files); end
@@ -89,89 +89,24 @@ for file_idx = 1:n_files
 gdf_path = fullfile(gdf_dir, gdf_names{file_idx});
 fprintf('\n[%d/%d] %s\n', file_idx, n_files, gdf_names{file_idx});
 
-%% --- Load GDF --------------------------------------------------------
-[signal, header, basename] = load_gdf(gdf_path);
-
-%% --- Load parameters YAML -----------------------------
-[params, ~] = load_params_yaml(gdf_path);
-
-paradigm = params.integrator.paradigm;
-if ~strcmp(paradigm, 'hybrid')
-    fprintf('  skipping %s: paradigm=%s (hybrid-only)\n', basename, paradigm);
+%% --- Load + preprocess both MI/CVSA streams (shared with main_hybrid_advantage_probs) ---
+S = load_hybrid_streams(gdf_path);
+if S.skip
+    fprintf('  skipping %s: paradigm=%s (hybrid-only)\n', S.basename, S.paradigm);
     continue;
 end
-
-fs        = double(params.acquisition.samplerate);
-framerate = double(params.acquisition.framerate);
-chunk_size = round(fs / framerate);
-if abs(fs - header.SampleRate) > 1e-3
-    log_step('main_hybrid_vs_mi: YAML samplerate=%.1f != GDF samplerate=%.1f -> using GDF', ...
-             fs, header.SampleRate);
-    fs = header.SampleRate;
-    chunk_size = round(fs / framerate);
-end
-
-bufsize_proc = double(params.RingBufferCfg.params.size);
-bufsize_art  = double(params.RingBufferCfgArtifact.params.size);
-eog_names    = to_strcell(params.CarCfg.params.EOG_ch_names);
-
-do_car_mi   = logical(params.processing_fbcsp_mi.do_car);
-do_car_cvsa = logical(params.processing_fbcsp_cvsa.do_car);
-nchannels   = double(params.processing_fbcsp_mi.nchannels);
-
-signal = signal(:,1:nchannels); % remove the last 3 values: associated with ACC values
-
-log_step('main_hybrid_vs_mi: paradigm=%s, fs=%g, framerate=%g, chunk=%d, bufproc=%d, bufart=%d, nchannels=%d', ...
-         paradigm, fs, framerate, chunk_size, bufsize_proc, bufsize_art, nchannels);
-
-%% --- Load CSP + sLDA for both MI and CVSA -----------------------------
-csp_mi   = load_csp(params, 'mi');
-slda_mi  = load_slda(params, 'mi');
-csp_cvsa = load_csp(params, 'cvsa');
-slda_cvsa = load_slda(params, 'cvsa');
-
-%% --- Apply processing (one stream per modality) -----------------------
-proc_cfg_mi = struct('samplerate', fs, 'chunk_size', chunk_size, ...
-                     'bufsize', bufsize_proc, 'filter_order', 4, ...
-                     'do_car', do_car_mi, 'eog_names', {eog_names});
-[features_mi, header_mi, info_proc] = apply_processing(signal, header, csp_mi, proc_cfg_mi);
-
-proc_cfg_cvsa = struct('samplerate', fs, 'chunk_size', chunk_size, ...
-                       'bufsize', bufsize_proc, 'filter_order', 4, ...
-                       'do_car', do_car_cvsa, 'eog_names', {eog_names});
-[features_cv, header_cv, ~] = apply_processing(signal, header, csp_cvsa, proc_cfg_cvsa);
-
-%% --- Apply artifact detection on raw signal ----------------------------
-art_cfg = params.ArtifactCfg.params;
-art_cfg.EOG_ch_names = to_strcell(art_cfg.EOG_ch_names);
-cfg_art = struct('samplerate', fs, 'chunk_size', chunk_size, 'bufsize_artifact', bufsize_art);
-[art_flags, ~] = detect_artifacts(signal, header, art_cfg, cfg_art);
-
-%% --- Apply sLDA over the whole feature stream --------------------------
-p_mi_aligned   = apply_slda(features_mi, slda_mi,   csp_mi.bands);
-p_cvsa_aligned = apply_slda(features_cv, slda_cvsa, csp_cvsa.bands);
-
-log_step('main_hybrid_vs_mi: streams aligned (n_chunks=%d, first_valid_proc=%d)', ...
-         info_proc.n_chunks, info_proc.first_valid_chunk);
-
-%% --- Integrator config (shared by all three counterfactual runs) ------
-int_cfg = params.integrator;
-if ~isfield(int_cfg, 'increment'),               int_cfg.increment = 1; end
-if ~isfield(int_cfg, 'thresholds_rejection'),    int_cfg.thresholds_rejection = []; end
-if ~isfield(int_cfg, 'cvsa_influence'),          int_cfg.cvsa_influence = 2.5; end
-if ~isfield(int_cfg, 'thresholds'),              int_cfg.thresholds = params.training_node.thresholds; end
-
-header_chunks = header_mi;
-header_chunks.framerate = framerate;
+signal = S.signal; header = S.header; basename = S.basename;
+fs = S.fs; framerate = S.framerate; chunk_size = S.chunk_size;
+int_cfg = S.int_cfg;
 
 classes    = to_vec(int_cfg.classes);
 n_cls      = numel(classes);
 thresholds = to_vec(int_cfg.thresholds);
 
 %% --- Run the integrator three times: hybrid / MI-only / CVSA-only ------
-trials_hyb  = integrate_signal(p_mi_aligned, p_cvsa_aligned, art_flags, header_chunks, int_cfg, 'hybrid');
-trials_mi   = integrate_signal(p_mi_aligned, p_cvsa_aligned, art_flags, header_chunks, int_cfg, 'mi');
-trials_cvsa = integrate_signal(p_mi_aligned, p_cvsa_aligned, art_flags, header_chunks, int_cfg, 'cvsa');
+trials_hyb  = integrate_signal(S.p_mi_aligned, S.p_cvsa_aligned, S.art_flags, S.header_chunks, int_cfg, 'hybrid');
+trials_mi   = integrate_signal(S.p_mi_aligned, S.p_cvsa_aligned, S.art_flags, S.header_chunks, int_cfg, 'mi');
+trials_cvsa = integrate_signal(S.p_mi_aligned, S.p_cvsa_aligned, S.art_flags, S.header_chunks, int_cfg, 'cvsa');
 n_trials = numel(trials_hyb);
 
 %% --- Read REAL outcomes from GDF events (897=HIT, 898=MISS, 899=TIMEOUT)
@@ -802,6 +737,27 @@ fprintf('    Hybrid - MI-only   : %+.0f%%  [%+.0f%%, %+.0f%%]\n', ...
         100*(acc(1)-acc(2)), 100*boot_d_mi(lo_b),  100*boot_d_mi(hi_b));
 fprintf('    Hybrid - CVSA-only : %+.0f%%  [%+.0f%%, %+.0f%%]\n', ...
         100*(acc(1)-acc(3)), 100*boot_d_cvs(lo_b), 100*boot_d_cvs(hi_b));
+
+%% ── Save counterfactual summary .mat for cross-script use ────────────────────
+%   Stream index convention: 1=Hybrid, 2=MI-only, 3=CVSA-only (matches stream_names).
+counterfactual = struct();
+counterfactual.acc          = acc;           % [1x3]: Hybrid, MI-only, CVSA-only
+counterfactual.acc_se       = acc_se;
+counterfactual.n_trials     = n_tot;
+counterfactual.n_hit        = n_hit;
+counterfactual.n_miss       = n_miss;
+counterfactual.n_to         = n_to;
+counterfactual.t_hit_mean   = t_hit_mean;   % [1x3]
+counterfactual.t_hit_sem    = t_hit_sem;
+counterfactual.t_miss_mean  = t_miss_mean;  % [1x3]
+counterfactual.t_miss_sem   = t_miss_sem;
+counterfactual.t_to_mean    = t_to_mean;    % [1x3]
+counterfactual.t_to_sem     = t_to_sem;
+counterfactual.ci_lo_acc    = ci_lo_acc;    % [1x3] bootstrap 95% CI lower
+counterfactual.ci_hi_acc    = ci_hi_acc;    % [1x3] bootstrap 95% CI upper
+counterfactual.stream_names = stream_names; % {'Hybrid','MI-only','CVSA-only'}
+save(fullfile(out_dir, 'counterfactual_summary.mat'), 'counterfactual');
+fprintf('\nSaved counterfactual_summary.mat to %s\n', out_dir);
 
 %% --- Figure 5: deep advantage analysis -----------------------------------
 %
