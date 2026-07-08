@@ -20,29 +20,34 @@
 %   Saves:
 %     counterfactual_validation.svg  — bar chart + scatter + TTH comparison
 
-clear; clc; close all;
+function main_validate_counterfactual(session_mat_path, cf_mat_path, show_figures)
+%   Callable as a function:
+%     main_validate_counterfactual(session_mat_path, cf_mat_path, show_figures)
+%   With no arguments, shows GUI pickers for the two .mat files.
 
-SHOW_FIGURES = true;
+if nargin < 3, show_figures = false; end
+SHOW_FIGURES = show_figures;
 if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
 
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir, fullfile(this_dir,'io'), fullfile(this_dir,'utils'));
 
-% ── Load session summary ────────────────────────────────────────────────────
-[f1, d1] = uigetfile({'*.mat','MAT files (*.mat)'}, ...
-    'Select session_summary.mat  (from main_session_overview)', ...
-    '/home/paolo/bci_vr_ws/recordings');
-if isequal(f1, 0), error('No file selected.'); end
-s1 = load(fullfile(d1, f1));
+if nargin < 1 || isempty(session_mat_path)
+    default_dir = '/home/paolo/bci_vr_ws/recordings';
+    [f1, d1] = uigetfile({'*.mat','MAT files (*.mat)'}, ...
+        'Select session_summary.mat  (from main_session_overview)', default_dir);
+    if isequal(f1, 0), error('No file selected.'); end
+    session_mat_path = fullfile(d1, f1);
+    [f2, d2] = uigetfile({'*.mat','MAT files (*.mat)'}, ...
+        'Select counterfactual_summary.mat  (from main_hybrid_advantage_integ)', d1);
+    if isequal(f2, 0), error('No file selected.'); end
+    cf_mat_path = fullfile(d2, f2);
+end
+s1 = load(session_mat_path);
 summary_file = s1.summary_file;
-
-% ── Load counterfactual summary ─────────────────────────────────────────────
-[f2, d2] = uigetfile({'*.mat','MAT files (*.mat)'}, ...
-    'Select counterfactual_summary.mat  (from main_hybrid_advantage_integ)', ...
-    '/home/paolo/bci_vr_ws/recordings');
-if isequal(f2, 0), error('No file selected.'); end
-s2 = load(fullfile(d2, f2));
+s2 = load(cf_mat_path);
 cf = s2.counterfactual;
+d2 = fileparts(cf_mat_path);   % directory of cf_mat (no trailing separator)
 
 % ── Aggregate real performance per paradigm ─────────────────────────────────
 pars       = {'mi',  'cvsa', 'hybrid'};
@@ -104,7 +109,7 @@ fprintf('═══════════════════════�
 COL_REAL = {[0.85 0.30 0.10], [0.10 0.60 0.30], [0.18 0.45 0.75]};
 COL_SIM  = {[0.93 0.70 0.60], [0.65 0.88 0.75], [0.65 0.78 0.93]};
 
-analysis_results_dir = fileparts(fileparts(d2));   % .../analysis_results/hybrid_advantage_integ/ -> .../analysis_results/
+analysis_results_dir = fileparts(d2);   % .../hybrid_advantage_integ -> .../analysis_results/
 out_dir = fullfile(analysis_results_dir, 'validate_counterfactual');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
@@ -239,3 +244,5 @@ sgtitle(fig, sprintf(['Counterfactual Validation  |  n_sim=%d trials  |  ' ...
 saveas(fig, fullfile(out_dir, 'counterfactual_validation.svg'), 'svg');
 fprintf('Saved counterfactual_validation.svg to %s\n', out_dir);
 if ~SHOW_FIGURES, close(fig); end
+
+end % main_validate_counterfactual

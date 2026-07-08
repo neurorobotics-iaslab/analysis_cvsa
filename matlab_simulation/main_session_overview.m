@@ -26,12 +26,56 @@
 %              Subplot 2: CVSA classifier — first 3 s only
 %              Subplot 3: Hybrid fused   — full CF  (hybrid files only)
 %
+%   Figs 4-7 (CSP/sLDA importance, ERD/ERS) are documented inline below.
+%
+%     Fig 8 — Within-trial classifier accuracy by FIXED time bin (offline simulation)
+%              "Averaged over all trials, does P_sLDA get more often correct
+%              as the trial progresses?" Each trial's CF window is split into
+%              fixed BIN_WIDTH_S-wide ABSOLUTE time bins from CF onset (0-0.5s,
+%              0.5-1s, ... up to MAX_TIME_S) -- not fractional position, so a
+%              2s trial and a 5s trial both contribute to the same "0-0.5s"
+%              bin meaningfully. Per-bin trial count N is annotated above
+%              each point (later bins have fewer trials still running, since
+%              evaluation trials end at variable times); a hollow marker
+%              flags bins below 15% of the group's trial count as a weak
+%              average. One line per stream (MI/CVSA/Fused), one panel per
+%              paradigm group. Distinct from main_trial_dynamics.m, which
+%              looks at trial-ORDER effects (session progress) rather than
+%              within-trial time.
+%
+%     Fig 9 — Artifact rate vs outcome (offline simulation)
+%              "Do MISS/TIMEOUT trials have a higher fraction of CF frames
+%              frozen by the artifact gate than HIT trials?" Bar per outcome
+%              (HIT vs MISS/TO), point-biserial correlation between per-trial
+%              artifact rate and HIT/not-HIT with a permutation p-value, one
+%              panel per paradigm group. Distinguishes "integrator stalled
+%              because it was frozen" from "classifier pointed the wrong way"
+%              as a MISS failure mode.
+%
+%     Fig 10 — Confusion matrix: real outcome by target class (real GDF events)
+%              "Is one class systematically easier to hit than the other?"
+%              One panel per paradigm: rows = target class, columns =
+%              HIT/MISS/TIMEOUT, cell = count (row %%), pooled across all
+%              files of that paradigm. An aggregate accuracy can hide a
+%              strong per-class asymmetry that matters in practice (a VR
+%              direction that almost never triggers).
+%
+%   Console also reports, per file and per paradigm TOTAL: ITR (bits/trial
+%   and bits/min, Wolpaw formula; P=hit_tot incl. TIMEOUT as failure, N=n_cls,
+%   T=mean time-to-outcome over all trials) and a chance-level significance
+%   test (exact one-sided binomial, decided trials only: n=n_hit+n_miss,
+%   k=n_hit, p0=1/n_cls) -- answers "is this session's accuracy significantly
+%   above what guessing among n_cls classes would achieve?"
+%
 %   Colors:   MI = orange   CVSA = green   Hybrid = blue
 
-clear; clc; close all;
+function main_session_overview(gdf_dir, gdf_names, show_figures)
+%   Callable as a function: main_session_overview(gdf_dir, gdf_names, show_figures)
+%   With no arguments, shows the GUI file picker (interactive mode).
 
 % --- Display options -------------------------------------------------------
-SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+if nargin < 3, show_figures = false; end
+SHOW_FIGURES = show_figures;
 if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
 
 this_dir = fileparts(mfilename('fullpath'));
@@ -41,6 +85,9 @@ addpath(this_dir, fullfile(this_dir,'io'), fullfile(this_dir,'processing'), ...
 
 HIT_EV = 897;  MISS_EV = 898;  TO_EV = 899;  CF_EV = 781;
 CVSA_MAX_S = 3.0;   % seconds used for CVSA sample accuracy
+BIN_WIDTH_S = 0.5;  % within-trial fixed time-bin width for Fig 8 (seconds)
+MAX_TIME_S  = 5.0;  % within-trial time axis cap for Fig 8 (seconds from CF onset)
+BIN_EDGES_S = 0:BIN_WIDTH_S:MAX_TIME_S;
 
 % Set to true to print, for every trial, the per-frame P/argmax diagnostic
 % used to debug class-ordering issues. Very verbose — leave false for a
@@ -52,12 +99,18 @@ COL = struct('mi', [0.85 0.30 0.10], ...
              'hybrid', [0.18 0.45 0.75], ...
              'unknown',[0.55 0.55 0.55]);
 
-% ── File picker ───────────────────────────────────────────────────────────────
-default_dir = '/home/paolo/bci_vr_ws/recordings';
-if ~isfolder(default_dir), default_dir = this_dir; end
-[gdf_names, gdf_dir] = uigetfile({'*.gdf','GDF files (*.gdf)'}, ...
-    'Select evaluation GDF file(s)', default_dir, 'MultiSelect','on');
-if isequal(gdf_names,0), error('main_session_overview:cancel','No file selected.'); end
+% ── File picker (GUI) or batch (args passed in) ───────────────────────────
+if nargin < 1 || isempty(gdf_dir)
+    default_dir = '/home/paolo/bci_vr_ws/recordings';
+    if ~isfolder(default_dir), default_dir = this_dir; end
+    [gdf_names, gdf_dir] = uigetfile({'*.gdf','GDF files (*.gdf)'}, ...
+        'Select evaluation GDF file(s)', default_dir, 'MultiSelect','on');
+    if isequal(gdf_names,0), error('main_session_overview:cancel','No file selected.'); end
+elseif nargin < 2 || isempty(gdf_names)
+    f = dir(fullfile(gdf_dir, '*.gdf'));
+    gdf_names = {f.name};
+    if isempty(gdf_names), error('main_session_overview:nofiles', 'No GDF files in %s', gdf_dir); end
+end
 if ischar(gdf_names), gdf_names = {gdf_names}; end
 n_files = numel(gdf_names);
 
@@ -141,12 +194,18 @@ for fi = 1:n_files
     sa_cvsa_hit = NaN; sa_cvsa_miss = NaN;
     sa_fused_hit = NaN; sa_fused_miss = NaN;
     sa_mi_cls = NaN; sa_cvsa_cls = NaN; sa_fused_cls = NaN;
+    qacc_mi = []; qacc_cvsa = []; qacc_fused = [];   % within-trial quarter accuracy, [n_tr x N_Q]
+    art_rate = []; art_hit_mask = []; art_miss_mask = [];   % per-trial artifact rate during CF
     r_csp_mi        = [];   % populated inside try if MI CSP is available
     r_csp_cvsa      = [];   % populated inside try if CVSA CSP is available
     r_slda_mi       = [];   % sLDA-weighted spatial analysis, MI
     r_slda_cvsa     = [];   % sLDA-weighted spatial analysis, CVSA
     r_erd_mi        = [];   % ERD/ERS epochs, MI CSP channels
     r_erd_cvsa      = [];   % ERD/ERS epochs, CVSA CSP channels
+    n_cls           = NaN;  % # classes (from int_cfg), used by ITR/chance-level/confusion matrix
+    trial_cls_ev    = [];   % per-trial target class, aligned 1:n_ev with real outcomes
+    outcomes_ev     = [];   % per-trial real outcome code (897/898/899), aligned 1:n_ev
+    class_codes_r   = [];   % sorted class codes (e.g. [769 770]), for confusion-matrix labels
 
     try
         [params, ~] = load_params_yaml(gdf_path);
@@ -222,6 +281,7 @@ for fi = 1:n_files
         %   MI: [769,770]   CVSA: [730,731]   Hybrid: [750,751]
         % sLDA output column 1 = P(class with lower code) = P(class 1)
         classes_sim = sort(to_vec(int_cfg.classes));
+        class_codes_r = classes_sim(:)';
         fprintf('  [sim params] classes=[%s]  bufsize=%d  k_gain=%.2f  thresholds=[%s]\n', ...
                 num2str(classes_sim(:)','%d '), int_cfg.buffer_size, int_cfg.k_gain, ...
                 strjoin(cellfun(@(x)sprintf('%.2f',x),num2cell(to_vec(int_cfg.thresholds)),'un',0),','));
@@ -233,6 +293,14 @@ for fi = 1:n_files
         miss_mask = false(1, n_sim);
         hit_mask(1:n_ev)  = outcomes(1:n_ev) == HIT_EV;
         miss_mask(1:n_ev) = outcomes(1:n_ev) == MISS_EV | outcomes(1:n_ev) == TO_EV;
+
+        % Per-trial target class + real outcome, aligned 1:n_ev -- feeds the
+        % confusion matrix (Fig 10) and the chance-level test below.
+        trial_cls_ev = nan(1, n_ev);
+        for t_c = 1:n_ev
+            trial_cls_ev(t_c) = trials(t_c).target_class;
+        end
+        outcomes_ev = outcomes(1:n_ev);
 
         % ── DIAGNOSTIC: inspect ALL trials (HIT and MISS) ────────────────────
         % Prints: onset event code from GDF, target_class, mean P per class, argmax.
@@ -397,6 +465,44 @@ for fi = 1:n_files
                     sa_mi_cls(cc)*100, sa_cvsa_cls(cc)*100, sa_fused_cls(cc)*100);
         end
 
+        % ── Within-trial classifier accuracy by FIXED time bin ───────────────────
+        %   Same accuracy definition as above (argmax(P_sLDA)==target), but resolved
+        %   into fixed BIN_WIDTH_S-wide bins of absolute time from CF onset (NOT
+        %   fractional position) -- a 2s trial and a 5s trial both contribute to the
+        %   "0-0.5s" bin with the same meaning. Evaluation trials end at variable
+        %   times (HIT/MISS/TIMEOUT), so later bins naturally have fewer trials
+        %   still running -- exactly like topo_erders.m's NaN-masked heatmaps. The
+        %   bin grid (BIN_EDGES_S) is the same for every file, so per-file matrices
+        %   concatenate directly when pooled by paradigm group for Fig 8.
+        if use_mi && ~use_cvsa
+            qacc_mi    = frame_acc_time_bins(trials, 'raw', Inf, framerate, BIN_EDGES_S, []);
+        elseif use_cvsa && ~use_mi
+            qacc_cvsa  = frame_acc_time_bins(trials, 'raw', n3s, framerate, BIN_EDGES_S, []);
+        else
+            qacc_mi    = frame_acc_time_bins(trials, 'mi',   Inf, framerate, BIN_EDGES_S, []);
+            qacc_cvsa  = frame_acc_time_bins(trials, 'cvsa', n3s, framerate, BIN_EDGES_S, []);
+            qacc_fused = frame_acc_time_bins(trials, 'raw',  Inf, framerate, BIN_EDGES_S, []);
+        end
+        fprintf('  SA by time bin (0-%.1fs, step %.1fs):  MI=[%s]\n', BIN_EDGES_S(end), BIN_WIDTH_S, fmt_bins(qacc_mi));
+        fprintf('                                       CVSA=[%s]\n', fmt_bins(qacc_cvsa));
+        fprintf('                                       Fused=[%s]\n', fmt_bins(qacc_fused));
+
+        % ── Per-trial artifact rate during CF (fraction of frames the artifact
+        %    gate froze the integrator) -- does artifact rate predict MISS/TIMEOUT,
+        %    and is it higher for some trials than others? `trials(t).artifact` is
+        %    already computed by integrate_signal, so this is just a read-out.
+        art_rate = nan(1, n_sim);
+        for t = 1:n_sim
+            c = trials(t).target_class;
+            if isnan(c) || c < 1, continue; end
+            np = trials(t).n_pre; nc = trials(t).n_cf;
+            art_rate(t) = mean(trials(t).artifact(np+1:np+nc));
+        end
+        art_hit_mask  = hit_mask;
+        art_miss_mask = miss_mask;
+        fprintf('  Artifact rate:  HIT trials=%.1f%%  MISS/TO trials=%.1f%%  (frac. of CF frames gated)\n', ...
+                100*mean(art_rate(hit_mask), 'omitnan'), 100*mean(art_rate(miss_mask), 'omitnan'));
+
         % ── ERD/ERS (Pfurtscheller-style) for spatial validation figures ─────────
         %   Placed AFTER sample-accuracy so any failure cannot abort SA stats.
         %   Baseline = cue period [CF-1.5s, CF]. Result stored for Figs 6 & 7.
@@ -428,6 +534,32 @@ for fi = 1:n_files
         fprintf('  [warn] simulation error: %s\n', ME.message);
     end
 
+    % ── ITR (bits/min, Wolpaw) + chance-level test ────────────────────────────
+    %   ITR uses P=hit_tot (TIMEOUT counted as a failed trial, N=n_cls classes,
+    %   T=mean time-to-outcome over ALL trials incl. TIMEOUT) -- the standard
+    %   "communication rate" convention when a BCI can fail to decide at all.
+    %   The chance-level test instead restricts to DECIDED trials only
+    %   (n=n_hit+n_miss, k=n_hit, p0=1/n_cls, exact one-sided binomial test)
+    %   since TIMEOUT trials carry no classification decision to assess.
+    itr_bits_trial = NaN; itr_bpm = NaN; chance_p = NaN; t_all_mean = NaN;
+    if ~isnan(n_cls) && n_cls >= 2
+        t_all_mean     = msafe([tth_vals, t_miss_vals, to_vals]);
+        itr_bits_trial = itr_bits_per_trial(hit_tot, n_cls);
+        if ~isnan(t_all_mean) && t_all_mean > 0
+            itr_bpm = itr_bits_trial * 60 / t_all_mean;
+        end
+        n_decided = n_hit + n_miss;
+        if n_decided > 0
+            chance_p = binom_test_upper(n_hit, n_decided, 1/n_cls);
+        end
+        fprintf('  ITR: %.3f bits/trial  %.2f bits/min  (T=%.2fs, N=%d classes)\n', ...
+                itr_bits_trial, itr_bpm, t_all_mean, n_cls);
+        fprintf('  Chance-level test (decided trials only, n=%d, p0=1/%d): p=%.4f  %s\n', ...
+                n_decided, n_cls, chance_p, stars_local_art(chance_p));
+    else
+        fprintf('  ITR / chance-level test: skipped (no simulation / class count unavailable)\n');
+    end
+
     % ── Collect results ───────────────────────────────────────────────────────
     r = struct('file_label',file_label,'paradigm',paradigm,'col',col, ...
                'n_hit',n_hit,'n_miss',n_miss,'n_to',n_to, ...
@@ -439,12 +571,22 @@ for fi = 1:n_files
                'sa_cvsa_hit',sa_cvsa_hit,'sa_cvsa_miss',sa_cvsa_miss, ...
                'sa_fused_hit',sa_fused_hit,'sa_fused_miss',sa_fused_miss, ...
                'sa_mi_cls',sa_mi_cls,'sa_cvsa_cls',sa_cvsa_cls,'sa_fused_cls',sa_fused_cls);
+    r.qacc_mi         = qacc_mi;
+    r.qacc_cvsa       = qacc_cvsa;
+    r.qacc_fused      = qacc_fused;
+    r.art_rate        = art_rate;
+    r.art_hit_mask    = art_hit_mask;
+    r.art_miss_mask   = art_miss_mask;
     r.csp_mi          = r_csp_mi;
     r.csp_cvsa        = r_csp_cvsa;
     r.slda_mi_weights   = r_slda_mi;
     r.slda_cvsa_weights = r_slda_cvsa;
     r.erd_mi            = r_erd_mi;
     r.erd_cvsa          = r_erd_cvsa;
+    r.n_cls             = n_cls;
+    r.trial_cls         = trial_cls_ev;
+    r.outcomes_ev       = outcomes_ev;
+    r.class_codes       = class_codes_r;
     RES{end+1} = r;
 end
 
@@ -498,6 +640,27 @@ for g = 1:numel(par_seq)
             'TOTAL', n_hit_tot, n_miss_tot, n_to_tot, ...
             100*n_hit_tot/n_tot_g, 100*n_hit_tot/max(1,n_hit_tot+n_miss_tot), ...
             msafe(tth_all), msafe(tmiss_all), msafe(to_all), numel(idx_g));
+
+    % Pooled ITR + chance-level test for the whole paradigm group (TOTAL row)
+    n_cls_g = NaN;
+    for i = idx_g
+        if ~isnan(RES{i}.n_cls)
+            n_cls_g = RES{i}.n_cls;
+            break;
+        end
+    end
+    if ~isnan(n_cls_g) && n_cls_g >= 2
+        acc_g      = n_hit_tot / n_tot_g;
+        t_mean_g   = msafe([tth_all, tmiss_all, to_all]);
+        itr_bits_g = itr_bits_per_trial(acc_g, n_cls_g);
+        itr_bpm_g  = NaN;
+        if ~isnan(t_mean_g) && t_mean_g > 0, itr_bpm_g = itr_bits_g * 60 / t_mean_g; end
+        n_dec_g    = n_hit_tot + n_miss_tot;
+        chance_p_g = NaN;
+        if n_dec_g > 0, chance_p_g = binom_test_upper(n_hit_tot, n_dec_g, 1/n_cls_g); end
+        fprintf('    %-12s ITR=%.3f bits/trial (%.2f bits/min)   chance-test p=%.4f %s  (n_decided=%d, p0=1/%d)\n', ...
+                'TOTAL', itr_bits_g, itr_bpm_g, chance_p_g, stars_local_art(chance_p_g), n_dec_g, n_cls_g);
+    end
 end
 fprintf('═══════════════════════════════════════════════════════\n');
 
@@ -1128,6 +1291,206 @@ if n_erd7 > 0
     end
 end
 
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 8 — WITHIN-TRIAL CLASSIFIER ACCURACY BY FIXED TIME BIN
+%
+%   Question: averaged over all trials, does the sLDA classify the target
+%   class more often correctly as the trial progresses? Each trial's CF
+%   window is split into FIXED BIN_WIDTH_S-wide absolute time bins from CF
+%   onset (0-0.5s, 0.5-1s, ... up to MAX_TIME_S) -- NOT fractional position,
+%   so a 2s trial and a 5s trial both contribute meaningfully to the same
+%   "0-0.5s" bin. Evaluation trials end at variable times, so later bins
+%   naturally have fewer trials still running: the per-bin trial count N is
+%   annotated above every point, and a hollow marker flags bins below
+%   MIN_N_FRAC of that group's trial count (a "weak", low-N average) --
+%   same convention as main_hybrid_advantage_integ's temporal_significance
+%   figure. One line per stream (MI/CVSA/Fused), one panel per paradigm.
+%  ═════════════════════════════════════════════════════════════════════════════
+fig8 = figure('Name','Within-Trial Accuracy by Time Bin','Color','w', ...
+              'NumberTitle','off','Visible',fig_vis);
+set(fig8,'Units','normalized','OuterPosition',[0 0 1 1]);
+
+bin_x = (BIN_EDGES_S(1:end-1) + BIN_EDGES_S(2:end)) / 2;   % bin centers, seconds
+MIN_N_FRAC = 0.15;   % flag bins with fewer than 15% of the group's trials as weak
+
+for g = 1:numel(par_seq)
+    idx_g = grp_start(g):grp_end(g);
+    ax = subplot(1, numel(par_seq), g); hold(ax, 'on');
+
+    qm_mi = []; qm_cvsa = []; qm_fused = [];
+    for ii = idx_g
+        qm_mi    = [qm_mi;    RES{ii}.qacc_mi];    %#ok<AGROW>
+        qm_cvsa  = [qm_cvsa;  RES{ii}.qacc_cvsa];  %#ok<AGROW>
+        qm_fused = [qm_fused; RES{ii}.qacc_fused]; %#ok<AGROW>
+    end
+    n_tot_g = max([size(qm_mi,1), size(qm_cvsa,1), size(qm_fused,1)]);
+    min_n   = max(3, round(MIN_N_FRAC * n_tot_g));
+
+    plot_bin_line(ax, qm_mi,    bin_x, [0.85 0.30 0.10], 'MI',    min_n);
+    plot_bin_line(ax, qm_cvsa,  bin_x, [0.10 0.60 0.30], 'CVSA',  min_n);
+    plot_bin_line(ax, qm_fused, bin_x, [0.18 0.45 0.75], 'Fused', min_n);
+
+    yline(ax, 50, 'k:', 'HandleVisibility', 'off');
+    set(ax, 'XLim', [BIN_EDGES_S(1)-0.1, BIN_EDGES_S(end)+0.1], 'YLim', [0,115]);
+    xlabel(ax, 'time from CF onset (s)');
+    ylabel(ax, 'classifier accuracy (%)');
+    legend(ax, 'Location', 'south', 'FontSize', 8);
+    title(ax, sprintf('%s  (n\\le%d trials; hollow marker = n<%d)', upper(par_seq{g}), n_tot_g, min_n), ...
+          'FontSize', 10, 'FontWeight', 'bold');
+    grid(ax, 'on');
+end
+sgtitle(fig8, sprintf(['Within-trial classifier accuracy by fixed %.1fs time bin — numbers above each point = trial count\n' ...
+        'hollow marker = fewer than %.0f%% of trials still running (weak average)'], BIN_WIDTH_S, 100*MIN_N_FRAC), ...
+        'FontSize', 10);
+saveas(fig8, fullfile(out_dir, 'overview_timebin_accuracy.svg'), 'svg');
+fprintf('Saved %s\n', fullfile(out_dir, 'overview_timebin_accuracy.svg'));
+if ~SHOW_FIGURES, close(fig8); end
+
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 9 — ARTIFACT RATE vs OUTCOME
+%
+%   Question: do HIT trials have a lower artifact rate (fraction of CF
+%   frames where the artifact gate froze the integrator) than MISS/TIMEOUT
+%   trials? A high artifact rate on MISS trials suggests the integrator
+%   stalled because it was frozen, not because the classifier pointed the
+%   wrong way -- a different failure mode worth distinguishing.
+%  ═════════════════════════════════════════════════════════════════════════════
+fig9 = figure('Name','Artifact Rate vs Outcome','Color','w', ...
+              'NumberTitle','off','Visible',fig_vis);
+set(fig9,'Units','normalized','OuterPosition',[0 0 1 1]);
+
+fprintf('\n══════════════════ Artifact rate vs outcome (per paradigm) ══════════════════\n');
+N_PERM_ART = 2000;
+for g = 1:numel(par_seq)
+    idx_g = grp_start(g):grp_end(g);
+    ax = subplot(1, numel(par_seq), g); hold(ax, 'on');
+
+    ar = []; hit_v = []; miss_v = [];
+    for ii = idx_g
+        r2 = RES{ii};
+        if isempty(r2.art_rate), continue; end
+        ar     = [ar, r2.art_rate]; %#ok<AGROW>
+        hit_v  = [hit_v,  r2.art_hit_mask];  %#ok<AGROW>
+        miss_v = [miss_v, r2.art_miss_mask]; %#ok<AGROW>
+    end
+    keep   = hit_v | miss_v;
+    ar_k   = ar(keep);
+    hit_k  = double(hit_v(keep));
+
+    art_hit_pct  = 100 * mean(ar(logical(hit_v)),  'omitnan');
+    art_miss_pct = 100 * mean(ar(logical(miss_v)), 'omitnan');
+    r_val = NaN; p_val = NaN;
+    if numel(ar_k) >= 3 && std(hit_k) > 0
+        C = corrcoef(ar_k, hit_k);
+        r_val = C(1,2);
+        p_val = corr_perm_test_local(ar_k, hit_k, r_val, N_PERM_ART);
+    end
+
+    b = bar(ax, [1 2], [art_hit_pct, art_miss_pct], 0.5);
+    b.FaceColor = 'flat';
+    b.CData = [0.15 0.65 0.15; 0.80 0.15 0.15];
+    set(ax, 'XTick', [1 2], 'XTickLabel', {'HIT', 'MISS/TO'}, 'YLim', [0, max(5, 1.3*max([art_hit_pct,art_miss_pct,1]))]);
+    ylabel(ax, 'mean artifact rate during CF (%)');
+    title(ax, sprintf('%s\nr=%+.2f  p=%.3f  %s', upper(par_seq{g}), r_val, p_val, stars_local_art(p_val)), ...
+          'FontSize', 10, 'FontWeight', 'bold');
+    grid(ax, 'on');
+
+    fprintf('  %-8s  HIT art.rate=%.1f%%  MISS/TO art.rate=%.1f%%  point-biserial r=%+.3f  p=%.4f  %s\n', ...
+            upper(par_seq{g}), art_hit_pct, art_miss_pct, r_val, p_val, stars_local_art(p_val));
+end
+fprintf('  (positive r = higher artifact rate associated with HIT, which would be counter-intuitive;\n');
+fprintf('   negative r = higher artifact rate associated with MISS/TIMEOUT, i.e. artifacts contribute to misses)\n');
+fprintf('═══════════════════════════════════════════════════════════════════════════════\n');
+
+sgtitle(fig9, 'Artifact rate during CF: HIT vs MISS/TIMEOUT trials, per paradigm', 'FontSize', 11);
+saveas(fig9, fullfile(out_dir, 'overview_artifact_rate.svg'), 'svg');
+fprintf('Saved %s\n', fullfile(out_dir, 'overview_artifact_rate.svg'));
+if ~SHOW_FIGURES, close(fig9); end
+
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 10 — CONFUSION MATRIX: real outcome by target class, per paradigm
+%
+%   Question: is one class systematically easier to hit than the other? An
+%   aggregate accuracy (Fig 1) can hide a strong class asymmetry (e.g. class 1
+%   90% HIT vs class 2 50% HIT) that matters in practice -- a VR direction
+%   that almost never triggers is a real usability problem, not just a
+%   statistical curiosity. Rows = target class (real GDF onset code), columns
+%   = real outcome (HIT/MISS/TIMEOUT), pooled across all files of that
+%   paradigm. Cell = count (row %%).
+%  ═════════════════════════════════════════════════════════════════════════════
+OC_LABELS10 = {'HIT','MISS','TIMEOUT'};
+OC_CODES10  = [HIT_EV, MISS_EV, TO_EV];
+
+valid_grp10 = false(1, numel(par_seq));
+for g = 1:numel(par_seq)
+    idx_g = grp_start(g):grp_end(g);
+    for ii = idx_g
+        if ~isnan(RES{ii}.n_cls) && ~isempty(RES{ii}.trial_cls)
+            valid_grp10(g) = true;
+            break;
+        end
+    end
+end
+n_cm_groups = sum(valid_grp10);
+
+if n_cm_groups > 0
+    fig10 = figure('Name','Confusion Matrix','Color','w','NumberTitle','off','Visible',fig_vis);
+    set(fig10,'Units','normalized','OuterPosition',[0 0 1 1]);
+    cm_map = [linspace(1,0.10,64)', linspace(1,0.55,64)', linspace(1,0.15,64)'];  % white -> green
+
+    gp = 0;
+    for g = 1:numel(par_seq)
+        if ~valid_grp10(g), continue; end
+        idx_g = grp_start(g):grp_end(g);
+        n_cls_g = NaN; class_codes_g = [];
+        cls_pool = []; oc_pool = [];
+        for ii = idx_g
+            r2 = RES{ii};
+            if isnan(r2.n_cls) || isempty(r2.trial_cls), continue; end
+            n_cls_g       = r2.n_cls;
+            class_codes_g = r2.class_codes;
+            cls_pool      = [cls_pool, r2.trial_cls];     %#ok<AGROW>
+            oc_pool       = [oc_pool,  r2.outcomes_ev];   %#ok<AGROW>
+        end
+        gp = gp + 1;
+
+        cm = zeros(n_cls_g, 3);
+        for c = 1:n_cls_g
+            for o = 1:3
+                cm(c,o) = sum(cls_pool == c & oc_pool == OC_CODES10(o));
+            end
+        end
+        row_tot = sum(cm, 2);
+        row_pct = cm ./ max(row_tot, 1);
+
+        ylabs10 = cell(1, n_cls_g);
+        for c = 1:n_cls_g
+            ylabs10{c} = sprintf('c%d (n=%d)', class_codes_g(c), row_tot(c));
+        end
+
+        ax = subplot(1, n_cm_groups, gp);
+        imagesc(ax, row_pct, [0 1]);
+        colormap(ax, cm_map);
+        set(ax, 'XTick', 1:3, 'XTickLabel', OC_LABELS10, ...
+                'YTick', 1:n_cls_g, 'YTickLabel', ylabs10);
+        for c = 1:n_cls_g
+            for o = 1:3
+                txt_col = 'k'; if row_pct(c,o) > 0.6, txt_col = 'w'; end
+                text(ax, o, c, sprintf('%d\n(%.0f%%)', cm(c,o), 100*row_pct(c,o)), ...
+                     'HorizontalAlignment','center','FontSize',9,'Color',txt_col,'FontWeight','bold');
+            end
+        end
+        title(ax, upper(par_seq{g}), 'FontSize',11,'FontWeight','bold','Color',COL.(par_seq{g})*0.7);
+        xlabel(ax, 'real outcome'); ylabel(ax, 'target class (row %)');
+    end
+    sgtitle(fig10, 'Confusion matrix — real outcome by target class, pooled per paradigm', 'FontSize', 12);
+    saveas(fig10, fullfile(out_dir, 'overview_confusion_matrix.svg'), 'svg');
+    fprintf('Saved %s\n', fullfile(out_dir, 'overview_confusion_matrix.svg'));
+    if ~SHOW_FIGURES, close(fig10); end
+else
+    fprintf('  [Fig10] skipped: no paradigm group has simulated class/outcome data\n');
+end
+
 %% ── Save session summary .mat for cross-script use ──────────────────────────
 summary_file = struct();
 for fi2 = 1:numel(RES)
@@ -1148,6 +1511,8 @@ fprintf('Saved session_summary.mat to %s\n', out_dir);
 
 fprintf('\nDone.\n');
 
+end % main_session_overview
+
 %% ── Local functions ──────────────────────────────────────────────────────────
 
 function par = detect_paradigm(fname)
@@ -1156,6 +1521,108 @@ function par = detect_paradigm(fname)
     elseif contains(s,'cvsa'), par = 'cvsa';
     elseif contains(s,'mi'),   par = 'mi';
     else,                      par = 'unknown';
+    end
+end
+
+function s = stars_local_art(p)
+% STARS_LOCAL_ART  Convert a p-value to a significance-star string.
+    if isnan(p),      s = '';
+    elseif p < 0.001, s = '***';
+    elseif p < 0.01,  s = '**';
+    elseif p < 0.05,  s = '*';
+    else,              s = 'n.s.';
+    end
+end
+
+function p = corr_perm_test_local(x, y, r_obs, n_perm)
+% CORR_PERM_TEST_LOCAL  Permutation p-value for a Pearson correlation:
+%   shuffle y, recompute |r|, compare to the observed |r_obs|.
+    n = numel(x);
+    if n < 3, p = NaN; return; end
+    cnt = 0;
+    for i = 1:n_perm
+        y_shuf = y(randperm(n));
+        C = corrcoef(x, y_shuf);
+        if abs(C(1,2)) >= abs(r_obs) - 1e-12
+            cnt = cnt + 1;
+        end
+    end
+    p = (cnt + 1) / (n_perm + 1);
+end
+
+function bin_acc = frame_acc_time_bins(trials, modality, n_max, framerate, bin_edges_s, outcome_mask)
+% FRAME_ACC_TIME_BINS  Per-trial, per-time-bin sample accuracy (within-CF),
+%   resolved into FIXED absolute time bins (bin_edges_s, seconds from CF
+%   onset) rather than fractional trial position -- so a 2s trial and a 5s
+%   trial both contribute meaningfully to the "0-0.5s" bin. A trial whose CF
+%   (capped at n_max frames, same convention as FRAME_ACC_CLS) ends before a
+%   bin starts contributes NaN to that bin -- evaluation trials have
+%   variable duration, so later bins naturally have fewer trials (check
+%   sum(~isnan(bin_acc),1) for the per-bin trial count before trusting a
+%   bin's mean). Returns [n_trials x numel(bin_edges_s)-1].
+    n_tr   = numel(trials);
+    n_bins = numel(bin_edges_s) - 1;
+    if nargin < 6 || isempty(outcome_mask)
+        outcome_mask = true(1, n_tr);
+    end
+    outcome_mask = logical(outcome_mask(:)');
+    if numel(outcome_mask) < n_tr
+        outcome_mask(end+1:n_tr) = false;
+    end
+
+    bin_acc = nan(n_tr, n_bins);
+    for t = 1:n_tr
+        if ~outcome_mask(t), continue; end
+        c  = trials(t).target_class;
+        np = trials(t).n_pre;
+        if isnan(c) || c < 1, continue; end
+        n_use = min(trials(t).n_cf, n_max);
+        if n_use < 1, continue; end
+        switch modality
+            case 'raw',  raw = trials(t).raw(np+1:np+n_use, :);
+            case 'mi',   raw = trials(t).p_mi(np+1:np+n_use, :);
+            case 'cvsa', raw = trials(t).p_cvsa(np+1:np+n_use, :);
+            otherwise,   raw = trials(t).raw(np+1:np+n_use, :);
+        end
+        vld     = ~any(isnan(raw), 2);
+        correct = raw(:,c) == max(raw, [], 2);
+        t_s     = (0:n_use-1) / framerate;   % time of each frame from CF onset
+        for b = 1:n_bins
+            idx = find(t_s >= bin_edges_s(b) & t_s < bin_edges_s(b+1));
+            v   = vld(idx);
+            if any(v), bin_acc(t,b) = mean(correct(idx(v))); end
+        end
+    end
+end
+
+function s = fmt_bins(bin_acc)
+% FMT_BINS  "b1%, b2%, ..." percent string for console output (mean over trials).
+    if isempty(bin_acc), s = '--'; return; end
+    m = mean(bin_acc, 1, 'omitnan') * 100;
+    s = strjoin(arrayfun(@(v) sprintf('%.0f%%',v), m, 'UniformOutput', false), ', ');
+end
+
+function plot_bin_line(ax, bin_mat, bin_x, col, lbl, min_n)
+% PLOT_BIN_LINE  Mean +- SEM line across time bins; skipped if bin_mat is
+%   empty. Markers for bins with fewer than min_n contributing trials are
+%   drawn smaller/hollow to flag a weak (low-N) average -- the per-bin trial
+%   count itself is annotated above each point.
+    if isempty(bin_mat), return; end
+    n  = sum(~isnan(bin_mat), 1);
+    m  = mean(bin_mat, 1, 'omitnan') * 100;
+    se = std(bin_mat, 0, 1, 'omitnan') ./ sqrt(max(n,1)) * 100;
+    weak = n < min_n & n > 0;
+
+    errorbar(ax, bin_x, m, se, '-', 'Color', col, 'LineWidth', 2, ...
+             'CapSize', 5, 'DisplayName', lbl, 'HandleVisibility', 'on');
+    plot(ax, bin_x(~weak & n>0), m(~weak & n>0), 'o', 'Color', col, ...
+         'MarkerFaceColor', col, 'MarkerSize', 7, 'HandleVisibility', 'off');
+    plot(ax, bin_x(weak), m(weak), 'o', 'Color', col, 'MarkerFaceColor', 'w', ...
+         'MarkerSize', 7, 'LineWidth', 1.5, 'HandleVisibility', 'off');
+    for b = 1:numel(bin_x)
+        if n(b) == 0, continue; end
+        text(ax, bin_x(b), m(b) + se(b) + 4, sprintf('%d', n(b)), ...
+             'FontSize', 6.5, 'Color', col, 'HorizontalAlignment', 'center');
     end
 end
 
@@ -1213,6 +1680,28 @@ end
 
 function v = msafe(x)
     if isempty(x) || all(isnan(x(:))), v = NaN; else, v = mean(x(:),'omitnan'); end
+end
+
+function B = itr_bits_per_trial(P, N)
+% ITR_BITS_PER_TRIAL  Wolpaw et al. bits/trial for an N-class forced choice
+%   at accuracy P: B = log2(N) + P*log2(P) + (1-P)*log2((1-P)/(N-1)).
+%   P=0 and P=1 edge cases are handled explicitly (0*log2(0) := 0).
+    if isnan(P) || isnan(N) || N < 2, B = NaN; return; end
+    B = log2(N);
+    if P > 0, B = B + P * log2(P); end
+    if P < 1, B = B + (1-P) * log2((1-P) / (N-1)); end
+end
+
+function p = binom_test_upper(k, n, p0)
+% BINOM_TEST_UPPER  Exact one-sided binomial p-value for H0: P(success)<=p0,
+%   i.e. P(X >= k) under X~Binomial(n, p0). No Statistics Toolbox required
+%   (computed in log-space via gammaln, consistent with this file's other
+%   hand-rolled permutation/exact tests).
+    if isnan(k) || isnan(n) || n <= 0, p = NaN; return; end
+    ks    = k:n;
+    log_p = gammaln(n+1) - gammaln(ks+1) - gammaln(n-ks+1) + ...
+            ks*log(max(p0,eps)) + (n-ks)*log(max(1-p0,eps));
+    p = min(1, sum(exp(log_p)));
 end
 
 %% ═════════════════════════════════════════════════════════════════════════════

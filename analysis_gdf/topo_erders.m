@@ -92,11 +92,26 @@
 %   (one row per paradigm x band: mean ERD/ERS per class over CSP-selected
 %   channels during CF, their discrimination, and the CSP-weight Pearson r)
 %   for cross-subject aggregation by main_group_analysis.m.
+%
+%   Also saves topo_erders_channels.mat (same folder): the full per-channel,
+%   per-time grand-average band power (this subject's own average across
+%   their files of that paradigm/band, i.e. exactly what feeds the topoplots
+%   above) plus channel labels and CSP masks -- richer than the scalar-only
+%   topo_erders_summary.mat, needed to redraw a GROUP-LEVEL (cross-subject)
+%   averaged topoplot. Used by group_topo_erders.m, which averages this
+%   across subjects (simple unweighted mean) and reconstructs the same
+%   7-column topoplot grid at the cohort level.
 
-clear; clc; close all;
+function topo_erders(gdf_dir, gdf_names, show_figures)
+%   Callable as a function:
+%     topo_erders(gdf_dir)                        → analyse all GDFs in folder
+%     topo_erders(gdf_dir, gdf_names)             → analyse specific GDFs
+%     topo_erders(gdf_dir, gdf_names, true)       → also show figures on screen
+%   With no arguments, shows a GUI picker.
 
 % --- Display options -------------------------------------------------------
-SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+if nargin < 3, show_figures = false; end
+SHOW_FIGURES = show_figures;
 if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
 
 %% --- 1. SETUP ----------------------------------------------------------
@@ -109,7 +124,10 @@ ms_dir   = fullfile(this_dir, '..', 'matlab_simulation');
 addpath(ms_dir, fullfile(ms_dir,'io'), fullfile(ms_dir,'utils'));
 
 %% --- 2. PARAMETERS ------------------------------------------------------
-DEFAULT_BANDS = [4 8; 8 14; 14 24; 14 30];   % fallback if a paradigm has no CSP info
+DEFAULT_BANDS_MI   = [8.0 12.0; 10.0 14.0; 12.0 16.0; 14.0 18.0; 16.0 22.0; 20.0 30.0];   % fallback if a paradigm has no CSP info
+DEFAULT_BANDS_CVSA = [7.0 11.0; 9.0 13.0; 11.0 15.0];
+DEFAULT_CHANNELS_MI   = {'FC5','FC1','C3','CP5','CP1','CP6','CP2','Cz','C4','FC6','FC2'};
+DEFAULT_CHANNELS_CVSA = {'T7','CP5','P7','P3','Pz','P4','P8','CP6','T8','O1','Oz','O2'};
 epoch_limits  = [-2 5];   % [s] relative to class-onset event; CF assumed in [0, epoch_limits(2)]
 CUE_DURATION_S = 1.5;     % [s] cue length (Training.cpp duration/cue=1500ms), immediately before CF onset
 baseline_ms = [-CUE_DURATION_S*1000, 0];   % baseline window = cue only (excludes earlier fixation)
@@ -138,9 +156,18 @@ ERD_SMOOTH_MS       = 200;                      % [ms] moving-average window for
 heat_time_range     = [0, epoch_limits(2)*1000]; % [ms] cue onset -> max possible CF end
 
 %% --- 3. FILE PICKER ------------------------------------------------------
-[files, folder] = uigetfile('*.gdf', 'Seleziona uno o più file GDF', 'MultiSelect', 'on');
-if isequal(files,0), disp('Operazione annullata'); return; end
-if ischar(files), files = {files}; end
+if nargin < 1 || isempty(gdf_dir)
+    default_dir = '/home/paolo/bci_vr_ws/recordings';
+    [gdf_names, gdf_dir] = uigetfile('*.gdf', 'Seleziona uno o più file GDF', default_dir, 'MultiSelect', 'on');
+    if isequal(gdf_names, 0), disp('Operazione annullata'); return; end
+elseif nargin < 2 || isempty(gdf_names)
+    f_list = dir(fullfile(gdf_dir, '*.gdf'));
+    gdf_names = {f_list.name};
+    if isempty(gdf_names), error('topo_erders:nofiles', 'No GDF files in %s', gdf_dir); end
+end
+if ischar(gdf_names), gdf_names = {gdf_names}; end
+files   = gdf_names;
+folder  = gdf_dir;
 n_files = numel(files);
 
 output_dir = fullfile(folder, 'analysis_results', 'topo_erders');
@@ -195,6 +222,28 @@ for f = 1:n_files
         fprintf('[%d/%d] %s: event types %s/%s (paradigm=%s, filename heuristic)\n', f, n_files, basename, ...
                 file_event_types{f}{1}, file_event_types{f}{2}, file_paradigm{f});
     end
+
+    % No CSP info from YAML → inject default channel selection so sel_ figures are generated
+    if isempty(file_csp_info{f})
+        par_name = file_paradigm{f};
+        if any(strcmpi(par_name, {'mi','hybrid'}))
+            n_b = size(DEFAULT_BANDS_MI, 1);
+            file_csp_info{f}(end+1) = struct('name', 'MI', ...
+                'channels',    {DEFAULT_CHANNELS_MI}, ...
+                'bands',       DEFAULT_BANDS_MI, ...
+                'csp_matrices', {repmat({zeros(0, numel(DEFAULT_CHANNELS_MI))}, n_b, 1)});
+        end
+        if any(strcmpi(par_name, {'cvsa','hybrid'}))
+            n_b = size(DEFAULT_BANDS_CVSA, 1);
+            file_csp_info{f}(end+1) = struct('name', 'CVSA', ...
+                'channels',    {DEFAULT_CHANNELS_CVSA}, ...
+                'bands',       DEFAULT_BANDS_CVSA, ...
+                'csp_matrices', {repmat({zeros(0, numel(DEFAULT_CHANNELS_CVSA))}, n_b, 1)});
+        end
+        if ~isempty(file_csp_info{f})
+            fprintf('  [default channels] No YAML found — using default electrode selection for %s\n', upper(par_name));
+        end
+    end
 end
 
 %% --- 4b. PER-PARADIGM BANDS (+ display mode) AND GLOBAL FREQ RANGE ---------
@@ -214,7 +263,8 @@ for p = 1:n_par
         bnd_mi   = collect_bands(file_csp_info, idx_p, 'MI');
         bnd_cvsa = collect_bands(file_csp_info, idx_p, 'CVSA');
         if isempty(bnd_mi) && isempty(bnd_cvsa)
-            bnd_mi = DEFAULT_BANDS;
+            bnd_mi = DEFAULT_BANDS_MI;
+            bnd_cvsa = DEFAULT_BANDS_CVSA;
             warning('topo_erders:nobands', 'No CSP bands found for paradigm "%s" — using default bands (MI display).', paradigms{p});
         end
         bnd    = [bnd_mi; bnd_cvsa];
@@ -223,9 +273,12 @@ for p = 1:n_par
         variant_name = upper(paradigms{p});   % 'MI' or 'CVSA'
         bnd = collect_bands(file_csp_info, idx_p, variant_name);
         if isempty(bnd)
-            bnd = DEFAULT_BANDS;
+            if strcmpi(variant_name, 'mi')
+                bnd = DEFAULT_BANDS_MI;
+            else
+                bnd = DEFAULT_BANDS_CVSA;
+            end
             warning('topo_erders:nobands', 'No CSP bands found for paradigm "%s" — using default bands.', paradigms{p});
-            variant_name = 'MI';   % default display mode
         end
         origin = repmat({variant_name}, size(bnd,1), 1);
     end
@@ -442,7 +495,22 @@ end
 %% --- 7. GENERATE TOPOPLOT GRIDS ---------------------------------------------
 fprintf('\n--- GENERATING TOPOPLOTS ---\n');
 
-erd_summary = struct([]);
+erd_summary = struct('band_name', {}, 'band_origin', {}, 'freq_lo', {}, 'freq_hi', {}, ...
+                      'mean_erd_c1', {}, 'mean_erd_c2', {}, 'discrimination', {}, ...
+                      'csp_r', {}, 'n_csp_channels', {}, 'paradigm', {});
+
+% Full per-channel, per-time grand-average band power (this subject's own
+% average across their files of that paradigm/band), for cross-subject
+% topoplot averaging by group_topo_erders.m -- richer than erd_summary's
+% scalar-only rows above, which aren't enough to redraw a topoplot.
+topo_channel_data = struct();
+topo_channel_data.ref_labels    = ref_labels;      % {1 x nchan} cellstr, channel order for c1/c2 below
+topo_channel_data.heat_times    = heat_times;      % [1 x ntime] ms, cue onset = 0
+topo_channel_data.epoch_limits  = epoch_limits;    % [1x2] s
+topo_channel_data.cue_duration_s = CUE_DURATION_S; % s
+topo_channel_data.bands = struct('paradigm', {}, 'band_name', {}, 'band_origin', {}, ...
+                                  'freq_lo', {}, 'freq_hi', {}, 'c1', {}, 'c2', {}, ...
+                                  'mi_mask', {}, 'cvsa_mask', {});
 
 for p = 1:n_par
     par_dir       = fullfile(output_dir, paradigms{p});
@@ -489,6 +557,17 @@ for p = 1:n_par
                                        bnd(idx_b,:), bnames{idx_b}, origin{idx_b}, file_csp_info, idx_p, ref_labels, mask_b);
         row.paradigm = paradigms{p};
         erd_summary(end+1) = row; %#ok<AGROW>
+
+        idx_tc = numel(topo_channel_data.bands) + 1;
+        topo_channel_data.bands(idx_tc).paradigm    = paradigms{p};
+        topo_channel_data.bands(idx_tc).band_name   = bnames{idx_b};
+        topo_channel_data.bands(idx_tc).band_origin = origin{idx_b};
+        topo_channel_data.bands(idx_tc).freq_lo     = bnd(idx_b,1);
+        topo_channel_data.bands(idx_tc).freq_hi     = bnd(idx_b,2);
+        topo_channel_data.bands(idx_tc).c1 = par_heat{p}{idx_b}.c1;   % [nchan x ntime], full ref_labels order
+        topo_channel_data.bands(idx_tc).c2 = par_heat{p}{idx_b}.c2;
+        topo_channel_data.bands(idx_tc).mi_mask   = par_mi_mask{p};   % logical [nchan x 1] or [], over ref_labels
+        topo_channel_data.bands(idx_tc).cvsa_mask = par_cvsa_mask{p};
     end
 
     % ── ERD/ERS lateralization time-course, by CSP-channel hemisphere ROI ─
@@ -533,8 +612,12 @@ end
 
 save(fullfile(output_dir, 'topo_erders_summary.mat'), 'erd_summary');
 fprintf('Saved topo_erders_summary.mat to %s\n', output_dir);
+save(fullfile(output_dir, 'topo_erders_channels.mat'), 'topo_channel_data');
+fprintf('Saved topo_erders_channels.mat to %s\n', output_dir);
 
 fprintf('\nDone. Figures saved under: %s (one sub-folder per paradigm)\n', output_dir);
+
+end % topo_erders
 
 %% ── Local helpers (must be after all script statements) ────────────────────
 function bnd = collect_bands(file_csp_info, idx_files, name)
@@ -777,6 +860,7 @@ function imp = csp_importance_for_band(file_csp_info, idx_files, name, band, ref
             bnd_v = file_csp_info{f}(v).bands;
             row = find(all(abs(bnd_v - band) < 1e-6, 2), 1);
             if isempty(row), continue; end
+            if isempty(file_csp_info{f}(v).csp_matrices{row}), continue; end   % default entry, no real CSP filters
 
             w = sum(abs(file_csp_info{f}(v).csp_matrices{row}), 1);   % [1 x n_sel]
             sel_lbl = lower(strtrim(file_csp_info{f}(v).channels));

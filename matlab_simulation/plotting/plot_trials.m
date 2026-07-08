@@ -68,6 +68,16 @@ function fig = plot_trials(trials, int_cfg, framerate, paradigm, basename, trial
         time_s   = ((0:nframes-1) - n_pre) / framerate;
         cf_end_t = (tr.n_cf - 1) / framerate;
 
+        if nframes < 2
+            % Recording ended before this trial's CF started (n_cf == 0 in
+            % integrate_signal) -- nothing to plot, avoid the degenerate
+            % xlim([x,x]) call below.
+            text(ax, 0.5, 0.5, sprintf('Trial %d\nno CF data\n(recording ended early)', t), ...
+                 'Units', 'normalized', 'HorizontalAlignment', 'center', 'FontSize', 8);
+            set(ax, 'XTick', [], 'YTick', []);
+            continue;
+        end
+
         % --- artifact shading ---
         if any(tr.artifact)
             yl = [-0.05, 1.10];

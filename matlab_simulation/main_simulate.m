@@ -1,3 +1,4 @@
+function main_simulate(gdf_dir, gdf_names, show_figures)
 %% MAIN_SIMULATE  Offline MATLAB simulator of the ROS BCI pipeline.
 %
 %   1. Pop up a file picker to choose a GDF recording.
@@ -14,11 +15,13 @@
 %
 %   Works for paradigm = 'mi' | 'cvsa' | 'hybrid' automatically — the
 %   paradigm is read from the YAML.
-
-clear; clc; close all;
+%
+%   Callable as a function: main_simulate(gdf_dir, gdf_names, show_figures)
+%   With no arguments, shows the GUI file picker (interactive mode).
 
 % --- Display options -------------------------------------------------------
-SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+if nargin < 3, show_figures = false; end
+SHOW_FIGURES = show_figures;
 
 % --- Make every subfolder visible to the simulator -----------------------
 this_dir = '/home/paolo/bci_vr_ws/src/analysis_bci/matlab_simulation';
@@ -31,13 +34,18 @@ addpath(fullfile(this_dir, 'integrator'));
 addpath(fullfile(this_dir, 'plotting'));
 addpath(fullfile(this_dir, 'utils'));
 
-% --- GUI: pick GDF(s); everything else flows from the sibling YAML(s) ---
-default_dir = '/home/paolo/bci_vr_ws/recordings';
-
-[gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
-                                'Select GDF recording(s)', default_dir, 'MultiSelect', 'on');
-if isequal(gdf_names, 0)
-    error('main_simulate:cancel', 'No GDF selected.');
+% --- GUI or batch file selection -------------------------------------------
+if nargin < 1 || isempty(gdf_dir)
+    default_dir = '/home/paolo/bci_vr_ws/recordings';
+    [gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
+                                    'Select GDF recording(s)', default_dir, 'MultiSelect', 'on');
+    if isequal(gdf_names, 0)
+        error('main_simulate:cancel', 'No GDF selected.');
+    end
+elseif nargin < 2 || isempty(gdf_names)
+    f = dir(fullfile(gdf_dir, '*.gdf'));
+    gdf_names = {f.name};
+    if isempty(gdf_names), error('main_simulate:nofiles', 'No GDF files in %s', gdf_dir); end
 end
 if ischar(gdf_names), gdf_names = {gdf_names}; end
 n_files = numel(gdf_names);
@@ -205,6 +213,8 @@ if ~isempty(simulate_summary)
     save(fullfile(out_dir, 'simulate_summary.mat'), 'simulate_summary');
     fprintf('Saved simulate_summary.mat to %s\n', out_dir);
 end
+
+end % main_simulate
 
 
 % ----------------------------------------------------------------------

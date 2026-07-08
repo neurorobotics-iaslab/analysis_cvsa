@@ -9,13 +9,25 @@
 %     mean P_fused(target class) — Bayesian LOP output (integrator input)
 %     mean buffer(target class)  — leaky-WTA integrator state
 %
-%   Prints a per-trial diagnostic table and a per-outcome summary.
-%   Shows one figure: per-trial scatter coloured by outcome (HIT/MISS/TO).
+%   Prints a per-trial diagnostic table and a per-outcome summary, including
+%   a within-session sign-flip permutation test + Cohen's d on the whole-
+%   window CVSA-fusion advantage (trial is the unit; saved as fus_adv_pval/
+%   fus_adv_cohend, this is the per-subject input combined into a group-level
+%   meta-analytic test by main_group_analysis.m).
+%   Six figures, including a cluster-based permutation test (Maris &
+%   Oostenveld style, see utils/cluster_permutation_test.m) on
+%   P_fused(target)-P_MI(target) within the CVSA-influence window -- tests
+%   whether the CVSA-driven fusion effect is a genuine, temporally-localised
+%   period of influence rather than noise, correcting for the multiple-
+%   comparisons problem of testing every frame independently.
 
-clear; clc; close all;
+function main_hybrid_advantage_probs(gdf_dir, gdf_names, show_figures)
+%   Callable as a function: main_hybrid_advantage_probs(gdf_dir, gdf_names, show_figures)
+%   With no arguments, shows the GUI file picker (interactive mode).
 
 % --- Display options -------------------------------------------------------
-SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+if nargin < 3, show_figures = false; end
+SHOW_FIGURES = show_figures;
 if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
 
 % --- Make every subfolder visible to the simulator -----------------------
@@ -29,13 +41,18 @@ addpath(fullfile(this_dir, 'integrator'));
 addpath(fullfile(this_dir, 'plotting'));
 addpath(fullfile(this_dir, 'utils'));
 
-% --- GUI: pick GDF(s); everything else flows from the sibling YAML(s) ---
-default_dir = '/home/paolo/bci_vr_ws/recordings';
-
-[gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
-                                'Select GDF recording(s)', default_dir, 'MultiSelect', 'on');
-if isequal(gdf_names, 0)
-    error('main_simulate:cancel', 'No GDF selected.');
+% --- GUI or batch file selection -------------------------------------------
+if nargin < 1 || isempty(gdf_dir)
+    default_dir = '/home/paolo/bci_vr_ws/recordings';
+    [gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
+                                    'Select GDF recording(s)', default_dir, 'MultiSelect', 'on');
+    if isequal(gdf_names, 0)
+        error('main_hybrid_advantage_probs:cancel', 'No GDF selected.');
+    end
+elseif nargin < 2 || isempty(gdf_names)
+    f = dir(fullfile(gdf_dir, '*.gdf'));
+    gdf_names = {f.name};
+    if isempty(gdf_names), error('main_hybrid_advantage_probs:nofiles', 'No GDF files in %s', gdf_dir); end
 end
 if ischar(gdf_names), gdf_names = {gdf_names}; end
 n_files = numel(gdf_names);
@@ -278,6 +295,14 @@ n_hurt_fr  = 0;   % frames: P_MI(target)>0.5  -> P_fused(target)<=0.5 (CVSA hurt
 n_both_ok  = 0;   % frames: both correct
 n_both_bad = 0;   % frames: both wrong
 
+% Pooled (both classes) per-trial x per-frame matrices within the CVSA-
+% influence window, for the cluster-based permutation test below -- same
+% class-agnostic pooling convention already used for fus_adv/n_help/n_hurt.
+n_inf_frames = round(cvsa_inf * framerate);
+mi_pool   = nan(n_trials, n_inf_frames);
+fus_pool  = nan(n_trials, n_inf_frames);
+diff_pool = nan(n_trials, n_inf_frames);   % P_fused(target) - P_MI(target)
+
 for t = 1:n_trials
     c = trial_class(t);
     if isnan(c) || c < 1 || c > n_cls, continue; end
@@ -305,15 +330,27 @@ for t = 1:n_trials
         n_hurt_fr  = n_hurt_fr  + sum( mi_ok & ~fus_ok);
         n_both_ok  = n_both_ok  + sum( mi_ok &  fus_ok);
         n_both_bad = n_both_bad + sum(~mi_ok & ~fus_ok);
+
+        idx_inf = find(vld_inf);   % guaranteed <= n_inf_frames by the truncation above
+        mi_pool(t, idx_inf)   = pm(idx_inf);
+        fus_pool(t, idx_inf)  = pf(idx_inf);
+        diff_pool(t, idx_inf) = pf(idx_inf) - pm(idx_inf);
     end
 end
 
 n_def  = sum(~isnan(fus_adv));
 n_help = sum(fus_adv > 0);
 n_hurt = sum(fus_adv < 0);
+fus_adv_pval    = sign_flip_test_local(fus_adv, 2000);
+fus_adv_cohend  = mean(fus_adv, 'omitnan') / std(fus_adv, 'omitnan');
 fprintf('\n  CVSA-fusion advantage  (mean[P_fused(target) - P_MI(target)] over first %.1fs of CF):\n', cvsa_inf);
 fprintf('  helped (>0): %d/%d   hurt (<0): %d/%d   mean delta: %+.3f\n', ...
         n_help, n_def, n_hurt, n_def, mean(fus_adv, 'omitnan'));
+fprintf('  within-session sign-flip test (trial is the unit, %d trials): p=%.4f (two-sided)  d=%+.2f\n', ...
+        n_def, fus_adv_pval, fus_adv_cohend);
+fprintf('  (this is the per-subject test combined by main_group_analysis.m''s meta-analytic group test, since a\n');
+fprintf('   trial-level sign-flip test here has far more permutations -- and so far more power -- than the\n');
+fprintf('   subject-level sign-flip test in the group script, which is limited by the number of subjects)\n');
 
 net_fr = n_resc - n_hurt_fr;
 if net_fr > 0,     verdict_fr = 'CVSA helped';
@@ -325,6 +362,33 @@ fprintf('  rescued (MI wrong -> fused correct): %d\n', n_resc);
 fprintf('  hurt    (MI correct -> fused wrong): %d\n', n_hurt_fr);
 fprintf('  both correct: %d   both wrong: %d\n', n_both_ok, n_both_bad);
 fprintf('  net effect: %+d frames  ->  %s\n', net_fr, verdict_fr);
+
+% ── Cluster-based permutation test (Maris & Oostenveld style): is there a
+%    genuine, temporally-localised period of CVSA-fusion influence within
+%    the CVSA-influence window, on the RAW classifier output
+%    P_fused(target)-P_MI(target)? This corrects for the multiple-
+%    comparisons problem of testing every frame independently (unlike a
+%    pointwise significance test) -- see utils/cluster_permutation_test.m.
+%    Trials are the permutation unit (sign-flip per whole trial). ─────────
+t_pool = (0:n_inf_frames-1) * chunk_size / fs;
+n_perm_cluster = 2000;
+cluster_res = cluster_permutation_test(diff_pool, t_pool, n_perm_cluster);
+n_trials_cluster = sum(any(~isnan(diff_pool), 2));
+
+fprintf('\n  Cluster-based permutation test on P_fused(target)-P_MI(target)  (first %.1fs of CF, %d trials, %d perms):\n', ...
+        cvsa_inf, n_trials_cluster, n_perm_cluster);
+if isempty(cluster_res.clusters)
+    fprintf('  no candidate cluster found (|t| never reached the cluster-forming threshold)\n');
+else
+    for k = 1:numel(cluster_res.clusters)
+        cl = cluster_res.clusters(k);
+        sig_str = ''; if cl.p < 0.05, sig_str = '  <-- SIGNIFICANT'; end
+        fprintf('  cluster %d: [%.2f - %.2f]s  mass=%+.1f  p=%.4f%s\n', k, cl.start_t, cl.end_t, cl.mass, cl.p, sig_str);
+        fprintf('    within this cluster only: mean delta=%+.3f  95%% CI=[%+.3f, %+.3f]  d=%+.2f\n', ...
+                cl.mean_delta, cl.ci_lo, cl.ci_hi, cl.cohen_d);
+    end
+end
+fprintf('  (cluster-forming threshold |t|>=2.0; cluster p-value = permutation on max |cluster mass|, per-trial sign-flip, %d perms; mean delta/CI/d = magnitude localised to that cluster''s own time range, trial is the unit)\n', n_perm_cluster);
 
 fig3 = figure('Name', sprintf('Does CVSA fusion help? — %s', basename), ...
               'Color', 'w', 'NumberTitle', 'off', 'Position', [80 80 1300 700], 'Visible', fig_vis);
@@ -665,6 +729,73 @@ grid(ax3, 'on');
 sgtitle(fig5, sprintf('%s  |  HIT=%d  MISS=%d  TO=%d  — does CVSA help, broken down by MI/CVSA agreement (first %.1fs of CF)', ...
         basename, n_hit_real, n_miss_real, n_to_real, cvsa_inf), 'FontSize', 10, 'Interpreter', 'none');
 
+%% ── Figure 6: cluster-based permutation test on CVSA-fusion influence ─────
+fig6 = figure('Name', sprintf('CVSA-fusion cluster test — %s', basename), ...
+              'Color', 'w', 'NumberTitle', 'off', 'Position', [100 100 1100 420], 'Visible', fig_vis);
+set(fig6, 'Units','normalized', 'OuterPosition',[0 0 1 1]);
+
+% ── Panel 1: pooled mean P_MI vs P_fused(target), significant cluster(s) shaded ──
+ax6a = subplot(1,2,1); hold(ax6a,'on');
+m_mi_p  = mean(mi_pool,  1, 'omitnan');
+m_fus_p = mean(fus_pool, 1, 'omitnan');
+n_eff_p = sum(~isnan(mi_pool), 1);
+s_mi_p  = std(mi_pool,  0, 1, 'omitnan') ./ sqrt(max(n_eff_p,1));
+s_fus_p = std(fus_pool, 0, 1, 'omitnan') ./ sqrt(max(n_eff_p,1));
+
+sig = cluster_res.sig_mask;
+k = 1;
+while k <= numel(sig)
+    if sig(k)
+        k2 = k;
+        while k2 <= numel(sig) && sig(k2), k2 = k2 + 1; end
+        fill(ax6a, [t_pool(k) t_pool(k2-1) t_pool(k2-1) t_pool(k)], [0 0 1 1], ...
+             [1.0 0.90 0.50], 'FaceAlpha', 0.6, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+        k = k2;
+    else
+        k = k + 1;
+    end
+end
+fill(ax6a, [t_pool, fliplr(t_pool)], [m_mi_p-s_mi_p, fliplr(m_mi_p+s_mi_p)], ...
+     COL_MI, 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+fill(ax6a, [t_pool, fliplr(t_pool)], [m_fus_p-s_fus_p, fliplr(m_fus_p+s_fus_p)], ...
+     COL_FUS, 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+plot(ax6a, t_pool, m_mi_p,  '-', 'Color', COL_MI,  'LineWidth', 2, 'DisplayName', 'P_{MI}(target)');
+plot(ax6a, t_pool, m_fus_p, '-', 'Color', COL_FUS, 'LineWidth', 2, 'DisplayName', 'P_{fused}(target)');
+yline(ax6a, 0.5, 'k:', 'HandleVisibility', 'off');
+set(ax6a, 'XLim', [0, max(t_pool(end),eps)], 'YLim', [0,1]);
+xlabel(ax6a, 'time from CF onset (s)', 'FontSize', 9);
+ylabel(ax6a, 'P(target class)', 'FontSize', 9);
+title(ax6a, sprintf('Pooled both classes (n=%d trials)\nshaded = significant cluster (p<0.05)', n_trials_cluster), ...
+      'FontSize', 10, 'FontWeight', 'bold');
+legend(ax6a, 'FontSize', 8, 'Location', 'best');
+grid(ax6a, 'on');
+
+% ── Panel 2: cluster-forming t-statistic over time ──────────────────────────
+ax6b = subplot(1,2,2); hold(ax6b,'on');
+plot(ax6b, t_pool, cluster_res.tstat, '-', 'Color', [0.2 0.2 0.2], 'LineWidth', 1.5, 'DisplayName', 't-statistic');
+yline(ax6b, 2.0, 'r--', 'LineWidth', 1, 'DisplayName', 'cluster-forming |t|=2.0');
+yline(ax6b, -2.0, 'r--', 'HandleVisibility', 'off');
+yline(ax6b, 0, 'k-', 'HandleVisibility', 'off');
+t_top = max([cluster_res.tstat, 2.5], [], 'omitnan');
+for k = 1:numel(cluster_res.clusters)
+    cl = cluster_res.clusters(k);
+    if cl.p < 0.05
+        plot(ax6b, [cl.start_t, cl.end_t], [t_top, t_top]*1.05, '-', ...
+             'Color', [0.9 0.6 0.1], 'LineWidth', 4, 'HandleVisibility', 'off');
+        text(ax6b, mean([cl.start_t, cl.end_t]), t_top*1.15, sprintf('p=%.3f', cl.p), ...
+             'HorizontalAlignment', 'center', 'FontSize', 8);
+    end
+end
+set(ax6b, 'XLim', [0, max(t_pool(end),eps)]);
+xlabel(ax6b, 'time from CF onset (s)', 'FontSize', 9);
+ylabel(ax6b, 't-statistic  (mean/SEM across trials)', 'FontSize', 9);
+title(ax6b, 'Cluster-forming statistic', 'FontSize', 10, 'FontWeight', 'bold');
+legend(ax6b, 'Location', 'best', 'FontSize', 8);
+grid(ax6b, 'on');
+
+sgtitle(fig6, sprintf('%s — cluster-based permutation test: is CVSA-fusion influence statistically genuine?', basename), ...
+        'FontSize', 10, 'Interpreter', 'none');
+
 %% --- Save figures -------------------------------------------------------
 out_dir = fullfile(gdf_dir, 'analysis_results', 'hybrid_advantage_probs');
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
@@ -673,8 +804,9 @@ saveas(fig2, fullfile(out_dir, sprintf('advantage_%s_frame_accuracy.svg', basena
 saveas(fig3, fullfile(out_dir, sprintf('advantage_%s_cvsa_fusion.svg',    basename)), 'svg');
 saveas(fig4, fullfile(out_dir, sprintf('advantage_%s_cf_duration.svg',    basename)), 'svg');
 saveas(fig5, fullfile(out_dir, sprintf('advantage_%s_agreement.svg',      basename)), 'svg');
+saveas(fig6, fullfile(out_dir, sprintf('advantage_%s_cluster_test.svg',   basename)), 'svg');
 fprintf('Saved figures to %s\n', out_dir);
-close([fig1, fig2, fig3, fig4, fig5]);
+close([fig1, fig2, fig3, fig4, fig5, fig6]);
 
 %% --- Accumulate per-file summary for cross-subject use ------------------
 idx_acc = numel(probs_summary) + 1;
@@ -691,6 +823,8 @@ probs_summary(idx_acc).acc_cvsa     = mean(acc_cvsa, 'omitnan');
 probs_summary(idx_acc).acc_fus      = mean(acc_fus,  'omitnan');
 probs_summary(idx_acc).acc_buf      = mean(acc_buf,  'omitnan');
 probs_summary(idx_acc).fus_adv_mean = mean(fus_adv, 'omitnan');
+probs_summary(idx_acc).fus_adv_pval   = fus_adv_pval;
+probs_summary(idx_acc).fus_adv_cohend = fus_adv_cohend;
 probs_summary(idx_acc).n_help       = n_help;
 probs_summary(idx_acc).n_hurt       = n_hurt;
 probs_summary(idx_acc).n_def        = n_def;
@@ -700,6 +834,14 @@ probs_summary(idx_acc).n_both_ok_fr = n_both_ok;
 probs_summary(idx_acc).n_both_bad_fr = n_both_bad;
 probs_summary(idx_acc).rescue_delta = mean_d(3);
 probs_summary(idx_acc).cost_delta   = mean_d(2);
+% For the group-level (cross-subject) cluster-based permutation test in
+% main_group_analysis.m: this session's own mean P_fused(target)-P_MI(target)
+% curve over the CVSA-influence window, used as one "row" (subject = the
+% permutation unit) once pooled across a subject's session(s).
+probs_summary(idx_acc).cluster_time_axis = t_pool;                       % [1 x n_inf_frames], seconds from CF onset
+probs_summary(idx_acc).cluster_diff_mean = mean(diff_pool, 1, 'omitnan'); % [1 x n_inf_frames]
+probs_summary(idx_acc).cluster_n_trials  = n_trials_cluster;
+probs_summary(idx_acc).cluster_cvsa_inf  = cvsa_inf;
 
 end % file_idx loop
 
@@ -711,6 +853,8 @@ if ~isempty(probs_summary)
     fprintf('\nSaved hybrid_advantage_probs_summary.mat to %s\n', out_dir_top);
 end
 
+
+end % main_hybrid_advantage_probs
 
 % ── Local helpers (must be after all script statements) ───────────────────
 
@@ -756,4 +900,23 @@ function add_scatter_legend(ax_leg, COL_HIT, COL_MISS, COL_TO, n_hit, n_miss, n_
     h(4) = scatter(ax_leg, NaN, NaN, 55, [0.5 0.5 0.5], 'filled', 'o', 'MarkerEdgeColor', 'k', 'DisplayName', sprintf('cls1 (%s)', cls_names{1}));
     h(5) = scatter(ax_leg, NaN, NaN, 55, [0.5 0.5 0.5], 'filled', 's', 'MarkerEdgeColor', 'k', 'DisplayName', sprintf('cls2 (%s)', cls_names{2}));
     legend(ax_leg, h, 'FontSize', 8, 'Location', 'southoutside', 'NumColumns', 5);
+end
+
+function p = sign_flip_test_local(diffs, n_perm)
+% SIGN_FLIP_TEST_LOCAL  Two-sided paired permutation test (sign-flip null)
+%   on H0: mean(diffs) = 0, trial is the permutation unit. No Statistics
+%   Toolbox required. Returns NaN if fewer than 2 valid observations.
+    diffs = diffs(~isnan(diffs));
+    n = numel(diffs);
+    if n < 2, p = NaN; return; end
+    obs = abs(mean(diffs));
+    cnt = 0;
+    for i = 1:n_perm
+        signs = sign(rand(n, 1) - 0.5);
+        signs(signs == 0) = 1;
+        if abs(mean(diffs .* signs)) >= obs - 1e-12
+            cnt = cnt + 1;
+        end
+    end
+    p = (cnt + 1) / (n_perm + 1);
 end

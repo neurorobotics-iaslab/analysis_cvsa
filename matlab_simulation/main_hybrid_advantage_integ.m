@@ -32,12 +32,26 @@
 %   Figure (once, saved at the top level): aggregate summary across ALL
 %   trials/files (2x3): outcome counts, accuracy, mean time-to-HIT/MISS/
 %   TIMEOUT per stream, and a Hybrid-vs-MI / Hybrid-vs-CVSA "who hit?"
-%   breakdown.
+%   breakdown. A sixth figure (confusion_matrix.svg) shows, per stream, the
+%   target-class x outcome breakdown -- since all three streams share the
+%   SAME buffer/thresholds, any per-class bias difference across panels
+%   reflects the classifier signal itself, not the integration settings.
+%
+%   Console also reports, per stream: ITR (bits/trial and bits/min, Wolpaw
+%   formula; P=acc(s) incl. TIMEOUT as failure, N=n_cls, T=mean time-to-
+%   outcome) and a chance-level significance test (exact one-sided binomial,
+%   decided trials only) -- answers "given the MI-tuned integration
+%   parameters, is each stream significantly above chance, and how does its
+%   communication rate compare once trial speed is folded in?" Saved into
+%   counterfactual_summary.mat as itr_bits_trial/itr_bits_min/chance_p ([1x3]).
 
-clear; clc; close all;
+function main_hybrid_advantage_integ(gdf_dir, gdf_names, show_figures)
+%   Callable as a function: main_hybrid_advantage_integ(gdf_dir, gdf_names, show_figures)
+%   With no arguments, shows the GUI file picker (interactive mode).
 
 % --- Display options -------------------------------------------------------
-SHOW_FIGURES = false;   % true: figures pop up on screen; false: created hidden (export only)
+if nargin < 3, show_figures = false; end
+SHOW_FIGURES = show_figures;
 if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
 
 OC_STR = {'?', 'HIT', 'MISS', 'TO'};   % outcome_code (0..3) -> label
@@ -53,13 +67,18 @@ addpath(fullfile(this_dir, 'integrator'));
 addpath(fullfile(this_dir, 'plotting'));
 addpath(fullfile(this_dir, 'utils'));
 
-% --- GUI: pick hybrid GDF(s); everything else flows from the sibling YAML(s)
-default_dir = '/home/paolo/bci_vr_ws/recordings';
-
-[gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
-                                'Select HYBRID GDF recording(s)', default_dir, 'MultiSelect', 'on');
-if isequal(gdf_names, 0)
-    error('main_hybrid_vs_mi:cancel', 'No GDF selected.');
+% --- GUI or batch file selection -------------------------------------------
+if nargin < 1 || isempty(gdf_dir)
+    default_dir = '/home/paolo/bci_vr_ws/recordings';
+    [gdf_names, gdf_dir] = uigetfile({'*.gdf', 'GDF recordings (*.gdf)'}, ...
+                                    'Select HYBRID GDF recording(s)', default_dir, 'MultiSelect', 'on');
+    if isequal(gdf_names, 0)
+        error('main_hybrid_advantage_integ:cancel', 'No GDF selected.');
+    end
+elseif nargin < 2 || isempty(gdf_names)
+    f = dir(fullfile(gdf_dir, '*.gdf'));
+    gdf_names = {f.name};
+    if isempty(gdf_names), error('main_hybrid_advantage_integ:nofiles', 'No GDF files in %s', gdf_dir); end
 end
 if ischar(gdf_names), gdf_names = {gdf_names}; end
 n_files = numel(gdf_names);
@@ -347,6 +366,36 @@ for s = 1:3
             fmt_mean_sem(t_to_mean(s),   t_to_sem(s)));
 end
 
+% --- ITR (bits/min, Wolpaw) + chance-level test, per stream ----------------
+%   Same fixed buffer/thresholds drive all three streams (only the signal
+%   feeding the integrator changes), so this is a direct, comparable check
+%   of whether the MI-tuned integration settings put each stream above
+%   chance -- and how their communication rate compares once trial speed is
+%   folded in (a stream that is slower but more accurate isn't automatically
+%   "better"). ITR: P=acc(s) (TIMEOUT counted as failure), N=n_cls,
+%   T=mean time-to-outcome over ALL trials for that stream. Chance-level
+%   test: exact one-sided binomial on DECIDED trials only (n=n_hit+n_miss,
+%   k=n_hit, p0=1/n_cls) -- TIMEOUT trials carry no decision to assess.
+itr_bits   = nan(1,3);
+itr_bpm    = nan(1,3);
+chance_p_s = nan(1,3);
+fprintf('\n  ITR & chance-level per stream (fixed buffer/thresholds across all 3):\n');
+fprintf('  %-10s %10s %10s   %8s  (p0=1/%d)\n', 'stream', 'bits/trial', 'bits/min', 'chance p', n_cls);
+for s = 1:3
+    t_mean_s = mean(streams_oc{s}(:,2), 'omitnan');
+    itr_bits(s) = itr_bits_per_trial(acc(s), n_cls);
+    if ~isnan(t_mean_s) && t_mean_s > 0
+        itr_bpm(s) = itr_bits(s) * 60 / t_mean_s;
+    end
+    n_dec_s = n_hit(s) + n_miss(s);
+    if n_dec_s > 0
+        chance_p_s(s) = binom_test_upper(n_hit(s), n_dec_s, 1/n_cls);
+    end
+    fprintf('  %-10s %10.3f %10.2f   %8.4f %s  (n_dec=%d)\n', ...
+            stream_names{s}, itr_bits(s), itr_bpm(s), chance_p_s(s), ...
+            p_to_stars(chance_p_s(s)), n_dec_s);
+end
+
 % --- "who hits?" breakdown: Hybrid vs MI-only, Hybrid vs CVSA-only ---------
 cmp_labels = {'both HIT','only Hybrid HIT','only other HIT','neither HIT'};
 hyb_hit = all_oc_hyb(:,1) == 1;
@@ -382,6 +431,43 @@ fprintf('\n  Mean integrator output (target class) — paired sign-flip permutat
 fprintf('    Hybrid vs MI-only   : delta=%.4f  p=%.4f  %s\n', mean(d_mi_all,  'omitnan'), p_buf_mi,  p_to_stars(p_buf_mi));
 fprintf('    Hybrid vs CVSA-only : delta=%.4f  p=%.4f  %s\n', mean(d_cvs_all, 'omitnan'), p_buf_cvs, p_to_stars(p_buf_cvs));
 fprintf('    (two-sided, %d permutations, single comparison)\n', N_PERM);
+
+% --- CVSA-influence-window restricted advantage --------------------------
+%   The whole-CF-window test above dilutes any early CVSA-driven boost with
+%   the later part of the trial where, by design, alpha->0 and Hybrid ~= MI-
+%   only (cosine-annealed LOP, see bayesian_fuse.m) -- so a genuine early
+%   effect can be washed out by averaging over frames where none is expected.
+%   This restricts the SAME per-trial-mean + sign-flip approach to only the
+%   first int_cfg.cvsa_influence seconds of each trial's CF (int_cfg always
+%   carries cvsa_influence -- load_hybrid_streams.m defaults it to 2.5s if
+%   the companion YAML doesn't specify one), directly answering "is the
+%   fused signal reliably closer to threshold than MI-only while CVSA is
+%   actually still influencing the fusion?" Mirrors fus_adv_pval in
+%   main_hybrid_advantage_probs.m (same window, same test), but on the
+%   INTEGRATOR buffer output here instead of the raw sLDA probability.
+cvsa_inf = int_cfg.cvsa_influence;
+buf_adv_mi_win  = nan(n_tot, 1);
+buf_adv_cvs_win = nan(n_tot, 1);
+for i = 1:n_tot
+    nc_i = numel(all_buf_hyb{i});
+    nwin = min(round(cvsa_inf * framerate), nc_i);
+    if nwin < 1, continue; end
+    buf_adv_mi_win(i)  = mean(all_buf_hyb{i}(1:nwin) - all_buf_mi{i}(1:nwin),   'omitnan');
+    buf_adv_cvs_win(i) = mean(all_buf_hyb{i}(1:nwin) - all_buf_cvsa{i}(1:nwin), 'omitnan');
+end
+buf_adv_mi_win_pval    = sign_flip_test(buf_adv_mi_win,  N_PERM);
+buf_adv_cvs_win_pval   = sign_flip_test(buf_adv_cvs_win, N_PERM);
+buf_adv_mi_win_mean    = mean(buf_adv_mi_win,  'omitnan');
+buf_adv_cvs_win_mean   = mean(buf_adv_cvs_win, 'omitnan');
+buf_adv_mi_win_cohend  = buf_adv_mi_win_mean  / std(buf_adv_mi_win,  'omitnan');
+buf_adv_cvs_win_cohend = buf_adv_cvs_win_mean / std(buf_adv_cvs_win, 'omitnan');
+fprintf('\n  CVSA-influence window ONLY (first %.1fs of CF) — mean buffer advantage, paired sign-flip test:\n', cvsa_inf);
+fprintf('    Hybrid vs MI-only   : delta=%+.4f  p=%.4f %s  d=%.3f  (n=%d trials)\n', ...
+        buf_adv_mi_win_mean,  buf_adv_mi_win_pval,  p_to_stars(buf_adv_mi_win_pval),  buf_adv_mi_win_cohend,  sum(~isnan(buf_adv_mi_win)));
+fprintf('    Hybrid vs CVSA-only : delta=%+.4f  p=%.4f %s  d=%.3f  (n=%d trials)\n', ...
+        buf_adv_cvs_win_mean, buf_adv_cvs_win_pval, p_to_stars(buf_adv_cvs_win_pval), buf_adv_cvs_win_cohend, sum(~isnan(buf_adv_cvs_win)));
+fprintf('    ANSWERS "does CVSA help": positive delta + p<0.05 on Hybrid vs MI-only means the fused\n');
+fprintf('    signal was reliably closer to threshold than MI-only while CVSA was still actively weighted.\n');
 
 %% --- Aggregate figure (3x3) ----------------------------------------------
 fig3 = figure('Name', 'Hybrid vs MI-only vs CVSA-only — aggregate summary', ...
@@ -663,6 +749,10 @@ ylabel(ax_t2, '\Delta buffer(target)  [Hybrid - MI-only]');
 title(ax_t2, sprintf('Hybrid vs MI-only advantage over time — mean ± SEM  (shading = p<0.05, %d perms, exploratory)', N_PERM_T), ...
      'FontWeight', 'bold');
 grid(ax_t2, 'on');
+text(ax_t2, 0.02, 0.95, sprintf('cvsa\\_influence window (0-%.1fs) single test: delta=%+.4f  p=%.4f %s  d=%.2f', ...
+     cvsa_inf, buf_adv_mi_win_mean, buf_adv_mi_win_pval, p_to_stars(buf_adv_mi_win_pval), buf_adv_mi_win_cohend), ...
+     'Units', 'normalized', 'FontSize', 8, 'FontWeight', 'bold', 'BackgroundColor', [1 1 1 0.7], ...
+     'VerticalAlignment', 'top');
 
 % Subplot 3: DELTA = Hybrid - CVSA-only over time
 ax_t3 = subplot(3,1,3); hold(ax_t3, 'on');
@@ -756,6 +846,22 @@ counterfactual.t_to_sem     = t_to_sem;
 counterfactual.ci_lo_acc    = ci_lo_acc;    % [1x3] bootstrap 95% CI lower
 counterfactual.ci_hi_acc    = ci_hi_acc;    % [1x3] bootstrap 95% CI upper
 counterfactual.stream_names = stream_names; % {'Hybrid','MI-only','CVSA-only'}
+counterfactual.itr_bits_trial = itr_bits;    % [1x3] bits/trial per stream (Wolpaw)
+counterfactual.itr_bits_min   = itr_bpm;     % [1x3] bits/min per stream
+counterfactual.chance_p       = chance_p_s;  % [1x3] exact binomial p vs chance (decided trials only)
+% CVSA-influence-window (first cvsa_inf s of CF) restricted buffer advantage
+% -- "does CVSA help" isolated from the later pure-MI portion of the trial.
+% Mirrors main_hybrid_advantage_probs.m's fus_adv_pval, on the integrator
+% buffer instead of the raw sLDA probability. Used by main_group_analysis.m
+% for per-subject + Stouffer meta-analytic group-level significance.
+counterfactual.cvsa_inf_window        = cvsa_inf;
+counterfactual.buf_adv_mi_win_mean    = buf_adv_mi_win_mean;
+counterfactual.buf_adv_mi_win_pval    = buf_adv_mi_win_pval;
+counterfactual.buf_adv_mi_win_cohend  = buf_adv_mi_win_cohend;
+counterfactual.buf_adv_cvs_win_mean   = buf_adv_cvs_win_mean;
+counterfactual.buf_adv_cvs_win_pval   = buf_adv_cvs_win_pval;
+counterfactual.buf_adv_cvs_win_cohend = buf_adv_cvs_win_cohend;
+counterfactual.buf_adv_mi_win_n_trials = sum(~isnan(buf_adv_mi_win));
 save(fullfile(out_dir, 'counterfactual_summary.mat'), 'counterfactual');
 fprintf('\nSaved counterfactual_summary.mat to %s\n', out_dir);
 
@@ -930,9 +1036,67 @@ sgtitle(fig5, sprintf(['Hybrid advantage — deeper analysis (%d trials, %d file
         'Interpreter', 'none');
 
 saveas(fig5, fullfile(out_dir, 'advantage_deep.svg'), 'svg');
-fprintf('\nSaved all figures to %s\n', out_dir);
 if ~SHOW_FIGURES, close(fig5); end
 
+%% --- Figure 6: confusion matrix per stream (class bias check) ------------
+%
+%   Rows = target class, columns = simulated outcome (HIT/MISS/TIMEOUT), one
+%   panel per stream (Hybrid/MI-only/CVSA-only). The SAME buffer/thresholds
+%   drive all three, so any difference in per-class bias across panels
+%   reflects the classifier signal itself (MI vs CVSA vs fused), not the
+%   integrator settings -- e.g. whether CVSA-only is skewed toward one
+%   attention direction while MI-only is balanced, and whether fusion
+%   evens out or inherits that skew.
+classes_all_cm = unique(all_trial_class(~isnan(all_trial_class)))';
+n_cls_cm   = numel(classes_all_cm);
+OC_LABELS6 = {'HIT','MISS','TIMEOUT'};
+cm_map6    = [linspace(1,0.10,64)', linspace(1,0.55,64)', linspace(1,0.15,64)'];  % white -> green
+
+fig6 = figure('Name', 'Confusion Matrix per Stream', 'Color', 'w', ...
+              'NumberTitle', 'off', 'Visible', fig_vis);
+set(fig6, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
+
+fprintf('\n  Confusion matrix per stream (class x outcome):\n');
+for s = 1:3
+    cm6 = zeros(n_cls_cm, 3);
+    for ci2 = 1:n_cls_cm
+        m = all_trial_class == classes_all_cm(ci2);
+        codes_s = streams_oc{s}(m,1);
+        cm6(ci2,1) = sum(codes_s==1); cm6(ci2,2) = sum(codes_s==2); cm6(ci2,3) = sum(codes_s==3);
+    end
+    row_tot6 = sum(cm6, 2);
+    row_pct6 = cm6 ./ max(row_tot6, 1);
+
+    ylabs6 = cell(1, n_cls_cm);
+    for ci2 = 1:n_cls_cm
+        ylabs6{ci2} = sprintf('class %d (n=%d)', classes_all_cm(ci2), row_tot6(ci2));
+        fprintf('    %-10s class %d: HIT=%d MISS=%d TO=%d  (HIT%%=%.0f%%)\n', ...
+                stream_names{s}, classes_all_cm(ci2), cm6(ci2,1), cm6(ci2,2), cm6(ci2,3), ...
+                100*row_pct6(ci2,1));
+    end
+
+    ax = subplot(1,3,s);
+    imagesc(ax, row_pct6, [0 1]);
+    colormap(ax, cm_map6);
+    set(ax, 'XTick', 1:3, 'XTickLabel', OC_LABELS6, 'YTick', 1:n_cls_cm, 'YTickLabel', ylabs6);
+    for ci2 = 1:n_cls_cm
+        for o = 1:3
+            txt_col = 'k'; if row_pct6(ci2,o) > 0.6, txt_col = 'w'; end
+            text(ax, o, ci2, sprintf('%d\n(%.0f%%)', cm6(ci2,o), 100*row_pct6(ci2,o)), ...
+                 'HorizontalAlignment','center','FontSize',9,'Color',txt_col,'FontWeight','bold');
+        end
+    end
+    title(ax, stream_names{s}, 'FontSize', 11, 'FontWeight', 'bold', 'Color', stream_cols{s}*0.8);
+    xlabel(ax, 'simulated outcome'); ylabel(ax, 'target class (row %)');
+end
+sgtitle(fig6, 'Confusion matrix per stream — same buffer/thresholds, only the driving signal changes', 'FontSize', 12);
+saveas(fig6, fullfile(out_dir, 'confusion_matrix.svg'), 'svg');
+fprintf('Saved %s\n', fullfile(out_dir, 'confusion_matrix.svg'));
+if ~SHOW_FIGURES, close(fig6); end
+
+fprintf('\nSaved all figures to %s\n', out_dir);
+
+end % main_hybrid_advantage_integ
 
 % ── Local helpers (must be after all script statements) ────────────────────
 
@@ -1019,6 +1183,28 @@ function s = p_to_stars(p)
     elseif p < 0.05,  s = '*';
     else,              s = 'n.s.';
     end
+end
+
+function B = itr_bits_per_trial(P, N)
+% ITR_BITS_PER_TRIAL  Wolpaw et al. bits/trial for an N-class forced choice
+%   at accuracy P: B = log2(N) + P*log2(P) + (1-P)*log2((1-P)/(N-1)).
+%   P=0 and P=1 edge cases are handled explicitly (0*log2(0) := 0).
+    if isnan(P) || isnan(N) || N < 2, B = NaN; return; end
+    B = log2(N);
+    if P > 0, B = B + P * log2(P); end
+    if P < 1, B = B + (1-P) * log2((1-P) / (N-1)); end
+end
+
+function p = binom_test_upper(k, n, p0)
+% BINOM_TEST_UPPER  Exact one-sided binomial p-value for H0: P(success)<=p0,
+%   i.e. P(X >= k) under X~Binomial(n, p0). No Statistics Toolbox required
+%   (log-space via gammaln, consistent with this file's sign-flip/bootstrap
+%   tests elsewhere).
+    if isnan(k) || isnan(n) || n <= 0, p = NaN; return; end
+    ks    = k:n;
+    log_p = gammaln(n+1) - gammaln(ks+1) - gammaln(n-ks+1) + ...
+            ks*log(max(p0,eps)) + (n-ks)*log(max(1-p0,eps));
+    p = min(1, sum(exp(log_p)));
 end
 
 function draw_sig_bracket(ax, x1, x2, y, label)

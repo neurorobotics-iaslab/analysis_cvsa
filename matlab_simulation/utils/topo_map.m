@@ -1,4 +1,4 @@
-function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero)
+function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero, sig_mask)
 % TOPO_MAP  Publication-quality scalp topography at standard 10-20 positions.
 %   scatteredInterpolant on 200×200 grid, RdBu diverging colormap, contour at 0,
 %   head outline with nose and ears. Each call uses its own clim (pass [] for auto).
@@ -12,12 +12,22 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero)
 %   bg_zero    logical (default false): if true, all known 10-20 channels not
 %              in ch_names are added with value 0, giving smooth full-head maps
 %              when only a subset of electrodes was selected.
+%   sig_mask   logical vector, same length as the ORIGINAL ch_names (before
+%              any bg_zero padding) — pass [] or omit for none. Channels
+%              where true get a black ring marker overlaid on the coloured
+%              dot, to flag statistically significant channels (e.g. a
+%              cross-subject test) without altering the underlying colour
+%              scale.
 
     if nargin < 3, clim = []; end
     if nargin < 4 || isempty(ax), ax = gca; end
     if nargin < 5, ttl = ''; end
     if nargin < 6, show_cbar = true; end
     if nargin < 7, bg_zero = false; end
+    if nargin < 8, sig_mask = []; end
+    if ~isempty(sig_mask) && numel(sig_mask) ~= numel(ch_names)
+        error('topo_map:sigmask', 'sig_mask must have the same length as ch_names (before bg_zero padding)');
+    end
 
     pos = {
         'Fp1',[-0.31, 0.87]; 'Fp2',[ 0.31, 0.87];
@@ -51,6 +61,7 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero)
             if ~any(strcmp(input_upper, known_keys{ki}))
                 ch_names{end+1} = known_keys{ki}; %#ok<AGROW>
                 values(end+1)   = 0;              %#ok<AGROW>
+                if ~isempty(sig_mask), sig_mask(end+1) = false; end %#ok<AGROW>
             end
         end
     end
@@ -71,6 +82,7 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero)
     end
 
     xf = xy(ok,1); yf = xy(ok,2); vf = double(values(ok));
+    if ~isempty(sig_mask), sig_ok = sig_mask(ok); else, sig_ok = false(size(vf)); end
     cla(ax); hold(ax,'on'); axis(ax,'equal','off');
 
     res = 200;
@@ -116,6 +128,9 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero)
     plot(ax,  ear_x, ear_y, 'k-', 'LineWidth', 1.5);
 
     scatter(ax, xf, yf, 18, vf, 'filled', 'MarkerEdgeColor','none');
+    if any(sig_ok)
+        scatter(ax, xf(sig_ok), yf(sig_ok), 70, 'k', 'LineWidth', 1.6);   % open ring = significant
+    end
 
     % Labels: original channels in black-bold; bg_zero-padded channels in gray
     ok_idx = find(ok);

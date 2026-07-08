@@ -82,7 +82,14 @@ function trials = integrate_signal(p_mi, p_cvsa, art_flags, header_chunks, int_c
         start_chunk = POS(i_cf);
         dur_offset  = max(0, DUR(i_cf));              % offset to the LAST CF chunk
         end_chunk   = min(n_chunks, start_chunk + dur_offset);
-        n_cf        = end_chunk - start_chunk + 1;    % number of CF chunks = DUR+1
+        n_cf        = max(0, end_chunk - start_chunk + 1);   % number of CF chunks = DUR+1;
+                                                              % 0 if start_chunk is beyond the
+                                                              % processed signal (recording
+                                                              % ended before this trial's CF)
+        if n_cf == 0
+            log_step('integrate_signal: trial %d/%d  CF start (chunk %d) is beyond the processed signal (n_chunks=%d) -- recording ended before this trial''s CF started; trial has no data', ...
+                     t, numel(cf_idx), start_chunk, n_chunks);
+        end
 
         onset_code   = find_onset_before(TYP, i_cf, classes);
         target_class = find(classes == onset_code, 1);
