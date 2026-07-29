@@ -102,15 +102,31 @@
 %   across subjects (simple unweighted mean) and reconstructs the same
 %   7-column topoplot grid at the cohort level.
 
-function topo_erders(gdf_dir, gdf_names, show_figures)
+function topo_erders(gdf_dir, gdf_names, show_figures, save_per_file)
 %   Callable as a function:
 %     topo_erders(gdf_dir)                        → analyse all GDFs in folder
 %     topo_erders(gdf_dir, gdf_names)             → analyse specific GDFs
 %     topo_erders(gdf_dir, gdf_names, true)       → also show figures on screen
+%     topo_erders(gdf_dir, gdf_names, false, false) → skip per-file topoplots/
+%                                                     heatmaps/ROI figures too
+%                                                     (grand-average figures +
+%                                                     both .mat summaries are
+%                                                     unaffected) — each
+%                                                     topoplot/heatmap figure
+%                                                     involves EEGLAB's
+%                                                     topoplot() plus an SVG
+%                                                     export, which dominates
+%                                                     this function's runtime;
+%                                                     skipping the per-file
+%                                                     set (proportional to the
+%                                                     number of GDFs) is the
+%                                                     cheapest way to speed it
+%                                                     up.
 %   With no arguments, shows a GUI picker.
 
 % --- Display options -------------------------------------------------------
 if nargin < 3, show_figures = false; end
+if nargin < 4, save_per_file = true; end
 SHOW_FIGURES = show_figures;
 if SHOW_FIGURES, fig_vis = 'on'; else, fig_vis = 'off'; end
 
@@ -456,20 +472,35 @@ for p = 1:n_par
     % ── Topoplot colour limits, from the same NaN-masked band power
     %    (over cue->max-CF-end), so topoplots use exactly the data the
     %    per-interval averages below are drawn from.
+    %    MI: single [lo 0] scale for the whole band grid (unchanged).
+    %    CVSA: ONE PER TIME-INTERVAL COLUMN instead of one scale for the
+    %    whole 7-column grid -- a single shared scale meant genuine but
+    %    modest lateralization in most columns collapsed to the flat middle
+    %    colour whenever one column (e.g. the widest "Cue+CF" window) had a
+    %    much bigger swing than the others, making real effects in the
+    %    other columns unreadable. 99th percentile (not raw max) so one
+    %    noisy channel/timepoint doesn't blow up a column's own scale
+    %    either. lims{idx_b} is therefore [num_intervals x 1] for CVSA
+    %    bands, one symmetric half-range per column (see plot_topo_grid).
     lims = cell(size(bnd,1), 1);
     for idx_b = 1:size(bnd,1)
-        c1 = par_heat{p}{idx_b}.c1(:, cf_idx);
-        c2 = par_heat{p}{idx_b}.c2(:, cf_idx);
         if strcmpi(origin{idx_b}, 'MI')
+            c1 = par_heat{p}{idx_b}.c1(:, cf_idx);
+            c2 = par_heat{p}{idx_b}.c2(:, cf_idx);
             neg = min(cat(1, c1, c2), 0);
             mx  = max(-neg(:));
             if mx == 0 || isnan(mx), mx = 1; end
             lims{idx_b} = [-mx 0];
         else   % CVSA: lateralization index = class1 - class2
-            d  = c1 - c2;
-            mx = max(abs(d(:)));
-            if mx == 0 || isnan(mx), mx = 1; end
-            lims{idx_b} = [-mx mx];
+            d = par_heat{p}{idx_b}.c1 - par_heat{p}{idx_b}.c2;   % full heat_times range
+            mx_col = zeros(num_intervals, 1);
+            for c = 1:num_intervals
+                t_idx_c  = heat_times >= intervals(c,1)*1000 & heat_times < intervals(c,2)*1000;
+                col_vals = d(:, t_idx_c);
+                mx_col(c) = local_prctile(abs(col_vals(:)), 99);
+                if mx_col(c) == 0 || isnan(mx_col(c)), mx_col(c) = 1; end
+            end
+            lims{idx_b} = mx_col;
         end
     end
     par_lims{p} = lims;
@@ -516,7 +547,7 @@ for p = 1:n_par
     par_dir       = fullfile(output_dir, paradigms{p});
     par_dir_files = fullfile(par_dir, 'per_file');
     if ~exist(par_dir, 'dir'), mkdir(par_dir); end
-    if ~exist(par_dir_files, 'dir'), mkdir(par_dir_files); end
+    if save_per_file && ~exist(par_dir_files, 'dir'), mkdir(par_dir_files); end
 
     bnd    = par_bands{p};
     bnames = par_band_names{p};
@@ -575,6 +606,11 @@ for p = 1:n_par
                              bnd, bnames, origin, evt, par_mi_mask{p}, par_cvsa_mask{p}, par_dir, paradigms{p}, fig_vis);
 
     % ── Per-file (same colour scale + bands as this paradigm) ────────────
+    %    Skippable via save_per_file: this loop is pure plotting/SVG-export
+    %    on data already computed above, so skipping it does not affect
+    %    the grand-average figures or topo_erders_summary.mat/
+    %    topo_erders_channels.mat.
+    if save_per_file
     for f = idx_p
         plot_topo_grid(all_heat_pow{f}, chanlocs_ref, heat_times, bnd, bnames, origin, ...
                        lims, intervals, titles_cols, evt, masks_none, par_dir_files, sprintf('all_%s', file_label{f}), fig_vis);
@@ -607,6 +643,7 @@ for p = 1:n_par
             plot_heatmap_grid(all_heat_pow{f}, chan_labels, heat_times, heat_time_range, ...
                                CUE_DURATION_S*1000, bnames, evt, file_heat_mask, par_dir_files, sprintf('sel_%s', file_label{f}), fig_vis);
         end
+    end
     end
 end
 
@@ -683,7 +720,12 @@ function plot_topo_grid(heat_bands, chanlocs, heat_times, bands, band_names, ban
 %   bands         : [Nx2] frequency bands (Hz), used for figure titles only
 %   band_origin   : {N} 'MI' (ERD-only, 2 rows = cues) | 'CVSA' (lateralization
 %                   index cue1-cue2, 1 row)
-%   band_lims     : {N} colour-axis limits per band
+%   band_lims     : {N} colour-axis limits per band -- for MI bands, a
+%                   single [lo 0] used for the whole grid; for CVSA bands,
+%                   a [num_intervals x 1] vector, one symmetric half-range
+%                   PER TIME-INTERVAL COLUMN (see topo_erders.m's caller for
+%                   why: a single shared scale washed out modest-but-real
+%                   lateralization in narrower columns)
 %   intervals     : [Mx2] time windows (s, relative to cue onset)
 %   event_types_p : {2} cue/event codes for this paradigm, used as row labels
 %   band_masks    : {N} of [] or logical [nchan x 1] — channels not in mask
@@ -710,6 +752,19 @@ function plot_topo_grid(heat_bands, chanlocs, heat_times, bands, band_names, ban
         h = figure('Name', sprintf('%s — %s %g-%g Hz', prefix, band_origin{idx_b}, low_f, high_f), ...
                     'Color','w', 'NumberTitle','off', 'Visible',fig_vis);
         set(h, 'Units','normalized', 'OuterPosition', [0 0 1 1]);
+        % MI bands are ONE-SIDED (ERD only, data(data>0)=0 below, clim=[-mx 0]
+        % -- ZERO IS THE UPPER BOUND of the colour axis, not its centre).
+        % A diverging blue-white-red map would then put 0 (= "no ERD") at
+        % the RED end (top of the axis), not at white -- exactly the "all
+        % red at 0" artifact this would otherwise cause. jet has no
+        % "neutral white centre" to misplace, so the full colormap spread
+        % maps meaningfully across the one-sided [-mx,0] range instead (0 =
+        % dark red = "no ERD" still, but that's jet's natural top colour,
+        % not a diverging map's midpoint colour misapplied). Same
+        % convention already used by group_topo_erders.m for the same
+        % reason. CVSA bands are genuinely bidirectional (lateralization
+        % index, symmetric clim=[-mx mx]), so they keep the diverging map.
+        if is_mi, colormap(h, jet(256)); else, colormap(h, erd_colormap(256)); end
         tiledlayout(num_rows, num_intervals, 'TileSpacing','compact', 'Padding','tight');
 
         for r = 1:num_rows
@@ -721,10 +776,13 @@ function plot_topo_grid(heat_bands, chanlocs, heat_times, bands, band_names, ban
                     src  = c1; if r == 2, src = c2; end
                     data = mean(src(:, t_idx), 2, 'omitnan');
                     data(data > 0) = 0;   % ERD only
+                    col_lims = band_lims{idx_b};
                 else
                     d1 = mean(c1(:, t_idx), 2, 'omitnan');
                     d2 = mean(c2(:, t_idx), 2, 'omitnan');
                     data = d1 - d2;
+                    mx = band_lims{idx_b}(c);   % per-column scale (see header doc)
+                    col_lims = [-mx mx];
                 end
                 % No trial of this class has CF still running in this
                 % interval for some channel -> mean is NaN; show as 0
@@ -732,13 +790,17 @@ function plot_topo_grid(heat_bands, chanlocs, heat_times, bands, band_names, ban
                 data(isnan(data)) = 0;
                 if ~isempty(mask), data = data .* mask(:); end
 
-                topoplot(data, chanlocs, 'style','both', 'maplimits', band_lims{idx_b}, ...
+                topoplot(data, chanlocs, 'style','both', 'maplimits', col_lims, ...
                          'electrodes','labels', 'whitebk','on');
                 if r == 1, title(titles_cols{c}, 'FontSize', 9); end
                 if c == 1
                     ylabel(row_labels{r}, 'Visible','on', 'FontWeight','bold');
                 end
-                if c == num_intervals, colorbar; end
+                if c == num_intervals
+                    cb = colorbar;
+                    if is_mi, cb.Label.String = '% ERD vs baseline';
+                    else,     cb.Label.String = '% ERD/ERS, cue1-cue2'; end
+                end
             end
         end
 
@@ -788,6 +850,19 @@ function cmap = erd_colormap(n)
     cmap = [blue_white; white_red];
 end
 
+function v = local_prctile(x, pct)
+% LOCAL_PRCTILE  Linear-interpolation percentile, no Statistics Toolbox
+%   required (equivalent to MATLAB's default prctile method on a vector).
+    x = x(isfinite(x));
+    x = sort(x(:));
+    n = numel(x);
+    if n == 0, v = NaN; return; end
+    if n == 1, v = x(1); return; end
+    idx = (pct/100) * (n-1) + 1;
+    lo = floor(idx); hi = ceil(idx);
+    if lo == hi, v = x(lo); else, v = x(lo) + (x(hi)-x(lo)) * (idx-lo); end
+end
+
 function plot_heatmap_grid(heat_bands, chan_labels, heat_times, heat_time_range, ...
                             cue_duration_ms, band_names, event_types_p, sel_mask, out_dir, prefix, fig_vis)
 % PLOT_HEATMAP_GRID  One figure per band: 2 rows (one per cue/class), each a
@@ -828,7 +903,8 @@ function plot_heatmap_grid(heat_bands, chan_labels, heat_times, heat_time_range,
             set(ax, 'Color', [0.85 0.85 0.85], 'YDir','normal', ...
                     'YTick', 1:numel(ch_idx), 'YTickLabel', chan_labels(ch_idx));
             colormap(ax, cmap);
-            colorbar(ax);
+            cb = colorbar(ax);
+            cb.Label.String = '% ERD(-)/ERS(+) vs baseline';
             hold(ax, 'on');
             xline(ax, cue_duration_ms/1000, 'k--', 'LineWidth', 1.2, 'HandleVisibility','off');
             xlabel(ax, 't [s]  (0 = cue onset, dashed = CF onset)');

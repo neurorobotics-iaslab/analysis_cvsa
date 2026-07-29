@@ -98,6 +98,15 @@ all_meanP_cvsa = [];
 all_meanBuf_hyb  = [];   % mean integrator output for the TARGET class over CF (per trial)
 all_meanBuf_mi   = [];
 all_meanBuf_cvsa = [];
+% "Time in correct zone": fraction of that trial's OWN actual CF duration
+% (nc frames, all trials -- hit/miss/timeout alike, whole 5s window, no
+% outcome-based truncation) where the target-class signal was on the
+% correct side of 0.5. Two versions: RAW = pre-integrator sLDA/fused P(target)
+% (classifier signal quality, isolated from the leaky integrator's own
+% dynamics); INT = post-integrator buffer(target) (the actual control signal
+% level, closer to what the VR feedback shows).
+all_fracraw_hyb  = []; all_fracraw_mi  = []; all_fracraw_cvsa  = [];
+all_fracint_hyb  = []; all_fracint_mi  = []; all_fracint_cvsa  = [];
 all_buf_hyb  = {};       % full integrator-output trajectory for the TARGET class over CF (per trial)
 all_buf_mi   = {};
 all_buf_cvsa = {};
@@ -147,6 +156,13 @@ buf_hyb_cell  = cell(n_trials, 1);   % integrator output for the target class ov
 buf_mi_cell   = cell(n_trials, 1);
 buf_cvsa_cell = cell(n_trials, 1);
 trial_class = nan(n_trials, 1);
+% "Time in correct zone": fraction of THIS trial's own CF frames (all
+% trials, whatever the outcome, whole actual CF duration) where the
+% target-class signal was on the correct side of 0.5 -- raw (pre-integrator)
+% and integrated (post-integrator buffer) versions, see accumulator comment
+% above.
+fracRaw = struct('hyb', nan(n_trials,1), 'mi', nan(n_trials,1), 'cvsa', nan(n_trials,1));
+fracInt = struct('hyb', nan(n_trials,1), 'mi', nan(n_trials,1), 'cvsa', nan(n_trials,1));
 
 fprintf('\n  Trial  class  REAL    HYB            MI-only        CVSA-only\n');
 for t = 1:n_trials
@@ -173,6 +189,13 @@ for t = 1:n_trials
     meanBuf.hyb(t)  = mean(buf_hyb_cell{t},  'omitnan');
     meanBuf.mi(t)   = mean(buf_mi_cell{t},   'omitnan');
     meanBuf.cvsa(t) = mean(buf_cvsa_cell{t}, 'omitnan');
+
+    fracRaw.hyb(t)  = mean(trials_hyb(t).raw (np+1:np+nc, c) > 0.5, 'omitnan');
+    fracRaw.mi(t)   = mean(trials_mi(t).raw  (np+1:np+nc, c) > 0.5, 'omitnan');
+    fracRaw.cvsa(t) = mean(trials_cvsa(t).raw(np+1:np+nc, c) > 0.5, 'omitnan');
+    fracInt.hyb(t)  = mean(buf_hyb_cell{t}  > 0.5, 'omitnan');
+    fracInt.mi(t)   = mean(buf_mi_cell{t}   > 0.5, 'omitnan');
+    fracInt.cvsa(t) = mean(buf_cvsa_cell{t} > 0.5, 'omitnan');
 
     switch trial_outcome_real(t)
         case HIT_CODE_SIM,     real_str = 'HIT';
@@ -313,6 +336,12 @@ all_meanBuf_cvsa = [all_meanBuf_cvsa; meanBuf.cvsa(valid_t)];
 all_buf_hyb  = [all_buf_hyb;  buf_hyb_cell(valid_t)];
 all_buf_mi   = [all_buf_mi;   buf_mi_cell(valid_t)];
 all_buf_cvsa = [all_buf_cvsa; buf_cvsa_cell(valid_t)];
+all_fracraw_hyb  = [all_fracraw_hyb;  fracRaw.hyb(valid_t)];
+all_fracraw_mi   = [all_fracraw_mi;   fracRaw.mi(valid_t)];
+all_fracraw_cvsa = [all_fracraw_cvsa; fracRaw.cvsa(valid_t)];
+all_fracint_hyb  = [all_fracint_hyb;  fracInt.hyb(valid_t)];
+all_fracint_mi   = [all_fracint_mi;   fracInt.mi(valid_t)];
+all_fracint_cvsa = [all_fracint_cvsa; fracInt.cvsa(valid_t)];
 all_trial_class = [all_trial_class; trial_class(valid_t)];
 all_file_label  = [all_file_label; repmat({basename}, numel(valid_t), 1)];
 
@@ -395,6 +424,36 @@ for s = 1:3
             stream_names{s}, itr_bits(s), itr_bpm(s), chance_p_s(s), ...
             p_to_stars(chance_p_s(s)), n_dec_s);
 end
+
+% --- "Time in correct zone": fraction of CF frames on the correct side of
+%   0.5, ALL trials (hit/miss/timeout alike, whole actual CF duration, no
+%   outcome-based truncation) -- per trial, then paired (same trials) mean +
+%   sign-flip test Hybrid vs MI-only / Hybrid vs CVSA-only. Raw = pre-
+%   integrator classifier signal; Int = post-integrator control signal
+%   (what actually drives the VR feedback). Trial is the unit here (paired
+%   within-file/within-subject test); main_group_analysis.m re-tests with
+%   subject as the unit across the cohort. -------------------------------
+n_perm_local = 2000;
+fracraw_mean = [mean(all_fracraw_hyb,'omitnan'), mean(all_fracraw_mi,'omitnan'), mean(all_fracraw_cvsa,'omitnan')];
+fracint_mean = [mean(all_fracint_hyb,'omitnan'), mean(all_fracint_mi,'omitnan'), mean(all_fracint_cvsa,'omitnan')];
+d_fracraw_mi  = all_fracraw_hyb - all_fracraw_mi;   d_fracraw_cvs = all_fracraw_hyb - all_fracraw_cvsa;
+d_fracint_mi  = all_fracint_hyb - all_fracint_mi;   d_fracint_cvs = all_fracint_hyb - all_fracint_cvsa;
+p_fracraw_mi  = sign_flip_test(d_fracraw_mi,  n_perm_local);
+p_fracraw_cvs = sign_flip_test(d_fracraw_cvs, n_perm_local);
+p_fracint_mi  = sign_flip_test(d_fracint_mi,  n_perm_local);
+p_fracint_cvs = sign_flip_test(d_fracint_cvs, n_perm_local);
+fprintf('\n  "Time in correct zone" (%% of CF frames with target-class signal > 0.5, ALL trials, whole CF duration):\n');
+fprintf('  %-10s %8s %8s   %8s %8s\n', 'stream', 'raw %', 'int %', '(paired vs Hybrid, trial=unit)', '');
+for s = 1:3
+    fprintf('  %-10s %7.1f%% %7.1f%%\n', stream_names{s}, 100*fracraw_mean(s), 100*fracint_mean(s));
+end
+fprintf('  Hybrid-MI-only   : raw delta=%+.1f%% p=%.4f %s  |  int delta=%+.1f%% p=%.4f %s\n', ...
+        100*mean(d_fracraw_mi,'omitnan'), p_fracraw_mi, p_to_stars(p_fracraw_mi), ...
+        100*mean(d_fracint_mi,'omitnan'), p_fracint_mi, p_to_stars(p_fracint_mi));
+fprintf('  Hybrid-CVSA-only : raw delta=%+.1f%% p=%.4f %s  |  int delta=%+.1f%% p=%.4f %s\n', ...
+        100*mean(d_fracraw_cvs,'omitnan'), p_fracraw_cvs, p_to_stars(p_fracraw_cvs), ...
+        100*mean(d_fracint_cvs,'omitnan'), p_fracint_cvs, p_to_stars(p_fracint_cvs));
+fprintf('  (two-sided sign-flip permutation, %d perms, trial is the unit within this file/subject)\n', n_perm_local);
 
 % --- "who hits?" breakdown: Hybrid vs MI-only, Hybrid vs CVSA-only ---------
 cmp_labels = {'both HIT','only Hybrid HIT','only other HIT','neither HIT'};
@@ -862,6 +921,23 @@ counterfactual.buf_adv_cvs_win_mean   = buf_adv_cvs_win_mean;
 counterfactual.buf_adv_cvs_win_pval   = buf_adv_cvs_win_pval;
 counterfactual.buf_adv_cvs_win_cohend = buf_adv_cvs_win_cohend;
 counterfactual.buf_adv_mi_win_n_trials = sum(~isnan(buf_adv_mi_win));
+% Raw per-trial (outcome_code, t_event_s) for all 3 streams -- code:
+% 1=HIT, 2=MISS, 3=TIMEOUT, matching classify_trial_outcome's convention.
+% Lets main_group_analysis.m split trials by WHEN they resolved (within vs
+% after cvsa_influence) without needing to re-run the pipeline -- these are
+% already computed above (all_oc_hyb/all_oc_mi/all_oc_cvsa), just not
+% previously exported.
+counterfactual.oc_hyb  = all_oc_hyb;    % [n_trials x 2]
+counterfactual.oc_mi   = all_oc_mi;
+counterfactual.oc_cvsa = all_oc_cvsa;
+% "Time in correct zone": mean fraction of CF frames (ALL trials, whole
+% actual per-trial CF duration, no outcome-based truncation) with the
+% target-class signal > 0.5 -- [1x3] Hybrid/MI-only/CVSA-only, raw
+% (pre-integrator) and int (post-integrator, the actual control signal).
+% Used by main_group_analysis.m for a per-subject + group-level figure.
+counterfactual.frac_correct_raw = fracraw_mean;
+counterfactual.frac_correct_int = fracint_mean;
+counterfactual.frac_correct_n_trials = n_tot;
 save(fullfile(out_dir, 'counterfactual_summary.mat'), 'counterfactual');
 fprintf('\nSaved counterfactual_summary.mat to %s\n', out_dir);
 

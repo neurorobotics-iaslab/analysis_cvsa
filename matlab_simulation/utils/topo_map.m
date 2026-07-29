@@ -1,7 +1,8 @@
-function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero, sig_mask)
+function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero, sig_mask, cmap, cbar_label)
 % TOPO_MAP  Publication-quality scalp topography at standard 10-20 positions.
-%   scatteredInterpolant on 200×200 grid, RdBu diverging colormap, contour at 0,
-%   head outline with nose and ears. Each call uses its own clim (pass [] for auto).
+%   scatteredInterpolant on 200×200 grid, RdBu diverging colormap by default,
+%   contour at 0, head outline with nose and ears. Each call uses its own
+%   clim (pass [] for auto).
 %
 %   ch_names   cell array of strings
 %   values     numeric vector (same length as ch_names)
@@ -18,6 +19,15 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero, sig_mask)
 %              dot, to flag statistically significant channels (e.g. a
 %              cross-subject test) without altering the underlying colour
 %              scale.
+%   cmap       [N x 3] colormap, or [] / omit for the default RdBu diverging
+%              map (topo_rdbu). Callers that want a different look (e.g.
+%              jet, to match an EEGLAB-rendered companion plot) can pass one
+%              in without affecting any other caller's default appearance.
+%   cbar_label string, or [] / omit for none — units of the plotted quantity
+%              (e.g. '% ERD vs baseline'), written on the colourbar itself so
+%              an exported SVG is self-contained. Different callers plot
+%              different quantities (ERD/ERS percent, raw CSP/sLDA weights,
+%              selectivity index, ...), so there is no sensible default.
 
     if nargin < 3, clim = []; end
     if nargin < 4 || isempty(ax), ax = gca; end
@@ -25,6 +35,8 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero, sig_mask)
     if nargin < 6, show_cbar = true; end
     if nargin < 7, bg_zero = false; end
     if nargin < 8, sig_mask = []; end
+    if nargin < 9 || isempty(cmap), cmap = topo_rdbu(256); end
+    if nargin < 10, cbar_label = ''; end
     if ~isempty(sig_mask) && numel(sig_mask) ~= numel(ch_names)
         error('topo_map:sigmask', 'sig_mask must have the same length as ch_names (before bg_zero padding)');
     end
@@ -111,10 +123,11 @@ function topo_map(ch_names, values, clim, ax, ttl, show_cbar, bg_zero, sig_mask)
     end
 
     pcolor(ax, GX, GY, GZ); shading(ax,'interp');
-    colormap(ax, topo_rdbu(256));
+    colormap(ax, cmap);
     caxis(ax, clim);
     if show_cbar
-        colorbar(ax, 'FontSize',6, 'TickLabelInterpreter','none');
+        cb = colorbar(ax, 'FontSize',6, 'TickLabelInterpreter','none');
+        if ~isempty(cbar_label), cb.Label.String = cbar_label; cb.Label.FontSize = 6; end
     end
 
     try; contour(ax, GX, GY, GZ, [0 0], 'k-', 'LineWidth', 0.5); catch; end

@@ -295,6 +295,17 @@ n_hurt_fr  = 0;   % frames: P_MI(target)>0.5  -> P_fused(target)<=0.5 (CVSA hurt
 n_both_ok  = 0;   % frames: both correct
 n_both_bad = 0;   % frames: both wrong
 
+% Same 4-way rescue/hurt/both-ok/both-bad classification, but over two
+% ADDITIONAL frame windows besides the cvsa_influence-restricted one above:
+%   _all  -- every valid CF frame of the trial (no time restriction)
+%   _post -- only frames AFTER cvsa_influence has elapsed (alpha ~ 0, fusion
+%            output ~ pure MI already) -- NOT every trial contributes here,
+%            since a trial whose CF ends before cvsa_influence has none.
+% All three share the SAME per-trial loop below for a single pass.
+n_resc_all = 0;   n_hurt_all = 0;   n_both_ok_all = 0;   n_both_bad_all = 0;
+n_resc_post = 0;  n_hurt_post = 0;  n_both_ok_post = 0;  n_both_bad_post = 0;
+n_trials_post = 0;   % trials contributing >=1 post-cvsa_influence frame
+
 % Pooled (both classes) per-trial x per-frame matrices within the CVSA-
 % influence window, for the cluster-based permutation test below -- same
 % class-agnostic pooling convention already used for fus_adv/n_help/n_hurt.
@@ -336,6 +347,28 @@ for t = 1:n_trials
         fus_pool(t, idx_inf)  = pf(idx_inf);
         diff_pool(t, idx_inf) = pf(idx_inf) - pm(idx_inf);
     end
+
+    % -- whole trial (no time restriction) --
+    if any(vld)
+        mi_ok_all  = pm(vld) > 0.5;
+        fus_ok_all = pf(vld) > 0.5;
+        n_resc_all     = n_resc_all     + sum(~mi_ok_all &  fus_ok_all);
+        n_hurt_all     = n_hurt_all     + sum( mi_ok_all & ~fus_ok_all);
+        n_both_ok_all  = n_both_ok_all  + sum( mi_ok_all &  fus_ok_all);
+        n_both_bad_all = n_both_bad_all + sum(~mi_ok_all & ~fus_ok_all);
+    end
+
+    % -- from cvsa_influence onward only (alpha ~ 0 already) --
+    vld_post = vld & ~vld_inf;
+    if any(vld_post)
+        n_trials_post = n_trials_post + 1;
+        mi_ok_p  = pm(vld_post) > 0.5;
+        fus_ok_p = pf(vld_post) > 0.5;
+        n_resc_post     = n_resc_post     + sum(~mi_ok_p &  fus_ok_p);
+        n_hurt_post     = n_hurt_post     + sum( mi_ok_p & ~fus_ok_p);
+        n_both_ok_post  = n_both_ok_post  + sum( mi_ok_p &  fus_ok_p);
+        n_both_bad_post = n_both_bad_post + sum(~mi_ok_p & ~fus_ok_p);
+    end
 end
 
 n_def  = sum(~isnan(fus_adv));
@@ -362,6 +395,27 @@ fprintf('  rescued (MI wrong -> fused correct): %d\n', n_resc);
 fprintf('  hurt    (MI correct -> fused wrong): %d\n', n_hurt_fr);
 fprintf('  both correct: %d   both wrong: %d\n', n_both_ok, n_both_bad);
 fprintf('  net effect: %+d frames  ->  %s\n', net_fr, verdict_fr);
+
+net_all = n_resc_all - n_hurt_all;
+if net_all > 0,     verdict_all = 'CVSA helped';
+elseif net_all < 0, verdict_all = 'CVSA hurt';
+else,               verdict_all = 'neutral';
+end
+fprintf('\n  CVSA-fusion frame-level effect  (WHOLE trial, no time restriction):\n');
+fprintf('  rescued: %d   hurt: %d   both correct: %d   both wrong: %d\n', ...
+        n_resc_all, n_hurt_all, n_both_ok_all, n_both_bad_all);
+fprintf('  net effect: %+d frames  ->  %s\n', net_all, verdict_all);
+
+net_post = n_resc_post - n_hurt_post;
+if net_post > 0,     verdict_post = 'CVSA helped';
+elseif net_post < 0, verdict_post = 'CVSA hurt';
+else,                verdict_post = 'neutral';
+end
+fprintf('\n  CVSA-fusion frame-level effect  (from %.1fs ONWARD, alpha~0 -- %d/%d trials contribute):\n', ...
+        cvsa_inf, n_trials_post, n_trials);
+fprintf('  rescued: %d   hurt: %d   both correct: %d   both wrong: %d\n', ...
+        n_resc_post, n_hurt_post, n_both_ok_post, n_both_bad_post);
+fprintf('  net effect: %+d frames  ->  %s\n', net_post, verdict_post);
 
 % ── Cluster-based permutation test (Maris & Oostenveld style): is there a
 %    genuine, temporally-localised period of CVSA-fusion influence within
@@ -832,6 +886,18 @@ probs_summary(idx_acc).n_rescued_fr = n_resc;
 probs_summary(idx_acc).n_hurt_fr    = n_hurt_fr;
 probs_summary(idx_acc).n_both_ok_fr = n_both_ok;
 probs_summary(idx_acc).n_both_bad_fr = n_both_bad;
+% Same 4-way frame counts over the two additional windows (see comment above
+% n_resc_all's declaration) -- consumed by main_group_analysis.m's 3-panel
+% rescue/hurt breakdown (within cvsa_influence / whole trial / post).
+probs_summary(idx_acc).n_rescued_fr_all  = n_resc_all;
+probs_summary(idx_acc).n_hurt_fr_all     = n_hurt_all;
+probs_summary(idx_acc).n_both_ok_fr_all  = n_both_ok_all;
+probs_summary(idx_acc).n_both_bad_fr_all = n_both_bad_all;
+probs_summary(idx_acc).n_rescued_fr_post  = n_resc_post;
+probs_summary(idx_acc).n_hurt_fr_post     = n_hurt_post;
+probs_summary(idx_acc).n_both_ok_fr_post  = n_both_ok_post;
+probs_summary(idx_acc).n_both_bad_fr_post = n_both_bad_post;
+probs_summary(idx_acc).n_trials_post = n_trials_post;   % how many of n_trials contributed >=1 post-cvsa_influence frame
 probs_summary(idx_acc).rescue_delta = mean_d(3);
 probs_summary(idx_acc).cost_delta   = mean_d(2);
 % For the group-level (cross-subject) cluster-based permutation test in

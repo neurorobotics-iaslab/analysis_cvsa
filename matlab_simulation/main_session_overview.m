@@ -89,6 +89,15 @@ BIN_WIDTH_S = 0.5;  % within-trial fixed time-bin width for Fig 8 (seconds)
 MAX_TIME_S  = 5.0;  % within-trial time axis cap for Fig 8 (seconds from CF onset)
 BIN_EDGES_S = 0:BIN_WIDTH_S:MAX_TIME_S;
 
+% Raw-EEG signal-quality check (per trial, CF window only): flags a channel
+% as "dead" (flat-lined / disconnected) or "very noisy" (saturated / heavy
+% movement) based on its own std/peak-to-peak amplitude during that trial,
+% post-CAR pre-filter -- see the SIGNAL QUALITY block below. Tune these if
+% your amplifier's noise floor / plausible EEG range differs.
+SIGQC_DEAD_STD_UV  = 0.5;   % channel std (uV) below this during the trial's CF window => "dead"/flat
+SIGQC_NOISY_STD_UV = 60;    % channel std (uV) above this during the trial's CF window => "very noisy"
+SIGQC_NOISY_PP_UV  = 250;   % OR peak-to-peak (uV) above this during the trial's CF window => "very noisy"
+
 % Set to true to print, for every trial, the per-frame P/argmax diagnostic
 % used to debug class-ordering issues. Very verbose — leave false for a
 % normal session overview.
@@ -116,6 +125,13 @@ n_files = numel(gdf_names);
 
 par_count = struct('mi',0,'cvsa',0,'hybrid',0,'unknown',0);
 RES       = {};   % cell array of result structs
+
+% CSP/sLDA channel-weight data for cross-subject use by
+% group_csp_slda_importance.m -- populated once per paradigm (mi/cvsa) from
+% the FIRST file of that paradigm encountered (the deployed CSP/sLDA model
+% is the same across every file of a paradigm within one run, so there is
+% nothing to average across files here, unlike ERD/ERS raw EEG data).
+csp_slda_data = struct();
 
 %% ═════════════════════════════════════════════════════════════════════════════
 %  PER-FILE LOOP
@@ -196,6 +212,8 @@ for fi = 1:n_files
     sa_mi_cls = NaN; sa_cvsa_cls = NaN; sa_fused_cls = NaN;
     qacc_mi = []; qacc_cvsa = []; qacc_fused = [];   % within-trial quarter accuracy, [n_tr x N_Q]
     art_rate = []; art_hit_mask = []; art_miss_mask = [];   % per-trial artifact rate during CF
+    sigqc_n_dead = []; sigqc_n_noisy = []; sigqc_dead_ch = {}; sigqc_noisy_ch = {};
+    sigqc_flag = []; sigqc_hit_mask = []; sigqc_miss_mask = [];   % per-trial raw-signal quality (dead/noisy ch during CF)
     r_csp_mi        = [];   % populated inside try if MI CSP is available
     r_csp_cvsa      = [];   % populated inside try if CVSA CSP is available
     r_slda_mi       = [];   % sLDA-weighted spatial analysis, MI
@@ -228,6 +246,69 @@ for fi = 1:n_files
         bufsize_proc = double(params.RingBufferCfg.params.size);
         bufsize_art  = double(params.RingBufferCfgArtifact.params.size);
         eog_names    = to_strcell(params.CarCfg.params.EOG_ch_names);
+
+        % ── Raw EEG signal-quality check, per trial (CF window only) ─────────
+        %   Post-CAR (same reference as apply_processing.m), pre-filter raw
+        %   signal, restricted to THIS TRIAL's own [CF onset, outcome event]
+        %   window -- deliberately independent of the artifact detector
+        %   (art_flags/Fig 9 above answer "did the EOG/peak gate fire?"; this
+        %   answers a more basic question: was the raw electrode signal even
+        %   valid during the trial -- flat/disconnected, or so far outside a
+        %   plausible EEG amplitude range that it's noise/saturation, not
+        %   brain signal? Placed early in this try block (right after
+        %   eog_names) so it still runs even if a later step (CSP/sLDA/
+        %   integrator) fails.
+        all_labels_sq = to_strcell(header.Label);
+        eog_idx_sq = [];
+        for i_e = 1:numel(eog_names)
+            m_e = find(strcmpi(all_labels_sq, strtrim(eog_names{i_e})), 1);
+            if ~isempty(m_e), eog_idx_sq(end+1) = m_e; end %#ok<AGROW>
+        end
+        non_eog_sq  = setdiff(1:size(signal,2), eog_idx_sq);
+        car_mean_sq = mean(signal(:, non_eog_sq), 2);
+        sig_car_sq  = signal(:, non_eog_sq) - car_mean_sq;   % [n_samp x n_non_eog], post-CAR
+        ch_names_sq = all_labels_sq(non_eog_sq);
+
+        n_samp_sq = size(signal, 1);
+        sigqc_n_dead   = nan(1, n_cf_ev);
+        sigqc_n_noisy  = nan(1, n_cf_ev);
+        sigqc_dead_ch  = cell(1, n_cf_ev);
+        sigqc_noisy_ch = cell(1, n_cf_ev);
+        for t_q = 1:n_cf_ev
+            if isnan(dt_vals(t_q)), continue; end
+            s0 = cf_pos(t_q);
+            s1 = min(n_samp_sq, cf_pos(t_q) + round(dt_vals(t_q) * fs));
+            if s1 <= s0, continue; end
+            seg     = sig_car_sq(s0:s1, :);
+            seg_std = std(seg, 0, 1);
+            seg_pp  = max(seg, [], 1) - min(seg, [], 1);
+            is_dead  = seg_std < SIGQC_DEAD_STD_UV;
+            is_noisy = seg_std > SIGQC_NOISY_STD_UV | seg_pp > SIGQC_NOISY_PP_UV;
+            sigqc_dead_ch{t_q}  = ch_names_sq(is_dead);
+            sigqc_noisy_ch{t_q} = ch_names_sq(is_noisy);
+            sigqc_n_dead(t_q)   = sum(is_dead);
+            sigqc_n_noisy(t_q)  = sum(is_noisy);
+        end
+        % (sigqc_n_dead/n_noisy are NaN for trials with no matched outcome --
+        %  NaN>0 is false in MATLAB, so those trials just read as "not
+        %  flagged" here; harmless since sigqc_hit_mask/sigqc_miss_mask
+        %  below are also false for them, so the Fig 11 keep-mask already
+        %  excludes them regardless.)
+        sigqc_flag      = (sigqc_n_dead > 0) | (sigqc_n_noisy > 0);
+        sigqc_hit_mask  = false(1, n_cf_ev); sigqc_hit_mask(1:n_cf_ev)  = outcomes(1:n_cf_ev) == HIT_EV;
+        sigqc_miss_mask = false(1, n_cf_ev); sigqc_miss_mask(1:n_cf_ev) = outcomes(1:n_cf_ev) == MISS_EV | outcomes(1:n_cf_ev) == TO_EV;
+
+        n_sigqc_valid   = sum(~isnan(sigqc_n_dead));
+        n_sigqc_flagged = sum(sigqc_flag > 0, 'omitnan');
+        fprintf('  Signal quality (raw EEG, post-CAR, during CF): %d/%d trials flagged (dead or very noisy channel)\n', ...
+                n_sigqc_flagged, n_sigqc_valid);
+        for t_q = 1:n_cf_ev
+            if isnan(sigqc_n_dead(t_q)) || (sigqc_n_dead(t_q) == 0 && sigqc_n_noisy(t_q) == 0), continue; end
+            parts_q = {};
+            if sigqc_n_dead(t_q) > 0,  parts_q{end+1}  = sprintf('DEAD: %s',  strjoin(sigqc_dead_ch{t_q}, ','));  end %#ok<AGROW>
+            if sigqc_n_noisy(t_q) > 0, parts_q{end+1} = sprintf('NOISY: %s', strjoin(sigqc_noisy_ch{t_q}, ',')); end %#ok<AGROW>
+            fprintf('    trial %2d: %s\n', t_q, strjoin(parts_q, '  |  '));
+        end
 
         do_car_mi   = true;
         do_car_cvsa = true;
@@ -366,7 +447,7 @@ for fi = 1:n_files
         %   rows 2,4,6,... maximise class-2 variance (MNE component_order='alternate').
         classes_sorted = sort(to_vec(int_cfg.classes));
         if use_mi && ~isempty(csp_mi)
-            [w1, w2, bw1, bw2, sel] = csp_channel_weights(csp_mi);
+            [w1, w2, bw1, bw2, sel, w1_band, w2_band, sel_band] = csp_channel_weights(csp_mi);
             r_csp_mi = struct('channels',    {csp_mi.selected_channels}, ...
                               'bands',       csp_mi.bands, ...
                               'n_bands',     csp_mi.n_bands, ...
@@ -375,6 +456,7 @@ for fi = 1:n_files
                               'w_c1',        w1,  'w_c2',      w2, ...
                               'band_w_c1',   bw1, 'band_w_c2', bw2, ...
                               'selectivity', sel, ...
+                              'w_c1_band', w1_band, 'w_c2_band', w2_band, 'selectivity_band', sel_band, ...
                               'class_codes', classes_sorted(:)');
             t3c1 = top_channels(csp_mi.selected_channels, w1, 3);
             t3c2 = top_channels(csp_mi.selected_channels, w2, 3);
@@ -383,7 +465,7 @@ for fi = 1:n_files
                     classes_sorted(2), strjoin(t3c2, '>'));
         end
         if use_cvsa && ~isempty(csp_cvsa)
-            [w1, w2, bw1, bw2, sel] = csp_channel_weights(csp_cvsa);
+            [w1, w2, bw1, bw2, sel, w1_band, w2_band, sel_band] = csp_channel_weights(csp_cvsa);
             r_csp_cvsa = struct('channels',    {csp_cvsa.selected_channels}, ...
                                 'bands',       csp_cvsa.bands, ...
                                 'n_bands',     csp_cvsa.n_bands, ...
@@ -392,6 +474,7 @@ for fi = 1:n_files
                                 'w_c1',        w1,  'w_c2',      w2, ...
                                 'band_w_c1',   bw1, 'band_w_c2', bw2, ...
                                 'selectivity', sel, ...
+                                'w_c1_band', w1_band, 'w_c2_band', w2_band, 'selectivity_band', sel_band, ...
                                 'class_codes', classes_sorted(:)');
             t3c1 = top_channels(csp_cvsa.selected_channels, w1, 3);
             t3c2 = top_channels(csp_cvsa.selected_channels, w2, 3);
@@ -423,6 +506,23 @@ for fi = 1:n_files
             r_slda_cvsa.class_codes = classes_sorted(:)';
             fprintf('  [sLDA-CVSA] %d/%d features selected by sLDA\n', ...
                     r_slda_cvsa.n_selected, csp_cvsa.n_components * csp_cvsa.n_bands);
+        end
+
+        % ── Stash CSP/sLDA channel-weight data for group_csp_slda_importance.m
+        %    (first file of each paradigm only -- see comment at csp_slda_data's
+        %    declaration above). Channels are re-expressed in the FULL montage
+        %    (all_labels_sq, this file's header.Label) rather than just the
+        %    CSP-selected subset, so different subjects' CSP-selected-channel
+        %    sets can be aligned/averaged cross-subject exactly like
+        %    topo_erders.m/group_topo_erders.m already do for ERD/ERS.
+        if ~isfield(csp_slda_data, 'ref_labels')
+            csp_slda_data.ref_labels = all_labels_sq;
+        end
+        if use_mi && ~isempty(csp_mi) && exist('r_slda_mi','var') && ~isempty(r_slda_mi) && ~isfield(csp_slda_data, 'mi')
+            csp_slda_data.mi = build_csp_slda_entry(r_csp_mi, r_slda_mi, all_labels_sq);
+        end
+        if use_cvsa && ~isempty(csp_cvsa) && exist('r_slda_cvsa','var') && ~isempty(r_slda_cvsa) && ~isfield(csp_slda_data, 'cvsa')
+            csp_slda_data.cvsa = build_csp_slda_entry(r_csp_cvsa, r_slda_cvsa, all_labels_sq);
         end
 
         % ── Sample accuracy: per trial → mean over trials ──────────────────────
@@ -577,6 +677,11 @@ for fi = 1:n_files
     r.art_rate        = art_rate;
     r.art_hit_mask    = art_hit_mask;
     r.art_miss_mask   = art_miss_mask;
+    r.sigqc_flag       = sigqc_flag;
+    r.sigqc_hit_mask   = sigqc_hit_mask;
+    r.sigqc_miss_mask  = sigqc_miss_mask;
+    r.sigqc_n_dead     = sigqc_n_dead;
+    r.sigqc_n_noisy    = sigqc_n_noisy;
     r.csp_mi          = r_csp_mi;
     r.csp_cvsa        = r_csp_cvsa;
     r.slda_mi_weights   = r_slda_mi;
@@ -1491,6 +1596,75 @@ else
     fprintf('  [Fig10] skipped: no paradigm group has simulated class/outcome data\n');
 end
 
+%% ═════════════════════════════════════════════════════════════════════════════
+%  FIG 11 — RAW SIGNAL QUALITY (dead/noisy channel) vs OUTCOME
+%
+%   Question: were MISS/TIMEOUT trials more often accompanied by a dead
+%   (flat/disconnected) or very noisy (saturated/heavy-movement) raw EEG
+%   channel during their own CF window than HIT trials? Distinct from
+%   Fig 9 (artifact GATE rate): this checks the raw electrode signal itself
+%   (post-CAR, pre-filter, per trial) for basic validity -- was there
+%   actually usable brain signal to classify, independent of whether the
+%   configured EOG/peak artifact detector happened to fire.
+%  ═════════════════════════════════════════════════════════════════════════════
+has_sigqc = any(cellfun(@(r2) ~isempty(r2.sigqc_flag), RES));
+if has_sigqc
+    fig11 = figure('Name','Signal Quality vs Outcome','Color','w', ...
+                  'NumberTitle','off','Visible',fig_vis);
+    set(fig11,'Units','normalized','OuterPosition',[0 0 1 1]);
+
+    fprintf('\n══════════════════ Signal quality (dead/noisy channel) vs outcome (per paradigm) ══════════════════\n');
+    N_PERM_SQ = 2000;
+    for g = 1:numel(par_seq)
+        idx_g = grp_start(g):grp_end(g);
+        ax = subplot(1, numel(par_seq), g); hold(ax, 'on');
+
+        sq = []; hit_v = []; miss_v = [];
+        for ii = idx_g
+            r2 = RES{ii};
+            if isempty(r2.sigqc_flag), continue; end
+            sq     = [sq, double(r2.sigqc_flag)]; %#ok<AGROW>
+            hit_v  = [hit_v,  r2.sigqc_hit_mask];  %#ok<AGROW>
+            miss_v = [miss_v, r2.sigqc_miss_mask]; %#ok<AGROW>
+        end
+        keep  = hit_v | miss_v;
+        sq_k  = sq(keep);
+        hit_k = double(hit_v(keep));
+
+        sq_hit_pct  = 100 * mean(sq(logical(hit_v)),  'omitnan');
+        sq_miss_pct = 100 * mean(sq(logical(miss_v)), 'omitnan');
+        r_val = NaN; p_val = NaN;
+        if numel(sq_k) >= 3 && std(hit_k) > 0 && std(sq_k, 'omitnan') > 0
+            C = corrcoef(sq_k, hit_k, 'Rows', 'complete');
+            r_val = C(1,2);
+            p_val = corr_perm_test_local(sq_k, hit_k, r_val, N_PERM_SQ);
+        end
+
+        b = bar(ax, [1 2], [sq_hit_pct, sq_miss_pct], 0.5);
+        b.FaceColor = 'flat';
+        b.CData = [0.15 0.65 0.15; 0.80 0.15 0.15];
+        set(ax, 'XTick', [1 2], 'XTickLabel', {'HIT', 'MISS/TO'}, 'YLim', [0, max(5, 1.3*max([sq_hit_pct,sq_miss_pct,1]))]);
+        ylabel(ax, '% trials with a dead/noisy channel during CF');
+        title(ax, sprintf('%s\nr=%+.2f  p=%.3f  %s', upper(par_seq{g}), r_val, p_val, stars_local_art(p_val)), ...
+              'FontSize', 10, 'FontWeight', 'bold');
+        grid(ax, 'on');
+
+        fprintf('  %-8s  HIT flagged=%.1f%%  MISS/TO flagged=%.1f%%  point-biserial r=%+.3f  p=%.4f  %s\n', ...
+                upper(par_seq{g}), sq_hit_pct, sq_miss_pct, r_val, p_val, stars_local_art(p_val));
+    end
+    fprintf('  ("flagged" = at least one channel dead (std<%.1fuV) or very noisy (std>%.0fuV or p2p>%.0fuV)\n', ...
+            SIGQC_DEAD_STD_UV, SIGQC_NOISY_STD_UV, SIGQC_NOISY_PP_UV);
+    fprintf('   during that trial''s own CF window -- see per-trial console lines above for which channel(s))\n');
+    fprintf('═══════════════════════════════════════════════════════════════════════════════\n');
+
+    sgtitle(fig11, 'Raw signal quality (dead/noisy channel) during CF: HIT vs MISS/TIMEOUT trials, per paradigm', 'FontSize', 11);
+    saveas(fig11, fullfile(out_dir, 'overview_signal_quality.svg'), 'svg');
+    fprintf('Saved %s\n', fullfile(out_dir, 'overview_signal_quality.svg'));
+    if ~SHOW_FIGURES, close(fig11); end
+else
+    fprintf('  [Fig11] skipped: no file has raw signal-quality data (simulation/YAML unavailable)\n');
+end
+
 %% ── Save session summary .mat for cross-script use ──────────────────────────
 summary_file = struct();
 for fi2 = 1:numel(RES)
@@ -1505,9 +1679,18 @@ for fi2 = 1:numel(RES)
     summary_file(fi2).tth_vals    = r2.tth_vals;
     summary_file(fi2).t_miss_vals = r2.t_miss_vals;
     summary_file(fi2).to_vals     = r2.to_vals;
+    summary_file(fi2).sigqc_n_dead  = r2.sigqc_n_dead;   % [1 x n_trials], NaN = no matched outcome for that trial
+    summary_file(fi2).sigqc_n_noisy = r2.sigqc_n_noisy;  % used by main_group_analysis for cross-subject signal-quality rate
 end
 save(fullfile(out_dir, 'session_summary.mat'), 'summary_file');
 fprintf('Saved session_summary.mat to %s\n', out_dir);
+
+if isfield(csp_slda_data, 'ref_labels') && (isfield(csp_slda_data, 'mi') || isfield(csp_slda_data, 'cvsa'))
+    save(fullfile(out_dir, 'csp_slda_channels.mat'), 'csp_slda_data');
+    fprintf('Saved csp_slda_channels.mat to %s\n', out_dir);
+else
+    fprintf('csp_slda_channels.mat not saved (no CSP/sLDA data available this run)\n');
+end
 
 fprintf('\nDone.\n');
 
@@ -1726,18 +1909,24 @@ function add_group_decorations(ax, grp_start, grp_end, par_seq, COL, ylim_top)
     end
 end
 
-function [w_c1, w_c2, band_w_c1, band_w_c2, selectivity] = csp_channel_weights(csp)
+function [w_c1, w_c2, band_w_c1, band_w_c2, selectivity, w_c1_band, w_c2_band, selectivity_band] = csp_channel_weights(csp)
 %CSP_CHANNEL_WEIGHTS  Per-channel and per-band importance from CSP filter matrices.
 %   MNE component_order='alternate': odd filter rows (1,3,...) maximise class-1
 %   variance; even rows (2,4,...) maximise class-2 variance.
 %   w_c1 and w_c2 are each normalised independently to sum to 1.
 %   band_w_c1/band_w_c2 are jointly normalised (sum over both = 1).
+%   w_c1_band/w_c2_band/selectivity_band [n_bands x n_sel] are the SAME
+%   quantities kept separate PER BAND (each band's row normalised on its
+%   own) instead of pooled across all bands -- used by
+%   group_csp_slda_importance.m for the cross-subject, per-band topoplots.
     n_bands = csp.n_bands;
     n_sel   = numel(csp.selected_channels);
     w1_raw = zeros(1, n_sel);
     w2_raw = zeros(1, n_sel);
     bw1    = zeros(1, n_bands);
     bw2    = zeros(1, n_bands);
+    w_c1_band = zeros(n_bands, n_sel);
+    w_c2_band = zeros(n_bands, n_sel);
     for b = 1:n_bands
         W      = csp.csp_matrices{b};       % [n_comp x n_sel]
         n_comp = size(W, 1);
@@ -1749,6 +1938,8 @@ function [w_c1, w_c2, band_w_c1, band_w_c2, selectivity] = csp_channel_weights(c
         w2_raw = w2_raw + a2;
         bw1(b) = sum(a1);
         bw2(b) = sum(a2);
+        w_c1_band(b,:) = a1 / max(sum(a1), eps);
+        w_c2_band(b,:) = a2 / max(sum(a2), eps);
     end
     w_c1       = w1_raw / max(sum(w1_raw), eps);
     w_c2       = w2_raw / max(sum(w2_raw), eps);
@@ -1756,6 +1947,7 @@ function [w_c1, w_c2, band_w_c1, band_w_c2, selectivity] = csp_channel_weights(c
     band_w_c1  = bw1 / max(tot, eps);
     band_w_c2  = bw2 / max(tot, eps);
     selectivity = (w_c1 - w_c2) ./ max(w_c1 + w_c2, eps);
+    selectivity_band = (w_c1_band - w_c2_band) ./ max(w_c1_band + w_c2_band, eps);
 end
 
 function top = top_channels(ch_names, weights, n)
@@ -1950,9 +2142,10 @@ function r = slda_spatial_weights(csp, slda)
         sel_idx = slda.selected_feature_indices(:);  % 1-based, FS active
     end
 
-    w_ch     = zeros(1, n_sel_ch);
-    band_w   = zeros(1, n_bands);
-    feat_mat = nan(n_comp, n_bands);   % NaN = not selected
+    w_ch      = zeros(1, n_sel_ch);
+    w_ch_band = zeros(n_bands, n_sel_ch);   % same importance, kept PER BAND (not pooled)
+    band_w    = zeros(1, n_bands);
+    feat_mat  = nan(n_comp, n_bands);   % NaN = not selected
 
     for fi = 1:numel(sel_idx)
         k    = sel_idx(fi);
@@ -1962,13 +2155,61 @@ function r = slda_spatial_weights(csp, slda)
         lda_w = abs(slda.weights(fi));
         filt  = abs(csp.csp_matrices{band}(comp, :));
         w_ch            = w_ch + lda_w * filt;
+        w_ch_band(band,:) = w_ch_band(band,:) + lda_w * filt;
         band_w(band)    = band_w(band) + lda_w * sum(filt);
         feat_mat(comp, band) = lda_w;
     end
 
     sw = sum(w_ch);   if sw > 0, w_ch   = w_ch   / sw;  end
     sb = sum(band_w); if sb > 0, band_w = band_w / sb;   end
+    for b = 1:n_bands
+        sbb = sum(w_ch_band(b,:));
+        if sbb > 0, w_ch_band(b,:) = w_ch_band(b,:) / sbb; end
+    end
 
     r = struct('w_ch', w_ch, 'band_w', band_w, 'feat_mat', feat_mat, ...
-               'n_selected', numel(sel_idx));
+               'n_selected', numel(sel_idx), 'w_ch_band', w_ch_band);
+end
+
+function entry = build_csp_slda_entry(r_csp, r_slda, ref_labels)
+%BUILD_CSP_SLDA_ENTRY  Re-express one paradigm's CSP/sLDA per-band channel
+%   weights in the FULL reference channel space (ref_labels = this file's
+%   header.Label), zero-padding channels the CSP didn't select -- so
+%   group_csp_slda_importance.m can align/average different subjects' CSP-
+%   selected-channel subsets on a common axis, exactly like
+%   topo_erders_channels.mat already does for ERD/ERS band power.
+    n_ref  = numel(ref_labels);
+    n_bands = r_csp.n_bands;
+    sel_names = r_csp.channels;
+    idx_map = zeros(1, numel(sel_names));
+    for i = 1:numel(sel_names)
+        m = find(strcmpi(ref_labels, strtrim(sel_names{i})), 1);
+        if ~isempty(m), idx_map(i) = m; end
+    end
+    valid = idx_map > 0;
+
+    w_c1_full   = zeros(n_bands, n_ref);
+    w_c2_full   = zeros(n_bands, n_ref);
+    sel_full    = zeros(n_bands, n_ref);
+    slda_w_full = zeros(n_bands, n_ref);
+    w_c1_full(:, idx_map(valid))   = r_csp.w_c1_band(:, valid);
+    w_c2_full(:, idx_map(valid))   = r_csp.w_c2_band(:, valid);
+    sel_full(:, idx_map(valid))    = r_csp.selectivity_band(:, valid);
+    if isfield(r_slda, 'w_ch_band')
+        slda_w_full(:, idx_map(valid)) = r_slda.w_ch_band(:, valid);
+    end
+
+    channel_mask = false(1, n_ref);
+    channel_mask(idx_map(valid)) = true;
+
+    entry = struct();
+    entry.bands            = r_csp.bands;          % [n_bands x 2] Hz
+    entry.n_components     = r_csp.n_components;
+    entry.channel_mask      = channel_mask;         % [1 x n_ref] logical, CSP-selected
+    entry.w_c1_band         = w_c1_full;            % [n_bands x n_ref]
+    entry.w_c2_band         = w_c2_full;
+    entry.selectivity_band  = sel_full;
+    entry.slda_w_ch_band    = slda_w_full;
+    entry.feat_mat          = r_slda.feat_mat;      % [n_comp x n_bands], NaN = not selected (channel-independent)
+    entry.n_selected        = r_slda.n_selected;
 end

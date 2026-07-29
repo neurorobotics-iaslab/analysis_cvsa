@@ -9,10 +9,23 @@
 %   Recursively scans a root folder (e.g. recordings/) for every
 %   <subject>/.../analysis_results/topo_erders/topo_erders_channels.mat.
 %   Subject ID = first path component under the root. If a subject has more
-%   than one matching file (e.g. several recording days), that subject's
-%   own files are averaged first (simple mean) before the cross-subject
-%   average -- subject is the unit, matching main_group_analysis.m's
-%   convention for every other metric in this package.
+%   than one matching file for the SAME session type (e.g. several
+%   recording days), that subject's own files are averaged first (simple
+%   mean) before the cross-subject average -- subject is the unit, matching
+%   main_group_analysis.m's convention for every other metric in this
+%   package.
+%
+%   EVALUATION vs CALIBRATION are kept as two entirely separate groups,
+%   never pooled together: run_subject_analysis.m calls topo_erders.m once
+%   on the evaluation/ folder and once on the sibling calibration/ folder
+%   (per day), so a subject can have BOTH an evaluation and a calibration
+%   topo_erders_channels.mat for the same paradigm/band -- pooling them
+%   would silently mix two different recording contexts (autopilot/real
+%   feedback aside, ERD/ERS during calibration can differ from evaluation,
+%   e.g. more trials, different day, no closed-loop feedback). Session type
+%   ('evaluation'/'calibration'/'unknown') is inferred from the folder path
+%   itself (topo_erders_channels.mat carries no such field), since that is
+%   the only place this distinction exists on disk.
 %
 %   Channel labels are assumed IDENTICAL across all subjects (the LiveAmp
 %   montage is fixed hardware, not subject-specific) -- errors clearly if a
@@ -42,9 +55,18 @@
 %   bands are never mixed), so MI and CVSA topoplots for hybrid are always
 %   produced and saved separately, same as for the "mi"/"cvsa" paradigms.
 %
-%   Output: <root>/group_topo_erders/<paradigm>/all_<paradigm>_<origin>_<band>.svg
-%   and .../sel_<paradigm>_<origin>_<band>.svg. Console prints, per group,
-%   how many of the cohort's subjects contributed and the CSP-mask footprint.
+%   Output: <root>/group_topo_erders/<session>/<paradigm>/all_<paradigm>_<origin>_<band>.svg
+%   and .../sel_<paradigm>_<origin>_<band>.svg, where <session> is
+%   'evaluation' or 'calibration' (or 'unknown' as a graceful fallback).
+%   Console prints, per group, how many of the cohort's subjects
+%   contributed and the CSP-mask footprint.
+%
+%   Additionally, for every (session, paradigm, origin) found, one extra
+%   summary image ".../all_<paradigm>_<origin>_CF_only_summary.svg" (and
+%   "sel_..." if a CSP mask exists) puts the "CF only" column (whole-
+%   feedback-period average) of EVERY band side by side, so you don't have
+%   to open each band's own 7-column figure just to compare column 2
+%   across bands.
 
 function group_topo_erders(root_dir, subjects_filter, show_figures)
 %   Callable as a function:
@@ -75,14 +97,23 @@ if isempty(files)
           'No topo_erders_channels.mat found. Run topo_erders.m for each subject first (regenerates this file).');
 end
 
-% ── Load all, tag with subject ──────────────────────────────────────────
-entries = struct('subject', {}, 'data', {});
+% ── Load all, tag with subject + session type (evaluation/calibration) ──
+entries = struct('subject', {}, 'session', {}, 'data', {});
 for i = 1:numel(files)
     fpath = fullfile(files(i).folder, files(i).name);
     s = load(fpath);
     idx = numel(entries) + 1;
     entries(idx).subject = subject_of(fpath, root_dir);
+    entries(idx).session = session_of(fpath);
     entries(idx).data    = s.topo_channel_data;
+end
+n_eval  = sum(strcmp({entries.session}, 'evaluation'));
+n_calib = sum(strcmp({entries.session}, 'calibration'));
+n_unk   = sum(strcmp({entries.session}, 'unknown'));
+if n_unk > 0
+    fprintf('  by session: %d evaluation, %d calibration, %d unknown\n', n_eval, n_calib, n_unk);
+else
+    fprintf('  by session: %d evaluation, %d calibration\n', n_eval, n_calib);
 end
 
 % ── Optional subject filter: only include the requested subjects ────────
@@ -134,37 +165,46 @@ while s_t < T
     titles_cols{end+1}  = sprintf('CF (%g-%gs)', s_t, e_t); %#ok<AGROW>
     s_t = e_t;
 end
-cf_window_idx = heat_times >= CUE_DURATION_S*1000 & heat_times <= epoch_limits(2)*1000;
-
-% ── Group all subjects' band entries into (paradigm, origin, freq) keys ──
+% ── Group all subjects' band entries into (session, paradigm, origin, freq)
+%    keys -- session kept separate so evaluation and calibration are NEVER
+%    pooled into the same average (see header comment above). ────────────
 keys = {};
 for i = 1:numel(entries)
     for b = 1:numel(entries(i).data.bands)
         bd = entries(i).data.bands(b);
-        keys{end+1} = sprintf('%s|%s|%.1f|%.1f', bd.paradigm, bd.band_origin, bd.freq_lo, bd.freq_hi); %#ok<AGROW>
+        keys{end+1} = sprintf('%s|%s|%s|%.1f|%.1f', entries(i).session, bd.paradigm, bd.band_origin, bd.freq_lo, bd.freq_hi); %#ok<AGROW>
     end
 end
 ukeys = unique(keys, 'stable');
-fprintf('\nFound %d (paradigm, band-origin, frequency) groups across the cohort\n', numel(ukeys));
+fprintf('\nFound %d (session, paradigm, band-origin, frequency) groups across the cohort\n', numel(ukeys));
 
 out_root = fullfile(root_dir, 'group_topo_erders');
 if ~exist(out_root, 'dir'), mkdir(out_root); end
 
+% Accumulates, per band, the already-computed subject-then-cross-subject
+% arrays below -- reused after the main loop to build the "CF only, all
+% bands in one image" summary figure without recomputing any averaging.
+cf_summary_entries = struct('session', {}, 'paradigm', {}, 'origin', {}, 'band_name', {}, ...
+                             'freq_lo', {}, 'freq_hi', {}, 'subj_c1', {}, 'subj_c2', {}, ...
+                             'subj_has', {}, 'grp_mask', {}, 'n_contrib', {});
+
 for kk = 1:numel(ukeys)
     parts    = strsplit(ukeys{kk}, '|');
-    paradigm = parts{1};
-    origin   = parts{2};
-    freq_lo  = str2double(parts{3});
-    freq_hi  = str2double(parts{4});
+    session  = parts{1};
+    paradigm = parts{2};
+    origin   = parts{3};
+    freq_lo  = str2double(parts{4});
+    freq_hi  = str2double(parts{5});
 
     % ── Per subject: average that subject's own matching entries first
-    %    (e.g. several recording days), simple mean ──────────────────────
+    %    (e.g. several recording days OF THE SAME SESSION TYPE), simple
+    %    mean ─────────────────────────────────────────────────────────────
     subj_c1   = nan(n_ch, numel(heat_times), n_subj);
     subj_c2   = nan(n_ch, numel(heat_times), n_subj);
     subj_mask = false(n_ch, n_subj);
     subj_has  = false(1, n_subj);
     for si = 1:n_subj
-        idx_e = find(strcmp({entries.subject}, subjects{si}));
+        idx_e = find(strcmp({entries.subject}, subjects{si}) & strcmp({entries.session}, session));
         c1_list = {}; c2_list = {}; mask_list = {};
         for ie = idx_e
             for b = 1:numel(entries(ie).data.bands)
@@ -188,43 +228,84 @@ for kk = 1:numel(ukeys)
     end
     if ~any(subj_has), continue; end
 
-    % ── Cross-subject average: simple (unweighted) mean over subjects,
-    %    CSP mask = UNION across subjects (continues the same union logic
-    %    topo_erders.m already applies within one subject's own files). ──
-    grp_c1   = mean(subj_c1(:,:,subj_has), 3, 'omitnan');
-    grp_c2   = mean(subj_c2(:,:,subj_has), 3, 'omitnan');
+    % ── CSP mask = UNION across subjects (continues the same union logic
+    %    topo_erders.m already applies within one subject's own files).
+    %    The cross-subject MEAN itself (used to be grp_c1/grp_c2 here) is
+    %    now computed per-cell inside plot_group_topo_grid instead, since
+    %    that's also where the per-cell colour scale needs it. ───────────
     grp_mask = any(subj_mask(:, subj_has), 2);
     n_contrib = sum(subj_has);
 
     band_name = sprintf('%s_%g-%gHz', origin, freq_lo, freq_hi);
-    par_dir = fullfile(out_root, paradigm);
+
+    cfe = numel(cf_summary_entries) + 1;
+    cf_summary_entries(cfe).session   = session;
+    cf_summary_entries(cfe).paradigm  = paradigm;
+    cf_summary_entries(cfe).origin    = origin;
+    cf_summary_entries(cfe).band_name = band_name;
+    cf_summary_entries(cfe).freq_lo   = freq_lo;
+    cf_summary_entries(cfe).freq_hi   = freq_hi;
+    cf_summary_entries(cfe).subj_c1   = subj_c1;
+    cf_summary_entries(cfe).subj_c2   = subj_c2;
+    cf_summary_entries(cfe).subj_has  = subj_has;
+    cf_summary_entries(cfe).grp_mask  = grp_mask;
+    cf_summary_entries(cfe).n_contrib = n_contrib;
+    par_dir = fullfile(out_root, session, paradigm);
     if ~exist(par_dir, 'dir'), mkdir(par_dir); end
 
-    fprintf('  [%-6s] %-4s %5.1f-%5.1f Hz : %d/%d subjects  (CSP mask: %s)\n', paradigm, origin, freq_lo, freq_hi, ...
+    fprintf('  [%-11s|%-6s] %-4s %5.1f-%5.1f Hz : %d/%d subjects  (CSP mask: %s)\n', session, paradigm, origin, freq_lo, freq_hi, ...
             n_contrib, n_subj, mask_summary(grp_mask));
 
-    % ── Colour limits: PERCENTILE-based (not max/min), same convention as
-    %    topo_erders.m otherwise. A single noisy channel/timepoint can
-    %    otherwise stretch the whole scale and wash out every real
-    %    difference -- CLIM_PCTL clips that tail; values beyond it just
-    %    saturate to the strongest colour instead of being lost. ──────────
-    CLIM_PCTL = 95;
-    is_mi = strcmpi(origin, 'MI');
-    if is_mi
-        neg = min(cat(1, grp_c1(:,cf_window_idx), grp_c2(:,cf_window_idx)), 0);
-        mx = local_prctile(-neg(:), CLIM_PCTL); if mx == 0 || isnan(mx), mx = 1; end
-        clim = [-mx 0];
-    else
-        d = grp_c1(:,cf_window_idx) - grp_c2(:,cf_window_idx);
-        mx = local_prctile(abs(d(:)), CLIM_PCTL); if mx == 0 || isnan(mx), mx = 1; end
-        clim = [-mx mx];
-    end
+    % ── Colour limits: PERCENTILE-based (CLIM_PCTL=99, set to 100 to
+    %    disable), computed PER TOPOPLOT (per row x column cell) inside
+    %    plot_group_topo_grid below -- NOT one shared scale for the whole
+    %    image. A single shared scale meant a cell with genuinely low
+    %    variance (e.g. a quiet 1s bin) got rendered on a scale sized for
+    %    whatever OTHER cell in the same image had the biggest swing,
+    %    crushing its own real (if modest) contrast to a single flat
+    %    colour -- indistinguishable from "no ERD at all" even when there
+    %    was some. Each topoplot now shows its own full colour range,
+    %    computed from its own data -- see local_cell_clim() below. ───────
+    CLIM_PCTL = 99;
 
-    plot_group_topo_grid(subj_c1, subj_c2, subj_has, ref_labels, heat_times, intervals, titles_cols, origin, clim, [], ...
-                          par_dir, sprintf('all_%s_%s', paradigm, band_name), n_contrib, n_subj, freq_lo, freq_hi, fig_vis);
+    plot_group_topo_grid(subj_c1, subj_c2, subj_has, ref_labels, heat_times, intervals, titles_cols, origin, CLIM_PCTL, [], ...
+                          par_dir, sprintf('all_%s_%s', paradigm, band_name), n_contrib, n_subj, freq_lo, freq_hi, fig_vis, session);
     if any(grp_mask)
-        plot_group_topo_grid(subj_c1, subj_c2, subj_has, ref_labels, heat_times, intervals, titles_cols, origin, clim, grp_mask, ...
-                              par_dir, sprintf('sel_%s_%s', paradigm, band_name), n_contrib, n_subj, freq_lo, freq_hi, fig_vis);
+        plot_group_topo_grid(subj_c1, subj_c2, subj_has, ref_labels, heat_times, intervals, titles_cols, origin, CLIM_PCTL, grp_mask, ...
+                              par_dir, sprintf('sel_%s_%s', paradigm, band_name), n_contrib, n_subj, freq_lo, freq_hi, fig_vis, session);
+    end
+end
+
+% ── "CF only" summary: ALL BANDS of a given (session, paradigm, origin)
+%    side by side in ONE image, instead of opening N separate per-band
+%    7-column figures and picking out column 2 ("CF only") from each.
+%    Reuses the subj_c1/subj_c2/subj_has/grp_mask already computed above --
+%    same cross-subject averaging convention as everywhere else in this
+%    file (each subject's own files averaged first, THEN a simple
+%    unweighted mean across subjects -- subject is the unit, not a
+%    trial-pooled grand average; "media della media", not "media
+%    generale") and the same per-cell percentile colour scale +
+%    significance-ring convention as plot_group_topo_grid.
+if ~isempty(cf_summary_entries)
+    grp_keys = arrayfun(@(e) sprintf('%s|%s|%s', e.session, e.paradigm, e.origin), cf_summary_entries, 'UniformOutput', false);
+    u_grp_keys = unique(grp_keys, 'stable');
+    for gk = 1:numel(u_grp_keys)
+        gparts = strsplit(u_grp_keys{gk}, '|');
+        g_session  = gparts{1};
+        g_paradigm = gparts{2};
+        g_origin   = gparts{3};
+        band_idx   = find(strcmp(grp_keys, u_grp_keys{gk}));
+        par_dir    = fullfile(out_root, g_session, g_paradigm);
+        if ~exist(par_dir, 'dir'), mkdir(par_dir); end
+
+        plot_cf_only_summary(cf_summary_entries(band_idx), ref_labels, heat_times, intervals(2,:), g_origin, CLIM_PCTL, false, ...
+                              par_dir, sprintf('all_%s_%s_CF_only_summary', g_paradigm, g_origin), n_subj, fig_vis, g_session);
+
+        any_mask = any(arrayfun(@(e) any(e.grp_mask), cf_summary_entries(band_idx)));
+        if any_mask
+            plot_cf_only_summary(cf_summary_entries(band_idx), ref_labels, heat_times, intervals(2,:), g_origin, CLIM_PCTL, true, ...
+                                  par_dir, sprintf('sel_%s_%s_CF_only_summary', g_paradigm, g_origin), n_subj, fig_vis, g_session);
+        end
     end
 end
 
@@ -240,14 +321,30 @@ function subj = subject_of(fpath, root_dir)
     subj = parts{1};
 end
 
+function sess = session_of(fpath)
+% SESSION_OF  'evaluation' | 'calibration' | 'unknown', inferred from the
+%   folder path itself -- topo_erders_channels.mat carries no session-type
+%   field of its own. run_subject_analysis.m calls topo_erders() once on
+%   the evaluation/ folder and once on the sibling calibration/ folder (per
+%   day), so the folder name is the only place this distinction lives.
+    parts = strsplit(fpath, filesep);
+    if any(strcmpi(parts, 'evaluation'))
+        sess = 'evaluation';
+    elseif any(strcmpi(parts, 'calibration'))
+        sess = 'calibration';
+    else
+        sess = 'unknown';
+    end
+end
+
 function s = mask_summary(mask)
     if isempty(mask) || ~any(mask), s = 'no CSP channels';
     else, s = sprintf('%d/%d channels (union across cohort)', sum(mask), numel(mask));
     end
 end
 
-function plot_group_topo_grid(subj_c1, subj_c2, subj_has, ch_names, heat_times, intervals, titles_cols, origin, clim, mask, ...
-                               out_dir, prefix, n_contrib, n_subj, freq_lo, freq_hi, fig_vis)
+function plot_group_topo_grid(subj_c1, subj_c2, subj_has, ch_names, heat_times, intervals, titles_cols, origin, CLIM_PCTL, mask, ...
+                               out_dir, prefix, n_contrib, n_subj, freq_lo, freq_hi, fig_vis, session)
 % PLOT_GROUP_TOPO_GRID  One figure: rows = cue(s), cols = time interval,
 %   drawn with topo_map.m (no EEGLAB dependency). Mirrors topo_erders.m's
 %   plot_topo_grid, but averaged across subjects upstream of this call.
@@ -258,6 +355,20 @@ function plot_group_topo_grid(subj_c1, subj_c2, subj_has, ch_names, heat_times, 
 %                     OWN per-channel significance test (subject is the
 %                     unit) on exactly the same time-window slice it plots.
 %   subj_has          [1 x n_subj] logical, which subjects contributed.
+%   session           'evaluation'|'calibration'|'unknown' -- cosmetic only
+%                      (figure Name/title annotation), so an exported SVG
+%                      viewed on its own still says which session type it is.
+%
+%   Each cell (one row x column tile) gets its OWN colour scale, computed
+%   from just that cell's own channel values (CLIM_PCTL-th percentile of
+%   |value|, see local_cell_clim below) -- NOT one shared scale for the
+%   whole image. A shared scale meant a genuinely low-variance cell (e.g. a
+%   quiet 1s bin) got rendered on a range sized for whichever OTHER cell in
+%   the same image had the biggest swing, crushing its own modest but real
+%   contrast down to a single flat colour that looked identical to "no
+%   effect at all". Each tile now shows its own full colour range and its
+%   own colourbar, so "this tile is saturated red/blue" always means
+%   "near this tile's OWN maximum", not "near some other tile's maximum".
 %
 %   Each cell's displayed value is still the plain cross-subject mean (same
 %   number as before); additionally, a black ring is drawn over channels
@@ -279,10 +390,20 @@ function plot_group_topo_grid(subj_c1, subj_c2, subj_has, ch_names, heat_times, 
     end
     bg_zero = ~isempty(mask);   % "sel": fill non-CSP channels with 0 for a smooth full-head map
 
-    h = figure('Name', sprintf('%s — %s %g-%g Hz (group, n=%d/%d)', prefix, origin, freq_lo, freq_hi, n_contrib, n_subj), ...
+    h = figure('Name', sprintf('%s — %s %s %g-%g Hz (group, n=%d/%d)', prefix, session, origin, freq_lo, freq_hi, n_contrib, n_subj), ...
                'Color', 'w', 'NumberTitle', 'off', 'Visible', fig_vis);
     set(h, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
+    % Explicit, hand-picked figure position for the tiledlayout itself
+    % (normalized units), leaving a fixed top margin for the title and a
+    % fixed bottom margin for the dot/ring legend below -- NOT relying on
+    % tiledlayout's own automatic title-margin sizing via title(tl,...) +
+    % Padding, which repeatedly still let the title text collide with the
+    % top row's per-tile titles (e.g. "Cue+CF (0-5s)") regardless of
+    % Padding/FontSize. Both the title and the legend are drawn as
+    % figure-level annotation() textboxes in their own reserved bands
+    % below, so there is no automatic sizing left to get wrong.
     tl = tiledlayout(num_rows, num_intervals, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tl.Position = [0.03 0.09 0.94 0.83];
 
     for r = 1:num_rows
         for c = 1:num_intervals
@@ -304,7 +425,7 @@ function plot_group_topo_grid(subj_c1, subj_c2, subj_has, ch_names, heat_times, 
             end
             data = mean(subj_vals, 2, 'omitnan');
             if is_mi
-                data(data > 0) = 0;   % ERD only (display convention)
+                data(data > 0) = 0;   % ERD only (display convention, matches topo_erders.m)
             end
             data(isnan(data)) = 0;
 
@@ -320,14 +441,170 @@ function plot_group_topo_grid(subj_c1, subj_c2, subj_has, ch_names, heat_times, 
                 sig_here   = sig_chan;
             end
 
-            topo_map(names_here, vals_here, clim, ax, '', c == num_intervals, bg_zero, sig_here);
+            % THIS CELL's own colour scale -- from vals_here only (i.e.
+            % after channel masking, so a "sel_" image's scale reflects
+            % only the channels actually shown in it, not the full 32).
+            if is_mi
+                mx_cell = local_prctile(-min(vals_here, 0), CLIM_PCTL);
+                if mx_cell == 0 || isnan(mx_cell), mx_cell = 1; end
+                clim_cell = [-mx_cell 0];
+            else
+                mx_cell = local_prctile(abs(vals_here), CLIM_PCTL);
+                if mx_cell == 0 || isnan(mx_cell), mx_cell = 1; end
+                clim_cell = [-mx_cell mx_cell];
+            end
+
+            % jet for MI (ERD-only, one-sided) to visually match the
+            % EEGLAB-rendered per-subject topoplots in topo_erders.m, which
+            % use EEGLAB's/MATLAB's default colormap rather than the
+            % diverging RdBu used elsewhere in this file (e.g. CVSA's
+            % lateralization index, still genuinely bidirectional, keeps
+            % the default RdBu -- pass [] for it).
+            if is_mi, cmap_here = jet(256); else, cmap_here = []; end
+            if is_mi, cbar_lbl = '% ERD vs baseline'; else, cbar_lbl = '% ERD/ERS, cue1-cue2'; end
+            % show_cbar = true on EVERY tile now (not just the last column):
+            % since every tile has its own independent scale, a single
+            % shared colourbar at the row's end would only describe that
+            % last tile, not the others.
+            topo_map(names_here, vals_here, clim_cell, ax, '', true, bg_zero, sig_here, cmap_here, cbar_lbl);
             if r == 1, title(ax, titles_cols{c}, 'FontSize', 9); end
             if c == 1, ylabel(ax, row_labels{r}, 'Visible', 'on', 'FontWeight', 'bold'); end
         end
     end
 
-    title(tl, sprintf('%s — %s %g-%g Hz  (group average, n=%d/%d subjects | ring = p<0.05 cross-subject t-test)', ...
-          prefix, origin, freq_lo, freq_hi, n_contrib, n_subj), 'Interpreter', 'none', 'FontWeight', 'bold');
+    % Title and dot/ring legend as figure-level annotation() textboxes, each
+    % pinned to its OWN reserved band (see tl.Position above) -- completely
+    % independent of the tiledlayout's internal spacing, so neither can ever
+    % collide with the top row's per-tile titles no matter the text length.
+    annotation(h, 'textbox', [0 0.94 1 0.06], 'String', ...
+        sprintf('%s — [%s] %s %g-%g Hz  (n=%d/%d subjects)', prefix, upper(session), origin, freq_lo, freq_hi, n_contrib, n_subj), ...
+        'EdgeColor', 'none', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
+        'FontWeight', 'bold', 'FontSize', 11, 'Interpreter', 'none');
+
+    annotation(h, 'textbox', [0 0 1 0.05], 'String', ...
+        'dot = value;  black ring = statistically significant (p<0.05, one-sample t-test across subjects)', ...
+        'EdgeColor', 'none', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', 'FontSize', 9);
+
+    save_path = fullfile(out_dir, sprintf('%s.svg', prefix));
+    saveas(h, save_path, 'svg');
+    if ~strcmp(fig_vis, 'on'), close(h); end
+    fprintf('    Saved: %s\n', save_path);
+end
+
+function plot_cf_only_summary(band_entries, ch_names, heat_times, cf_interval, origin, CLIM_PCTL, use_mask, ...
+                               out_dir, prefix, n_subj, fig_vis, session)
+% PLOT_CF_ONLY_SUMMARY  One figure: rows = cue(s) (or the lateralization
+%   row for CVSA), COLUMNS = BAND (not time interval) -- the cross-subject
+%   "CF only" topoplot (the whole-feedback-period average -- same cell
+%   that is column 2 of plot_group_topo_grid's 7-column grid) for every
+%   band found in this (session, paradigm, origin) group, side by side in
+%   one image, so you don't have to open N separate per-band figures and
+%   pick out column 2 from each.
+%
+%   band_entries      struct array (one per band) with fields subj_c1/
+%                      subj_c2 [n_ch x n_time x n_subj] (NOT pre-averaged
+%                      across subjects -- same per-subject arrays already
+%                      computed by the main loop in group_topo_erders.m,
+%                      passed in here rather than recomputed), subj_has
+%                      [1 x n_subj], grp_mask [n_ch x 1], freq_lo/freq_hi,
+%                      n_contrib.
+%   use_mask           if true, restrict every panel to the channels in
+%                      that band's own grp_mask (union across all bands in
+%                      this call); if false, show every channel.
+%
+%   Same per-cell percentile colour scale (CLIM_PCTL-th percentile of
+%   |value|) and the same cross-subject one-sample t-test significance
+%   ring (p<0.05) as plot_group_topo_grid -- each band's panel gets its OWN
+%   colour scale, not one shared across the whole image, for the same
+%   reason documented there.
+    is_mi = strcmpi(origin, 'MI');
+    if is_mi
+        num_rows = 2;
+        row_labels = {'Cue 1 (ERD)', 'Cue 2 (ERD)'};
+    else
+        num_rows = 1;
+        row_labels = {'Cue 1 - Cue 2 (lateralization)'};
+    end
+    n_bands = numel(band_entries);
+
+    combined_mask = false(numel(ch_names), 1);
+    if use_mask
+        for k = 1:n_bands
+            combined_mask = combined_mask | band_entries(k).grp_mask(:);
+        end
+    end
+    bg_zero = use_mask;
+
+    t_idx = heat_times >= cf_interval(1)*1000 & heat_times < cf_interval(2)*1000;
+
+    h = figure('Name', sprintf('%s — %s %s CF-only summary (group)', prefix, session, origin), ...
+               'Color', 'w', 'NumberTitle', 'off', 'Visible', fig_vis);
+    set(h, 'Units', 'normalized', 'OuterPosition', [0 0 1 1]);
+    tl = tiledlayout(num_rows, n_bands, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tl.Position = [0.03 0.09 0.94 0.83];
+
+    for r = 1:num_rows
+        for bk = 1:n_bands
+            ax = nexttile;
+            be = band_entries(bk);
+
+            subj_vals = nan(numel(ch_names), numel(be.subj_has));
+            for si = find(be.subj_has)
+                if is_mi
+                    src = be.subj_c1(:,:,si); if r == 2, src = be.subj_c2(:,:,si); end
+                    subj_vals(:,si) = mean(src(:, t_idx), 2, 'omitnan');
+                else
+                    d1 = mean(be.subj_c1(:, t_idx, si), 2, 'omitnan');
+                    d2 = mean(be.subj_c2(:, t_idx, si), 2, 'omitnan');
+                    subj_vals(:,si) = d1 - d2;
+                end
+            end
+            data = mean(subj_vals, 2, 'omitnan');
+            if is_mi, data(data > 0) = 0; end
+            data(isnan(data)) = 0;
+
+            sig_chan = local_ttest_pvals(subj_vals') < 0.05;
+
+            if use_mask
+                names_here = ch_names(combined_mask);
+                vals_here  = data(combined_mask);
+                sig_here   = sig_chan(combined_mask);
+            else
+                names_here = ch_names;
+                vals_here  = data;
+                sig_here   = sig_chan;
+            end
+
+            if is_mi
+                mx_cell = local_prctile(-min(vals_here, 0), CLIM_PCTL);
+                if mx_cell == 0 || isnan(mx_cell), mx_cell = 1; end
+                clim_cell = [-mx_cell 0];
+                cmap_here = jet(256);   % one-sided ERD-only, see topo_erders.m/plot_group_topo_grid
+            else
+                mx_cell = local_prctile(abs(vals_here), CLIM_PCTL);
+                if mx_cell == 0 || isnan(mx_cell), mx_cell = 1; end
+                clim_cell = [-mx_cell mx_cell];
+                cmap_here = [];   % topo_map.m default: diverging RdBu, centred at 0
+            end
+            if is_mi, cbar_lbl = '% ERD vs baseline'; else, cbar_lbl = '% ERD/ERS, cue1-cue2'; end
+
+            topo_map(names_here, vals_here, clim_cell, ax, '', true, bg_zero, sig_here, cmap_here, cbar_lbl);
+            if r == 1
+                title(ax, sprintf('%g-%g Hz (n=%d/%d)', be.freq_lo, be.freq_hi, be.n_contrib, n_subj), 'FontSize', 9);
+            end
+            if bk == 1, ylabel(ax, row_labels{r}, 'Visible', 'on', 'FontWeight', 'bold'); end
+        end
+    end
+
+    annotation(h, 'textbox', [0 0.94 1 0.06], 'String', ...
+        sprintf('%s — [%s] %s — "CF only" average, all bands (n subjects per band shown in each panel title)', ...
+                prefix, upper(session), origin), ...
+        'EdgeColor', 'none', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
+        'FontWeight', 'bold', 'FontSize', 11, 'Interpreter', 'none');
+
+    annotation(h, 'textbox', [0 0 1 0.05], 'String', ...
+        'dot = value;  black ring = statistically significant (p<0.05, one-sample t-test across subjects)', ...
+        'EdgeColor', 'none', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', 'FontSize', 9);
 
     save_path = fullfile(out_dir, sprintf('%s.svg', prefix));
     saveas(h, save_path, 'svg');

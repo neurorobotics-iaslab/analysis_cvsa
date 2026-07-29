@@ -26,6 +26,15 @@
 %       run_subject_analysis('/path/recordings/a001')
 %       run_subject_analysis('/path/recordings')   % all 'a*' subjects
 %
+%   Second argument save_per_file_topo (optional, default true): pass false
+%   to skip topo_erders' per-file topoplot/heatmap/ROI figures (grand-average
+%   figures + both .mat summaries are unaffected). Each per-file figure is an
+%   EEGLAB topoplot() call plus an SVG export — profiling shows this is by
+%   far the dominant cost of a batch run, not the FBCSP/CSP signal pipeline —
+%   so skipping them is the cheapest available speedup, proportional to the
+%   number of GDF files:
+%       run_subject_analysis('/path/recordings/S01/20250101/evaluation', false)
+%
 %   For each evaluation/ folder found, the following analyses run in order:
 %     1. main_simulate          — all GDFs: per-trial pipeline replay + figure
 %     2. main_session_overview  — all GDFs: 10-figure session summary (incl.
@@ -51,7 +60,15 @@
 %   All figures saved hidden (SHOW_FIGURES = false).
 %   main_group_analysis.m is a multi-subject aggregator — run it separately.
 
-function run_subject_analysis(root_dir)
+function run_subject_analysis(root_dir, save_per_file_topo)
+%   save_per_file_topo (optional, default true): pass false to skip
+%   topo_erders' per-file topoplot/heatmap/ROI figures (grand-average
+%   figures and both .mat summaries are unaffected). Each per-file figure
+%   involves an EEGLAB topoplot() call plus an SVG export, which dominates
+%   topo_erders' runtime — skipping them (scales with GDF count) is the
+%   cheapest way to speed up a batch run.
+
+if nargin < 2 || isempty(save_per_file_topo), save_per_file_topo = true; end
 
 this_dir   = fileparts(mfilename('fullpath'));
 topo_dir   = fullfile(this_dir, '..', 'analysis_gdf');
@@ -89,14 +106,14 @@ fprintf('═══════════════════════�
 for si = 1:numel(eval_dirs)
     eval_dir = eval_dirs{si};
     fprintf('\n\n══════ Session %d/%d : %s ══════\n', si, numel(eval_dirs), eval_dir);
-    process_eval_folder(eval_dir);
+    process_eval_folder(eval_dir, save_per_file_topo);
 
     % calibration/ sits next to evaluation/ (same day folder)
     day_dir  = fileparts(eval_dir);
     calib_dir = fullfile(day_dir, 'calibration');
     if isfolder(calib_dir) && ~isempty(dir(fullfile(calib_dir, '*.gdf')))
         fprintf('\n── Calibration : %s ──\n', calib_dir);
-        process_calibration_folder(calib_dir);
+        process_calibration_folder(calib_dir, save_per_file_topo);
     end
 end
 
@@ -107,7 +124,7 @@ end % run_subject_analysis
 
 % ── Local helpers ─────────────────────────────────────────────────────────────
 
-function process_eval_folder(eval_dir)
+function process_eval_folder(eval_dir, save_per_file_topo)
 % Run the full analysis pipeline on a single evaluation/ folder.
 
     f = dir(fullfile(eval_dir, '*.gdf'));
@@ -157,12 +174,12 @@ function process_eval_folder(eval_dir)
                  @() main_validate_counterfactual(session_mat, cf_mat));
     end
 
-    run_step(9, 'topo_erders',            @() topo_erders(eval_dir, all_names));
+    run_step(9, 'topo_erders',            @() topo_erders(eval_dir, all_names, false, save_per_file_topo));
 
     fprintf('  Results: %s\n', fullfile(eval_dir, 'analysis_results'));
 end
 
-function process_calibration_folder(calib_dir)
+function process_calibration_folder(calib_dir, save_per_file_topo)
 % Run topo_erders on all GDFs in a calibration/ folder.
     f = dir(fullfile(calib_dir, '*.gdf'));
     if isempty(f)
@@ -171,7 +188,7 @@ function process_calibration_folder(calib_dir)
     end
     all_names = {f.name};
     fprintf('  GDFs: %d (calibration)\n', numel(all_names));
-    run_step_calib('topo_erders', @() topo_erders(calib_dir, all_names));
+    run_step_calib('topo_erders', @() topo_erders(calib_dir, all_names, false, save_per_file_topo));
     fprintf('  Results: %s\n', fullfile(calib_dir, 'analysis_results'));
 end
 

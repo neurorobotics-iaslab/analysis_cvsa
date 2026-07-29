@@ -192,6 +192,8 @@ for t = 1:numel(trials)
     all_trials(idx_acc).n_cf         = tr.n_cf;
     all_trials(idx_acc).paradigm     = paradigm;
     all_trials(idx_acc).basename     = basename;
+    all_trials(idx_acc).framerate     = framerate;
+    all_trials(idx_acc).cvsa_influence = int_cfg.cvsa_influence;
 end
 
 end % file_idx loop
@@ -220,7 +222,8 @@ paradigms_present = unique({all_trials.paradigm}, 'stable');
 
 roc_by_group = struct('name', {}, 'n_trials', {}, 'n_frames', {}, ...
                        'fpr', {}, 'tpr', {}, 'thr', {}, 'auc', {}, ...
-                       'scores', {}, 'labels', {});
+                       'scores', {}, 'labels', {}, ...
+                       'window_s', {}, 'auc_win', {}, 'n_frames_win', {}, 'scores_win', {}, 'labels_win', {});
 for g = 1:numel(paradigms_present)
     name = paradigms_present{g};
     trials_g = all_trials(strcmp({all_trials.paradigm}, name));
@@ -244,7 +247,27 @@ for g = 1:numel(paradigms_present)
     roc_by_group(g).scores   = single(scores);
     roc_by_group(g).labels   = logical(labels);
 
+    % Windowed pooling: same frames, restricted to the first cvsa_influence
+    % seconds of each trial's CF -- the ONLY window where a Hybrid/fused
+    % classifier can actually differ from pure MI (bayesian_fuse.m forces
+    % alpha=0, i.e. fused==MI exactly, from cvsa_influence onward). Pooling
+    % ALL CF frames (roc_by_group(g).auc above) dilutes any early advantage
+    % with the later portion of every trial where the two are identical by
+    % construction; this restricted version isolates it. Computed the same
+    % way for every paradigm (not just hybrid) so MI's/CVSA's own early-CF
+    % AUC is directly comparable. window_s taken from this group's own
+    % trials' cvsa_influence (assumed constant per session config).
+    window_s = median([trials_g.cvsa_influence], 'omitnan');
+    [scores_w, labels_w] = pool_group_frames(trials_g, window_s);
+    [~, ~, ~, auc_win] = compute_roc_curve(scores_w, labels_w);
+    roc_by_group(g).window_s     = window_s;
+    roc_by_group(g).auc_win      = auc_win;
+    roc_by_group(g).n_frames_win = numel(scores_w);
+    roc_by_group(g).scores_win   = single(scores_w);
+    roc_by_group(g).labels_win   = logical(labels_w);
+
     print_roc(name, numel(trials_g), numel(scores), scores, labels, auc_val);
+    fprintf('  [%s] windowed (first %.1fs of CF): n_frames=%d  AUC=%.3f\n', name, window_s, numel(scores_w), auc_win);
 
     col = COL_mi;
     if isKey(par_colors, name), col = par_colors(name); end
@@ -317,12 +340,17 @@ end % main_roc_analysis
 
 % ── Local helpers (must be after all script statements) ────────────────────
 
-function [scores, labels] = pool_group_frames(trials_g)
+function [scores, labels] = pool_group_frames(trials_g, window_s)
 % POOL_GROUP_FRAMES  Flatten CF-window frames (excluding the N_PRE reset
 %   frame, artifact-flagged frames, and NaN raw values -- e.g. hybrid frames
 %   before both MI and CVSA streams are available) across a set of trials
 %   into a single (score, label) list. score = P(class 1) for that frame;
 %   label = true if the trial's target class is class 1.
+%   window_s (optional): if finite, only frames with time-since-CF-onset
+%   < window_s are included (frame k of the CF range, k=1..n_cf, is at
+%   t=(k-1)/framerate -- k=1 is the CF onset chunk itself, matching
+%   bayesian_fuse.m's own t=0 convention). Omit/Inf for no restriction.
+    if nargin < 2, window_s = Inf; end
     scores = [];
     labels = [];
     for it = 1:numel(trials_g)
@@ -331,6 +359,10 @@ function [scores, labels] = pool_group_frames(trials_g)
         p1  = tr.raw(cf_range, 1);
         art = tr.artifact(cf_range);
         valid = ~art & ~isnan(p1);
+        if isfinite(window_s)
+            t_since_onset = (0:(tr.n_cf-1))' / tr.framerate;
+            valid = valid & (t_since_onset < window_s);
+        end
         n_valid = sum(valid);
         if n_valid == 0, continue; end
         scores = [scores; p1(valid)]; %#ok<AGROW>
