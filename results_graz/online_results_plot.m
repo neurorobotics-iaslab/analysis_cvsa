@@ -1,7 +1,7 @@
 clear; clc; close all;
 
 % Data
-data_path = '/home/paolo/cvsa/ic_cvsa_ws/record_mi/results_graz/qda';
+data_path = '/home/paolo/cvsa/ic_cvsa_ws/recordings/record_mi/results_graz/qda';
 files = dir(fullfile(data_path, '*.mat'));
 n_subj = length(files);
 

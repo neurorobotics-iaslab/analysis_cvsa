@@ -163,7 +163,7 @@ disp('   Loading trad files to have the QDA');
     %% ----------------- plot prob integrated -----------------
     ic_index = find(cell2mat(gmmCfg.params.classes) == integratorCfg.ic_class_label);
     sampleRate_ros = bufferSize/chunkSize;
-    do_plot = false;
+    do_plot = true;
     r_square_data_all = []; r_square_label_all = [];
     r_square_data_gmm = []; r_square_label_gmm = [];
     for idx_trial = 1:ntrial

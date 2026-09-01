@@ -43,18 +43,21 @@ if exist('chanlocs_subset', 'var')
             subplot(3, 2, b);
             topoplot(grand_topo_IC, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp', 'conv', 'on');
             colorbar; caxis(clim_range);
+            yl = ylim; ylim([yl(1), yl(2)*1.2]);
             title(['GMM Selected (' band_names{b} ')'], 'FontSize', 12, 'FontWeight', 'bold');
 
             % --- Standard ---
             subplot(3, 2, b + 2);
             topoplot(grand_topo_All, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp', 'conv', 'on');
             colorbar; caxis(clim_range);
+            yl = ylim; ylim([yl(1), yl(2)*1.2]);
             title(['Standard (' band_names{b} ')'], 'FontSize', 12, 'FontWeight', 'bold');
 
             % --- Rejected ---
             subplot(3, 2, b + 4);
             topoplot(grand_topo_NIC, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp', 'conv', 'on');
             colorbar; caxis(clim_range);
+            yl = ylim; ylim([yl(1), yl(2)*1.2]);
             title(['Rejected Data (' band_names{b} ')'], 'FontSize', 12, 'FontWeight', 'bold');
         end
 
@@ -84,18 +87,21 @@ if exist('chanlocs_subset', 'var')
         subplot(3, 2, b);
         topoplot(grand_topo_IC, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp', 'conv', 'on');
         colorbar; caxis(clim_range);
+        yl = ylim; ylim([yl(1), yl(2)*1.2]);
         title(['GMM Selected (' band_names{b} ')'], 'FontSize', 12, 'FontWeight', 'bold');
-        
+
         % --- Standard ---
         subplot(3, 2, b + 2);
         topoplot(grand_topo_All, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp', 'conv', 'on');
         colorbar; caxis(clim_range);
+        yl = ylim; ylim([yl(1), yl(2)*1.2]);
         title(['Standard (' band_names{b} ')'], 'FontSize', 12, 'FontWeight', 'bold');
-        
+
         % --- Rejected ---
         subplot(3, 2, b + 4);
         topoplot(grand_topo_NIC, chanlocs_subset, 'electrodes', 'on', 'style', 'map', 'shading', 'interp', 'conv', 'on');
         colorbar; caxis(clim_range);
+        yl = ylim; ylim([yl(1), yl(2)*1.2]);
         title(['Rejected Data (' band_names{b} ')'], 'FontSize', 12, 'FontWeight', 'bold');
     end
     

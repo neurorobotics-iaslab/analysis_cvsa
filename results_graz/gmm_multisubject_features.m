@@ -1,7 +1,7 @@
 clear; clc; close all;
 
 %% load data
-data_path = '/home/paolo/cvsa/ic_cvsa_ws/record_mi/results_graz/gmm';
+data_path = '/home/paolo/cvsa/ic_cvsa_ws/recordings/record_mi/results_graz/gmm';
 files = dir(fullfile(data_path, 'GMM_Validation_*.mat'));
 n_subjects = length(files);
 if n_subjects == 0
@@ -56,7 +56,8 @@ for i = 1:n_subjects
     end
     
     h = errorbar(x_c, mean_bin, sem_bin, '-o', 'Color', colors(i,:), ...
-        'LineWidth', 2, 'MarkerSize', 6, 'MarkerFaceColor', colors(i,:), 'CapSize', 0);
+        'LineWidth', 1.5, 'MarkerSize', 4, 'MarkerFaceColor', colors(i,:), 'CapSize', 8);
+
     legend_handles(end+1) = h;
 
     %% BETA (18-24 Hz)
@@ -84,7 +85,7 @@ for i = 1:n_subjects
         
         errorbar(x_c, mean_bin, sem_bin, '--s', 'Color', colors(i,:), ...
             'LineWidth', 1.5, 'MarkerSize', 4, 'MarkerFaceColor', 'w', ...
-            'CapSize', 0, 'HandleVisibility', 'off'); % HandleVisibility off per non sporcare la legenda
+            'CapSize', 8, 'HandleVisibility', 'off'); % HandleVisibility off per non sporcare la legenda
     end
     
     legend_labels{i} = sprintf('%s', subject);
